@@ -34,9 +34,9 @@ pub struct ResolvedConfig {
     pub build_number: String,
     pub source_dir: PathBuf,
     pub build_dir: PathBuf,
-    pub info_json_path: PathBuf,
+    pub info_json_path: Option<PathBuf>,
     pub entitlements_json_path: PathBuf,
-    pub icon_path: PathBuf,
+    pub icon_path: Option<PathBuf>,
     pub archs: Vec<String>,
     pub target_name: String,
     pub team_id: String,
@@ -63,17 +63,20 @@ pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> ResolvedConfig {
     let target_name = cfg.target_name.unwrap_or_else(|| cfg.app_name.clone());
 
     ResolvedConfig {
-        info_json_path: resolve_path(&source_dir, cfg.info_json_path, "info.json"),
+        // User-supplied input paths are resolved relative to the config file's
+        // directory (the one fixed anchor the user reasons about), independent of
+        // `source_dir`. info_json_path and icon_path are optional with no default.
+        info_json_path: cfg
+            .info_json_path
+            .map(|p| if p.is_absolute() { p } else { config_dir.join(&p) }),
         entitlements_json_path: resolve_path(
-            &source_dir,
+            config_dir,
             cfg.entitlements_json_path,
             "entitlements.json",
         ),
-        icon_path: resolve_path(
-            &source_dir,
-            cfg.icon_path,
-            "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns",
-        ),
+        icon_path: cfg
+            .icon_path
+            .map(|p| if p.is_absolute() { p } else { config_dir.join(&p) }),
         archs: cfg.archs.unwrap_or_else(|| {
             let arch = match std::env::consts::ARCH {
                 "aarch64" => "arm64",

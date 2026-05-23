@@ -43,14 +43,14 @@ version      = "{version}"
 build_number = "{build_number}"
 
 # Paths are relative to this file's directory unless absolute.
-# Defaults shown — uncomment and edit to override.
-# source_dir             = "."
-# build_dir              = ".build/dist"
-# info_json_path         = "info.json"
+# Uncomment and edit to override.
+# source_dir             = "."                  # Swift package directory
+# build_dir              = ".build/dist"        # artifacts (relative to source_dir)
+# info_json_path         = "info.json"          # optional; empty object if unset
 # entitlements_json_path = "entitlements.json"
-# icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"
-# archs                  = ["arm64", "x86_64"]
-# target_name            = "{app_name}"
+# icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"  # optional; no icon if unset
+# archs                  = ["arm64", "x86_64"]  # default: host arch only
+# target_name            = "{app_name}"         # Swift target, if it differs from app_name
 "#,
         app_name = app_name,
         bundle_id = bundle_id,

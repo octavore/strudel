@@ -200,9 +200,9 @@ impl Builder {
             Value::String(self.cfg.bundle_id.clone()),
         );
 
-        if self.cfg.icon_path.exists() {
+        if let Some(icon_path) = &self.cfg.icon_path {
             self.copy_file(
-                &self.cfg.icon_path,
+                icon_path,
                 &app_bundle.join("Contents/Resources/AppIcon.icns"),
             )?;
             obj.insert(
