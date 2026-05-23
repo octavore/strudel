@@ -97,11 +97,19 @@ impl Shell {
             bail!("Empty command");
         }
         if self.dry_run {
-            cprintln!(
-                "<dim>[dry-run]</dim> {} << <blue><<{} bytes>></blue>",
-                args.join(" "),
-                stdin_data.len()
-            );
+            match std::str::from_utf8(stdin_data) {
+                Ok(text) => cprintln!(
+                    "<dim>[dry-run]</dim> {} << <blue><<{} bytes>></blue>\n<dim>{}</dim>",
+                    args.join(" "),
+                    stdin_data.len(),
+                    text
+                ),
+                Err(_) => cprintln!(
+                    "<dim>[dry-run]</dim> {} << <blue><<{} bytes>></blue>",
+                    args.join(" "),
+                    stdin_data.len()
+                ),
+            }
             return Ok(String::new());
         }
         let mut child = Command::new(args[0])

@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use serde_json::Value;
 
@@ -29,8 +29,54 @@ impl Builder {
         }
     }
 
+    fn dry_run(&self) -> bool {
+        self.sh.dry_run
+    }
+
+    /// Create a directory (and parents), logging in dry-run instead of acting.
+    fn create_dir(&self, path: &Path) -> Result<()> {
+        if self.dry_run() {
+            cprintln!("<dim>[dry-run]</dim> mkdir -p {}", path.display());
+            return Ok(());
+        }
+        fs::create_dir_all(path).with_context(|| format!("Failed to create {}", path.display()))
+    }
+
+    /// Copy a file, logging source → dest in dry-run instead of acting.
+    fn copy_file(&self, from: &Path, to: &Path) -> Result<()> {
+        if self.dry_run() {
+            cprintln!(
+                "<dim>[dry-run]</dim> copy <blue>{}</blue> -> <blue>{}</blue>",
+                from.display(),
+                to.display()
+            );
+            return Ok(());
+        }
+        fs::copy(from, to)
+            .with_context(|| format!("Failed to copy {} -> {}", from.display(), to.display()))?;
+        Ok(())
+    }
+
+    /// Write a file's contents, logging dest in dry-run instead of acting.
+    fn write_file(&self, path: &Path, contents: &str) -> Result<()> {
+        if self.dry_run() {
+            cprintln!(
+                "<dim>[dry-run]</dim> write {} ({} bytes)",
+                path.display(),
+                contents.len()
+            );
+            return Ok(());
+        }
+        fs::write(path, contents).with_context(|| format!("Failed to write {}", path.display()))
+    }
+
     pub fn clean(&self) -> Result<()> {
         step("Cleaning previous build...");
+        if self.dry_run() {
+            cprintln!("<dim>[dry-run]</dim> rm -rf {}", self.p.build_dir.display());
+            cprintln!("<dim>[dry-run]</dim> mkdir -p {}", self.p.build_dir.display());
+            return Ok(());
+        }
         if self.p.build_dir.exists() {
             fs::remove_dir_all(&self.p.build_dir)?;
         }
@@ -83,7 +129,32 @@ impl Builder {
         };
 
         if !bin_dir.is_empty() && !binary_path.exists() {
-            bail!("Could not locate built binary. Check the swift build output above.");
+            let found: Vec<String> = fs::read_dir(bin_dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| !n.contains('.'))
+                .collect();
+
+            let hint = if found.is_empty() {
+                "No executables were found in the build directory.".to_string()
+            } else {
+                format!(
+                    "Executables found in the build directory: {}.\n\
+                     If one of these is the right binary, set `target_name` in your strudel.toml to its name.",
+                    found.join(", ")
+                )
+            };
+
+            bail!(
+                "Could not locate built binary at:\n  {}\n\
+                 strudel looks for an executable named `{}` (from `target_name`, which defaults to `app_name`).\n{}",
+                binary_path.display(),
+                self.cfg.target_name,
+                hint,
+            );
         }
 
         Ok(binary_path)
@@ -93,17 +164,28 @@ impl Builder {
         step("Assembling app bundle...");
         let app_bundle = &self.p.app_bundle;
 
-        fs::create_dir_all(app_bundle.join("Contents/MacOS"))?;
-        fs::create_dir_all(app_bundle.join("Contents/Resources"))?;
+        self.create_dir(&app_bundle.join("Contents/MacOS"))?;
+        self.create_dir(&app_bundle.join("Contents/Resources"))?;
 
-        fs::copy(
+        self.copy_file(
             binary_path,
-            app_bundle.join("Contents/MacOS").join(&self.cfg.app_name),
+            &app_bundle.join("Contents/MacOS").join(&self.cfg.app_name),
         )?;
 
-        // Read info JSON and override version/identity fields
-        let info_str = fs::read_to_string(&self.cfg.info_json_path)?;
-        let mut info: Value = serde_json::from_str(&info_str)?;
+        // Read info JSON (or start from an empty object) and override version/identity fields
+        let mut info: Value = match &self.cfg.info_json_path {
+            Some(path) => {
+                let info_str = fs::read_to_string(path).with_context(|| {
+                    format!(
+                        "Failed to read info JSON at {} (set in `info_json_path` in strudel.toml).",
+                        path.display()
+                    )
+                })?;
+                serde_json::from_str(&info_str)
+                    .with_context(|| format!("Failed to parse info JSON at {}", path.display()))?
+            }
+            None => Value::Object(Default::default()),
+        };
         let obj = info.as_object_mut().unwrap();
         obj.insert(
             "CFBundleShortVersionString".to_string(),
@@ -119,9 +201,9 @@ impl Builder {
         );
 
         if self.cfg.icon_path.exists() {
-            fs::copy(
+            self.copy_file(
                 &self.cfg.icon_path,
-                app_bundle.join("Contents/Resources/AppIcon.icns"),
+                &app_bundle.join("Contents/Resources/AppIcon.icns"),
             )?;
             obj.insert(
                 "CFBundleIconFile".to_string(),
@@ -130,14 +212,14 @@ impl Builder {
         }
 
         // Pipe JSON into plutil to produce Info.plist
-        let json_bytes = serde_json::to_vec(&info)?;
+        let json_bytes = serde_json::to_vec_pretty(&info)?;
         let plist_path = self.p.info_plist.to_str().unwrap();
         self.sh.run_stdin(
             &["plutil", "-convert", "xml1", "-o", plist_path, "-"],
             &json_bytes,
         )?;
 
-        fs::write(app_bundle.join("Contents/PkgInfo"), "APPL????")?;
+        self.write_file(&app_bundle.join("Contents/PkgInfo"), "APPL????")?;
 
         Ok(app_bundle.clone())
     }
