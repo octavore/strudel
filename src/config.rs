@@ -74,9 +74,13 @@ pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> ResolvedConfig {
             cfg.icon_path,
             "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns",
         ),
-        archs: cfg
-            .archs
-            .unwrap_or_else(|| vec!["arm64".to_string(), "x86_64".to_string()]),
+        archs: cfg.archs.unwrap_or_else(|| {
+            let arch = match std::env::consts::ARCH {
+                "aarch64" => "arm64",
+                other => other,
+            };
+            vec![arch.to_string()]
+        }),
         team_id: env_or(cfg.team_id, "TEAM_ID"),
         sign_identity: env_or(cfg.sign_identity, "SIGN_IDENTITY"),
         apple_id: env_or(cfg.apple_id, "APPLE_ID"),
