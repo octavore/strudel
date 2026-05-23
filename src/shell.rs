@@ -16,15 +16,15 @@ fn format_failure(args: &[&str], output: &Output) -> String {
         .map(|c| c.to_string())
         .unwrap_or_else(|| "signal".to_string());
 
-    let mut msg = format!("{} failed (exit {}):", args[0], code);
+    let mut msg = format!("{} failed (exit {code}):", args[0]);
     msg.push_str(&format!("\n  command: {}", args.join(" ")));
     let stderr = stderr.trim();
     let stdout = stdout.trim();
     if !stderr.is_empty() {
-        msg.push_str(&format!("\n--- stderr ---\n{}", stderr));
+        msg.push_str(&format!("\n--- stderr ---\n{stderr}"));
     }
     if !stdout.is_empty() {
-        msg.push_str(&format!("\n--- stdout ---\n{}", stdout));
+        msg.push_str(&format!("\n--- stdout ---\n{stdout}"));
     }
     if stderr.is_empty() && stdout.is_empty() {
         msg.push_str("\n(no output captured on stdout or stderr)");
@@ -90,18 +90,18 @@ impl Shell {
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "signal".to_string());
             bail!(
-                "{} failed (exit {}):\n  command: {}\n  (output streamed above)",
+                "{} failed (exit {code}):\n  command: {}\n  (output streamed above)",
                 args[0],
-                code,
                 args.join(" ")
             );
         }
         Ok(())
     }
 
-    /// Run a command whose arguments contain a secret (e.g. `security import -P`).
-    /// Logs and reports `display` instead of the real args, so passwords never
-    /// reach the terminal or an error message. Callers pass a redacted form.
+    /// Run a command whose arguments contain a secret (e.g. `security import
+    /// -P`). Logs and reports `display` instead of the real args, so
+    /// passwords never reach the terminal or an error message. Callers pass
+    /// a redacted form.
     pub fn run_redacted(&self, args: &[&str], display: &str) -> Result<()> {
         if args.is_empty() {
             bail!("Empty command");
@@ -122,11 +122,11 @@ impl Shell {
                 .code()
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "signal".to_string());
-            let mut msg = format!("{} failed (exit {}):", args[0], code);
-            msg.push_str(&format!("\n  command: {}", display));
+            let mut msg = format!("{} failed (exit {code}):", args[0]);
+            msg.push_str(&format!("\n  command: {display}"));
             let stderr = stderr.trim();
             if !stderr.is_empty() {
-                msg.push_str(&format!("\n--- stderr ---\n{}", stderr));
+                msg.push_str(&format!("\n--- stderr ---\n{stderr}"));
             }
             bail!(msg);
         }

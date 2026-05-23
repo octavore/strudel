@@ -176,7 +176,8 @@ impl Builder {
             &app_bundle.join("Contents/MacOS").join(&self.cfg.app_name),
         )?;
 
-        // Read info JSON (or start from an empty object) and override version/identity fields
+        // Read info JSON (or start from an empty object) and override version/identity
+        // fields
         let mut info: Value = match &self.cfg.info_json_path {
             Some(path) => {
                 let info_str = fs::read_to_string(path).with_context(|| {
@@ -187,7 +188,7 @@ impl Builder {
                 })?;
                 serde_json::from_str(&info_str)
                     .with_context(|| format!("Failed to parse info JSON at {}", path.display()))?
-            }
+            },
             None => Value::Object(Default::default()),
         };
         let obj = info.as_object_mut().unwrap();
@@ -244,11 +245,11 @@ impl Builder {
         Ok(())
     }
 
-    /// Local/dev pipeline: clean → build → assemble → sign, stopping at a signed
-    /// `.app`. No notarization or DMG, and no notary credentials required. Uses
-    /// the configured signing identity if set, otherwise signs ad-hoc — enough
-    /// to test entitlements and the hardened runtime without a Developer ID
-    /// certificate or an Apple account.
+    /// Local/dev pipeline: clean → build → assemble → sign, stopping at a
+    /// signed `.app`. No notarization or DMG, and no notary credentials
+    /// required. Uses the configured signing identity if set, otherwise
+    /// signs ad-hoc — enough to test entitlements and the hardened runtime
+    /// without a Developer ID certificate or an Apple account.
     pub fn sign_app(&self) -> Result<()> {
         // No-op unless APPLE_CERTIFICATE is set; supports signing with an
         // imported Developer ID identity here too, but ad-hoc needs nothing.
@@ -280,12 +281,10 @@ impl Builder {
         let ent_json_path = &self.cfg.entitlements_json_path;
         let ent_json = ent_json_path.to_str().unwrap();
 
-        let ent_raw = fs::read_to_string(ent_json_path).with_context(|| {
-            format!("Failed to read entitlements JSON at {ent_json}")
-        })?;
-        serde_json::from_str::<Value>(&ent_raw).with_context(|| {
-            format!("Entitlements file is not valid JSON: {ent_json}")
-        })?;
+        let ent_raw = fs::read_to_string(ent_json_path)
+            .with_context(|| format!("Failed to read entitlements JSON at {ent_json}"))?;
+        serde_json::from_str::<Value>(&ent_raw)
+            .with_context(|| format!("Entitlements file is not valid JSON: {ent_json}"))?;
 
         // With no identity configured, sign ad-hoc (`--sign -`): no certificate
         // or account needed, enough to exercise entitlements locally. A real
@@ -408,7 +407,7 @@ impl Builder {
                 ];
                 display.extend(auth.clone());
                 args.extend(auth);
-            }
+            },
             Some(NotaryAuth::AppleId {
                 apple_id,
                 password,
@@ -430,7 +429,7 @@ impl Builder {
                     "--password".into(),
                     "<redacted>".into(),
                 ]);
-            }
+            },
             // preflight_credentials guarantees a complete set before `run`.
             None => bail!("No notarization credentials available"),
         }
@@ -465,9 +464,10 @@ impl Builder {
         problems
     }
 
-    /// Verify the credentials required for signing and notarization are present.
-    /// Bails early so a missing value doesn't surface deep into the pipeline (e.g.
-    /// `codesign: no identity found`). In dry-run, only warns — there's nothing to sign.
+    /// Verify the credentials required for signing and notarization are
+    /// present. Bails early so a missing value doesn't surface deep into
+    /// the pipeline (e.g. `codesign: no identity found`). In dry-run, only
+    /// warns — there's nothing to sign.
     fn preflight_credentials(&self) -> Result<()> {
         let problems = self.credential_problems();
         if problems.is_empty() {
@@ -634,7 +634,8 @@ impl Builder {
         }))
     }
 
-    /// Full release pipeline: clean → binary → assemble → sign → notarize → DMG.
+    /// Full release pipeline: clean → binary → assemble → sign → notarize →
+    /// DMG.
     pub fn release(&self) -> Result<()> {
         self.preflight_credentials()?;
         // Held for the whole build: the imported identity must remain available

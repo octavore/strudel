@@ -1,6 +1,7 @@
-use anyhow::{bail, Result};
 use std::fs;
 use std::path::Path;
+
+use anyhow::{Result, bail};
 
 use crate::shell::Shell;
 
@@ -29,8 +30,8 @@ pub fn make_icns(png_path: &Path, icns_path: &Path, dry_run: bool) -> Result<()>
         for &size in SIZES {
             let s = size.to_string();
             let s2 = (size * 2).to_string();
-            let out1 = format!("{}/icon_{}x{}.png", iconset, size, size);
-            let out2 = format!("{}/icon_{}x{}@2x.png", iconset, size, size);
+            let out1 = format!("{iconset}/icon_{size}x{size}.png");
+            let out2 = format!("{iconset}/icon_{size}x{size}@2x.png");
             sh.run(&["sips", "-z", &s, &s, png, "--out", &out1])?;
             sh.run(&["sips", "-z", &s2, &s2, png, "--out", &out2])?;
         }

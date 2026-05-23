@@ -110,8 +110,8 @@ pub enum NotaryAuth {
 }
 
 impl ResolvedConfig {
-    /// The notarization credentials, if a complete set is available. Prefers the
-    /// API key; returns `None` when neither set is fully specified.
+    /// The notarization credentials, if a complete set is available. Prefers
+    /// the API key; returns `None` when neither set is fully specified.
     pub fn notary_auth(&self) -> Option<NotaryAuth> {
         if let Some(key_path) = &self.apple_api_key_path
             && !self.apple_api_key.is_empty()
@@ -123,9 +123,7 @@ impl ResolvedConfig {
                 issuer: self.apple_api_issuer.clone(),
             });
         }
-        if !self.apple_id.is_empty()
-            && !self.apple_password.is_empty()
-            && !self.team_id.is_empty()
+        if !self.apple_id.is_empty() && !self.apple_password.is_empty() && !self.team_id.is_empty()
         {
             return Some(NotaryAuth::AppleId {
                 apple_id: self.apple_id.clone(),
@@ -175,17 +173,25 @@ pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> ResolvedConfig {
         // User-supplied input paths are resolved relative to the config file's
         // directory (the one fixed anchor the user reasons about), independent of
         // `source_dir`. info_json_path and icon_path are optional with no default.
-        info_json_path: build
-            .info_json_path
-            .map(|p| if p.is_absolute() { p } else { config_dir.join(&p) }),
+        info_json_path: build.info_json_path.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                config_dir.join(&p)
+            }
+        }),
         entitlements_json_path: resolve_path(
             config_dir,
             build.entitlements_json_path,
             "entitlements.json",
         ),
-        icon_path: build
-            .icon_path
-            .map(|p| if p.is_absolute() { p } else { config_dir.join(&p) }),
+        icon_path: build.icon_path.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                config_dir.join(&p)
+            }
+        }),
         archs: build.archs.unwrap_or_else(|| {
             let arch = match std::env::consts::ARCH {
                 "aarch64" => "arm64",
@@ -203,12 +209,17 @@ pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> ResolvedConfig {
         apple_api_key_path: notarize
             .api_key_path
             .or_else(|| std::env::var("APPLE_API_KEY_PATH").ok().map(PathBuf::from))
-            .map(|p| if p.is_absolute() { p } else { config_dir.join(&p) }),
+            .map(|p| {
+                if p.is_absolute() {
+                    p
+                } else {
+                    config_dir.join(&p)
+                }
+            }),
         // Secrets: environment only — these are never deserialized from the file.
         apple_password: std::env::var("APPLE_PASSWORD").unwrap_or_default(),
         apple_certificate: std::env::var("APPLE_CERTIFICATE").unwrap_or_default(),
-        apple_certificate_password: std::env::var("APPLE_CERTIFICATE_PASSWORD")
-            .unwrap_or_default(),
+        apple_certificate_password: std::env::var("APPLE_CERTIFICATE_PASSWORD").unwrap_or_default(),
         notarize_timeout: notarize.timeout.unwrap_or(600),
         app_name: app.name,
         bundle_id: app.bundle_id,
@@ -270,8 +281,14 @@ mod tests {
         let cfg = parse(FULL).expect("should parse");
         assert_eq!(cfg.app.name, "MyApp");
         assert_eq!(cfg.app.build_number, "42");
-        assert_eq!(cfg.build.archs.as_deref(), Some(&["arm64".into(), "x86_64".into()][..]));
-        assert_eq!(cfg.signing.identity.as_deref(), Some("Developer ID Application: Me (TEAM123456)"));
+        assert_eq!(
+            cfg.build.archs.as_deref(),
+            Some(&["arm64".into(), "x86_64".into()][..])
+        );
+        assert_eq!(
+            cfg.signing.identity.as_deref(),
+            Some("Developer ID Application: Me (TEAM123456)")
+        );
         assert_eq!(cfg.notarize.api_key.as_deref(), Some("KEYID123"));
         assert_eq!(cfg.notarize.timeout, Some(1200));
     }
@@ -317,7 +334,10 @@ mod tests {
             build_number = "1"
         "#,
         );
-        assert!(err.is_err(), "flat keys should be rejected by deny_unknown_fields");
+        assert!(
+            err.is_err(),
+            "flat keys should be rejected by deny_unknown_fields"
+        );
     }
 
     #[test]
@@ -343,7 +363,8 @@ mod tests {
     fn resolves_paths_relative_to_config_dir() {
         let cfg = parse(FULL).unwrap();
         let r = resolve_config(cfg, Path::new("/cfg"));
-        // source_dir is relative to the config dir; build_dir is relative to source_dir.
+        // source_dir is relative to the config dir; build_dir is relative to
+        // source_dir.
         assert_eq!(r.source_dir, PathBuf::from("/cfg/src"));
         assert_eq!(r.build_dir, PathBuf::from("/cfg/src/out"));
         // Input paths anchor on the config dir regardless of source_dir.
@@ -383,7 +404,10 @@ mod tests {
         .unwrap();
         let r = resolve_config(cfg, Path::new("/cfg"));
         assert_eq!(r.build_dir, PathBuf::from("/cfg/.build/dist"));
-        assert_eq!(r.entitlements_json_path, PathBuf::from("/cfg/entitlements.json"));
+        assert_eq!(
+            r.entitlements_json_path,
+            PathBuf::from("/cfg/entitlements.json")
+        );
         assert_eq!(r.target_name, "Defaulted"); // defaults to app.name
         assert_eq!(r.notarize_timeout, 600);
         assert_eq!(r.archs.len(), 1); // host arch
@@ -440,11 +464,15 @@ mod tests {
         r.apple_password = "pw".into();
         r.team_id = "TID".into();
         match r.notary_auth() {
-            Some(NotaryAuth::ApiKey { key_id, issuer, key_path }) => {
+            Some(NotaryAuth::ApiKey {
+                key_id,
+                issuer,
+                key_path,
+            }) => {
                 assert_eq!(key_id, "KID");
                 assert_eq!(issuer, "ISS");
                 assert_eq!(key_path, PathBuf::from("/k.p8"));
-            }
+            },
             other => panic!("expected ApiKey, got {other:?}"),
         }
     }

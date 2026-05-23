@@ -67,22 +67,22 @@ fn main() -> Result<()> {
         Cmd::Init { output_dir } => {
             let dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
             init::run_init(&dir)?;
-        }
+        },
         Cmd::Build { dry_run } => {
             let cfg = config::load_config(&cli.config)?;
             builder::Builder::new(cfg, dry_run).build()?;
-        }
+        },
         Cmd::Sign { dry_run } => {
             let cfg = config::load_config(&cli.config)?;
             builder::Builder::new(cfg, dry_run).sign_app()?;
-        }
+        },
         Cmd::Release { dry_run } => {
             let cfg = config::load_config(&cli.config)?;
             builder::Builder::new(cfg, dry_run).release()?;
-        }
+        },
         Cmd::MakeIcns { png, icns } => {
             icns::make_icns(&png, &icns, false)?;
-        }
+        },
     }
 
     Ok(())
