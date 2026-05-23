@@ -1,0 +1,4 @@
+project_name = "strudel-build"
+
+[tasks]
+install = "cargo install --path ."
