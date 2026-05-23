@@ -27,14 +27,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Build app bundle only (no signing/notarization)
-    Bundle {
+    /// Build the app bundle only (no signing/notarization)
+    Build {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,
     },
-    /// Full build: bundle, sign, notarize, and package DMG
-    Run {
+    /// Build and sign the app bundle (no notarization or DMG); for local dev.
+    /// Signs ad-hoc when no signing identity is configured.
+    Sign {
+        /// Print commands without executing them
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Full release: build, sign, notarize, and package DMG
+    Release {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,
@@ -61,13 +68,17 @@ fn main() -> Result<()> {
             let dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
             init::run_init(&dir)?;
         }
-        Cmd::Bundle { dry_run } => {
+        Cmd::Build { dry_run } => {
             let cfg = config::load_config(&cli.config)?;
-            builder::Builder::new(cfg, dry_run).bundle()?;
+            builder::Builder::new(cfg, dry_run).build()?;
         }
-        Cmd::Run { dry_run } => {
+        Cmd::Sign { dry_run } => {
             let cfg = config::load_config(&cli.config)?;
-            builder::Builder::new(cfg, dry_run).run()?;
+            builder::Builder::new(cfg, dry_run).sign_app()?;
+        }
+        Cmd::Release { dry_run } => {
+            let cfg = config::load_config(&cli.config)?;
+            builder::Builder::new(cfg, dry_run).release()?;
         }
         Cmd::MakeIcns { png, icns } => {
             icns::make_icns(&png, &icns, false)?;

@@ -2,10 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use color_print::{cformat, cprintln};
+use base64::Engine;
+use color_print::cprintln;
 use serde_json::Value;
 
-use crate::config::ResolvedConfig;
+use crate::config::{NotaryAuth, ResolvedConfig};
 use crate::paths::Paths;
 use crate::shell::Shell;
 
@@ -191,6 +192,10 @@ impl Builder {
         };
         let obj = info.as_object_mut().unwrap();
         obj.insert(
+            "CFBundleExecutable".to_string(),
+            Value::String(self.cfg.app_name.clone()),
+        );
+        obj.insert(
             "CFBundleShortVersionString".to_string(),
             Value::String(self.cfg.version.clone()),
         );
@@ -228,7 +233,7 @@ impl Builder {
     }
 
     /// Build bundle only (clean → binary → assemble).
-    pub fn bundle(&self) -> Result<()> {
+    pub fn build(&self) -> Result<()> {
         self.clean()?;
         let binary_path = self.build_binary()?;
         let app_bundle = self.assemble_bundle(&binary_path)?;
@@ -239,29 +244,79 @@ impl Builder {
         Ok(())
     }
 
+    /// Local/dev pipeline: clean → build → assemble → sign, stopping at a signed
+    /// `.app`. No notarization or DMG, and no notary credentials required. Uses
+    /// the configured signing identity if set, otherwise signs ad-hoc — enough
+    /// to test entitlements and the hardened runtime without a Developer ID
+    /// certificate or an Apple account.
+    pub fn sign_app(&self) -> Result<()> {
+        // No-op unless APPLE_CERTIFICATE is set; supports signing with an
+        // imported Developer ID identity here too, but ad-hoc needs nothing.
+        let _keychain = self.import_certificate()?;
+        self.clean()?;
+        let binary_path = self.build_binary()?;
+        self.assemble_bundle(&binary_path)?;
+        self.sign()?;
+
+        if self.dry_run() {
+            cprintln!(
+                "\n<dim>[dry-run]</dim> Dry run complete. Signed app bundle would be at:\n{}",
+                self.p.app_bundle.display()
+            );
+        } else {
+            cprintln!(
+                "\n<green>Done! Signed app bundle:</green>\n{}",
+                self.p.app_bundle.display()
+            );
+        }
+        Ok(())
+    }
+
     // ── Distribution steps ────────────────────────────────────────────────────
 
     pub fn sign(&self) -> Result<()> {
-        step("Signing app bundle...");
         let app_bundle = self.p.app_bundle.to_str().unwrap();
         let ent_plist = self.p.entitlements_plist.to_str().unwrap();
-        let ent_json = self.cfg.entitlements_json_path.to_str().unwrap();
+        let ent_json_path = &self.cfg.entitlements_json_path;
+        let ent_json = ent_json_path.to_str().unwrap();
+
+        let ent_raw = fs::read_to_string(ent_json_path).with_context(|| {
+            format!("Failed to read entitlements JSON at {ent_json}")
+        })?;
+        serde_json::from_str::<Value>(&ent_raw).with_context(|| {
+            format!("Entitlements file is not valid JSON: {ent_json}")
+        })?;
+
+        // With no identity configured, sign ad-hoc (`--sign -`): no certificate
+        // or account needed, enough to exercise entitlements locally. A real
+        // identity (and notarization) is required to distribute — see `release`.
+        let adhoc = self.cfg.sign_identity.is_empty();
+        let identity = if adhoc {
+            step("Signing app bundle (ad-hoc — no signing identity configured)...");
+            "-"
+        } else {
+            step("Signing app bundle...");
+            self.cfg.sign_identity.as_str()
+        };
 
         self.sh
             .run(&["plutil", "-convert", "xml1", "-o", ent_plist, ent_json])?;
 
-        self.sh.run(&[
+        let mut args = vec![
             "codesign",
             "--force",
-            "--options",
-            "runtime",
             "--entitlements",
             ent_plist,
             "--sign",
-            &self.cfg.sign_identity,
-            "--timestamp",
-            app_bundle,
-        ])?;
+            identity,
+        ];
+        // The hardened runtime and a trusted timestamp both require a real
+        // Developer ID certificate; skip them for ad-hoc signatures.
+        if !adhoc {
+            args.extend(["--options", "runtime", "--timestamp"]);
+        }
+        args.push(app_bundle);
+        self.sh.run(&args)?;
 
         step("Verifying signature...");
         self.sh.run(&[
@@ -330,21 +385,60 @@ impl Builder {
         ])?;
 
         step("Submitting DMG for notarization...");
-        self.sh.run(&[
-            "xcrun",
-            "notarytool",
-            "submit",
-            dmg,
-            "--apple-id",
-            &self.cfg.apple_id,
-            "--team-id",
-            &self.cfg.team_id,
-            "--password",
-            &self.cfg.apple_password,
-            "--wait",
-            "--timeout",
-            &timeout_str,
-        ])?;
+        // Build the real args alongside a redacted display: the API key path,
+        // key id, and issuer are identifiers, but the app-specific password is a
+        // secret and must not reach the terminal or an error message.
+        let mut args: Vec<String> = ["xcrun", "notarytool", "submit", dmg]
+            .map(String::from)
+            .to_vec();
+        let mut display = args.clone();
+        match self.cfg.notary_auth() {
+            Some(NotaryAuth::ApiKey {
+                key_path,
+                key_id,
+                issuer,
+            }) => {
+                let auth = [
+                    "--key".into(),
+                    key_path.to_string_lossy().into_owned(),
+                    "--key-id".into(),
+                    key_id,
+                    "--issuer".into(),
+                    issuer,
+                ];
+                display.extend(auth.clone());
+                args.extend(auth);
+            }
+            Some(NotaryAuth::AppleId {
+                apple_id,
+                password,
+                team_id,
+            }) => {
+                args.extend([
+                    "--apple-id".into(),
+                    apple_id.clone(),
+                    "--team-id".into(),
+                    team_id.clone(),
+                    "--password".into(),
+                    password,
+                ]);
+                display.extend([
+                    "--apple-id".into(),
+                    apple_id,
+                    "--team-id".into(),
+                    team_id,
+                    "--password".into(),
+                    "<redacted>".into(),
+                ]);
+            }
+            // preflight_credentials guarantees a complete set before `run`.
+            None => bail!("No notarization credentials available"),
+        }
+        let tail = ["--wait".into(), "--timeout".into(), timeout_str];
+        display.extend(tail.clone());
+        args.extend(tail);
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.sh.run_redacted(&arg_refs, &display.join(" "))?;
 
         step("Stapling DMG...");
         self.sh.run(&["xcrun", "stapler", "staple", dmg])?;
@@ -352,50 +446,201 @@ impl Builder {
         Ok(())
     }
 
+    /// Describe any signing/notarization credentials that are missing or
+    /// incomplete. Empty means a real `run` has everything it needs.
+    fn credential_problems(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if self.cfg.sign_identity.is_empty() {
+            problems.push("SIGN_IDENTITY (signing identity) is not set".to_string());
+        }
+        if self.cfg.notary_auth().is_none() {
+            problems.push(
+                "no complete notarization credentials — provide EITHER an App \
+                 Store Connect API key (APPLE_API_KEY_PATH, APPLE_API_KEY, \
+                 APPLE_API_ISSUER) OR an Apple ID (APPLE_ID, APPLE_PASSWORD, \
+                 TEAM_ID)"
+                    .to_string(),
+            );
+        }
+        problems
+    }
+
     /// Verify the credentials required for signing and notarization are present.
     /// Bails early so a missing value doesn't surface deep into the pipeline (e.g.
     /// `codesign: no identity found`). In dry-run, only warns — there's nothing to sign.
     fn preflight_credentials(&self) -> Result<()> {
-        let missing: Vec<&str> = [
-            ("SIGN_IDENTITY", &self.cfg.sign_identity),
-            ("TEAM_ID", &self.cfg.team_id),
-            ("APPLE_ID", &self.cfg.apple_id),
-            ("APPLE_PASSWORD", &self.cfg.apple_password),
-        ]
-        .iter()
-        .filter(|(_, v)| v.is_empty())
-        .map(|(env, _)| *env)
-        .collect();
-
-        if missing.is_empty() {
+        let problems = self.credential_problems();
+        if problems.is_empty() {
             return Ok(());
         }
 
-        let hint = "Set each via an environment variable or in strudel.toml \
-                    (config value takes precedence). See the README's \
-                    \"Signing credentials\" section.";
+        let hint = "Set identifiers in strudel.toml or the environment, and \
+                    secrets (passwords, certificate) in the environment only. \
+                    See the README's \"Signing & notarization\" section.";
 
         if self.dry_run() {
-            for env in &missing {
-                cprintln!(
-                    "<yellow>[warning]</yellow> Missing signing credential: <blue>{env}</blue>"
-                );
+            for p in &problems {
+                cprintln!("<yellow>[warning]</yellow> {p}");
             }
             cprintln!("<yellow>[warning]</yellow> {hint}");
             Ok(())
         } else {
-            let mut msg = String::from("Missing signing credentials required for `run`:");
-            for env in &missing {
-                msg.push_str(&cformat!("\n  - <yellow>{env}</yellow>"));
+            let mut msg = String::from("Cannot run signing/notarization:");
+            for p in &problems {
+                msg.push_str(&format!("\n  - {p}"));
             }
             msg.push_str(&format!("\n{hint}"));
             bail!(msg);
         }
     }
 
-    /// Full pipeline: clean → binary → assemble → sign → notarize → DMG.
-    pub fn run(&self) -> Result<()> {
+    /// The user's current keychain search list (absolute paths).
+    fn user_keychains(&self) -> Result<Vec<String>> {
+        let out = self.sh.run(&["security", "list-keychains", "-d", "user"])?;
+        Ok(out
+            .lines()
+            .map(|l| l.trim().trim_matches('"').to_string())
+            .filter(|l| !l.is_empty())
+            .collect())
+    }
+
+    /// Replace the user keychain search list.
+    fn set_user_keychains(&self, list: &[String]) -> Result<()> {
+        let mut args: Vec<&str> = vec!["security", "list-keychains", "-d", "user", "-s"];
+        args.extend(list.iter().map(String::as_str));
+        self.sh.run(&args).map(|_| ())
+    }
+
+    /// If a signing certificate is provided via `APPLE_CERTIFICATE`, decode it
+    /// into a throwaway keychain and add that keychain to the user search list
+    /// so `codesign` can find the identity. The returned guard removes the
+    /// keychain and restores the search list on drop, so a build leaves no
+    /// credentials behind — useful on a fresh CI runner. When no certificate is
+    /// configured (the common local case, where the identity already lives in
+    /// the login keychain), this is a no-op returning `None`.
+    fn import_certificate(&self) -> Result<Option<TempKeychain<'_>>> {
+        let Some((cert_b64, cert_password)) = self.cfg.signing_cert() else {
+            return Ok(None);
+        };
+
+        step("Importing signing certificate into a temporary keychain...");
+
+        let pid = std::process::id();
+        let keychain = std::env::temp_dir()
+            .join(format!("strudel-{pid}.keychain-db"))
+            .to_string_lossy()
+            .into_owned();
+        // Locks the throwaway keychain; never leaves this process, and the
+        // keychain is deleted on drop.
+        let kc_pw = format!("strudel-{pid}");
+
+        if self.dry_run() {
+            cprintln!("<dim>[dry-run]</dim> security create-keychain -p <<redacted>> {keychain}");
+            cprintln!(
+                "<dim>[dry-run]</dim> decode $APPLE_CERTIFICATE ({} b64 chars) -> <<temp>>.p12",
+                cert_b64.len()
+            );
+            cprintln!(
+                "<dim>[dry-run]</dim> security import <<temp>>.p12 -P <<redacted>> -k {keychain}"
+            );
+            cprintln!(
+                "<dim>[dry-run]</dim> security set-key-partition-list -S apple-tool:,apple: -k <<redacted>> {keychain}"
+            );
+            cprintln!(
+                "<dim>[dry-run]</dim> security list-keychains -d user -s {keychain} <<existing...>>"
+            );
+            return Ok(Some(TempKeychain {
+                sh: &self.sh,
+                path: keychain,
+                original_list: Vec::new(),
+                dry_run: true,
+            }));
+        }
+
+        // Decode the PKCS#12 bundle to a temp file for `security import`.
+        let p12 = base64::engine::general_purpose::STANDARD
+            .decode(cert_b64.trim())
+            .context("APPLE_CERTIFICATE is not valid base64")?;
+        let p12_path = std::env::temp_dir().join(format!("strudel-{pid}.p12"));
+        fs::write(&p12_path, &p12)
+            .with_context(|| format!("Failed to write {}", p12_path.display()))?;
+        let p12_str = p12_path.to_string_lossy().into_owned();
+
+        // Snapshot the search list first so the guard can restore it.
+        let original_list = self.user_keychains()?;
+
+        self.sh.run_redacted(
+            &["security", "create-keychain", "-p", &kc_pw, &keychain],
+            &format!("security create-keychain -p <redacted> {keychain}"),
+        )?;
+        self.sh.run(&[
+            "security",
+            "set-keychain-settings",
+            "-lut",
+            "21600",
+            &keychain,
+        ])?;
+        self.sh.run_redacted(
+            &["security", "unlock-keychain", "-p", &kc_pw, &keychain],
+            &format!("security unlock-keychain -p <redacted> {keychain}"),
+        )?;
+        self.sh.run_redacted(
+            &[
+                "security",
+                "import",
+                &p12_str,
+                "-P",
+                cert_password,
+                "-A",
+                "-t",
+                "cert",
+                "-f",
+                "pkcs12",
+                "-k",
+                &keychain,
+            ],
+            &format!("security import {p12_str} -P <redacted> -A -t cert -f pkcs12 -k {keychain}"),
+        )?;
+        // Let codesign use the imported key without an interactive prompt.
+        self.sh.run_redacted(
+            &[
+                "security",
+                "set-key-partition-list",
+                "-S",
+                "apple-tool:,apple:",
+                "-s",
+                "-k",
+                &kc_pw,
+                &keychain,
+            ],
+            &format!(
+                "security set-key-partition-list -S apple-tool:,apple: -s -k <redacted> {keychain}"
+            ),
+        )?;
+
+        // Put the new keychain at the front of the search list.
+        let mut list = vec![keychain.clone()];
+        list.extend(original_list.iter().cloned());
+        self.set_user_keychains(&list)?;
+
+        // The decoded cert has been imported; don't leave it on disk.
+        let _ = fs::remove_file(&p12_path);
+
+        Ok(Some(TempKeychain {
+            sh: &self.sh,
+            path: keychain,
+            original_list,
+            dry_run: false,
+        }))
+    }
+
+    /// Full release pipeline: clean → binary → assemble → sign → notarize → DMG.
+    pub fn release(&self) -> Result<()> {
         self.preflight_credentials()?;
+        // Held for the whole build: the imported identity must remain available
+        // to both `sign` and the DMG signing in `package_dmg`. Dropped at the
+        // end of this function, which tears the temporary keychain back down.
+        let _keychain = self.import_certificate()?;
         self.clean()?;
         let binary_path = self.build_binary()?;
         self.assemble_bundle(&binary_path)?;
@@ -403,12 +648,58 @@ impl Builder {
         self.notarize()?;
         self.package_dmg()?;
 
-        println!(
-            "\nDone! Distribution artifacts:\n  App bundle: {}\n  DMG:        {}\n  Zip:        {}",
-            self.p.app_bundle.display(),
-            self.p.dmg.display(),
-            self.p.zip.display(),
-        );
+        if self.dry_run() {
+            cprintln!(
+                "\n<dim>[dry-run]</dim> Dry run complete. Artifacts would be at:\n  App bundle: {}\n  DMG:        {}\n  Zip:        {}",
+                self.p.app_bundle.display(),
+                self.p.dmg.display(),
+                self.p.zip.display(),
+            );
+
+            let problems = self.credential_problems();
+            if !problems.is_empty() {
+                cprintln!("\n<yellow>[warning]</yellow> Credentials still missing for a real run:");
+                for p in &problems {
+                    cprintln!("  - {p}");
+                }
+            }
+        } else {
+            cprintln!(
+                "\n<green>Done!</green> Distribution artifacts:\n  App bundle: {}\n  DMG:        {}\n  Zip:        {}",
+                self.p.app_bundle.display(),
+                self.p.dmg.display(),
+                self.p.zip.display(),
+            );
+        }
         Ok(())
+    }
+}
+
+/// A throwaway keychain holding an imported signing identity. On drop it
+/// restores the original keychain search list and deletes the keychain, so a
+/// build never leaves credentials behind on the machine. Cleanup is
+/// best-effort: we're tearing down, so failures are ignored.
+struct TempKeychain<'a> {
+    sh: &'a Shell,
+    path: String,
+    original_list: Vec<String>,
+    dry_run: bool,
+}
+
+impl Drop for TempKeychain<'_> {
+    fn drop(&mut self) {
+        if self.dry_run {
+            cprintln!(
+                "<dim>[dry-run]</dim> security delete-keychain {}",
+                self.path
+            );
+            return;
+        }
+        if !self.original_list.is_empty() {
+            let mut args: Vec<&str> = vec!["security", "list-keychains", "-d", "user", "-s"];
+            args.extend(self.original_list.iter().map(String::as_str));
+            let _ = self.sh.run(&args);
+        }
+        let _ = self.sh.run(&["security", "delete-keychain", &self.path]);
     }
 }

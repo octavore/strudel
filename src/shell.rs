@@ -46,8 +46,12 @@ impl Shell {
         if args.is_empty() {
             bail!("Empty command");
         }
+        cprintln!(
+            "<dim>{}{}</dim>",
+            if self.dry_run { "[dry-run] " } else { "" },
+            args.join(" ")
+        );
         if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> {}", args.join(" "));
             return Ok(String::new());
         }
         let output = Command::new(args[0]).args(&args[1..]).output()?;
@@ -67,8 +71,12 @@ impl Shell {
         if args.is_empty() {
             bail!("Empty command");
         }
+        cprintln!(
+            "<dim>{}{}</dim>",
+            if self.dry_run { "[dry-run] " } else { "" },
+            args.join(" ")
+        );
         if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> {}", args.join(" "));
             return Ok(());
         }
         let status = Command::new(args[0])
@@ -91,25 +99,61 @@ impl Shell {
         Ok(())
     }
 
+    /// Run a command whose arguments contain a secret (e.g. `security import -P`).
+    /// Logs and reports `display` instead of the real args, so passwords never
+    /// reach the terminal or an error message. Callers pass a redacted form.
+    pub fn run_redacted(&self, args: &[&str], display: &str) -> Result<()> {
+        if args.is_empty() {
+            bail!("Empty command");
+        }
+        cprintln!(
+            "<dim>{}{}</dim>",
+            if self.dry_run { "[dry-run] " } else { "" },
+            display
+        );
+        if self.dry_run {
+            return Ok(());
+        }
+        let output = Command::new(args[0]).args(&args[1..]).output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let code = output
+                .status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".to_string());
+            let mut msg = format!("{} failed (exit {}):", args[0], code);
+            msg.push_str(&format!("\n  command: {}", display));
+            let stderr = stderr.trim();
+            if !stderr.is_empty() {
+                msg.push_str(&format!("\n--- stderr ---\n{}", stderr));
+            }
+            bail!(msg);
+        }
+        Ok(())
+    }
+
     /// Run a command with data piped to stdin. Fails on non-zero exit.
     pub fn run_stdin(&self, args: &[&str], stdin_data: &[u8]) -> Result<String> {
         if args.is_empty() {
             bail!("Empty command");
         }
+        match std::str::from_utf8(stdin_data) {
+            Ok(text) => cprintln!(
+                "<dim>{}{} << <<{} bytes>>\n{}</dim>",
+                if self.dry_run { "[dry-run] " } else { "" },
+                args.join(" "),
+                stdin_data.len(),
+                text
+            ),
+            Err(_) => cprintln!(
+                "<dim>{}{} << <<{} bytes>></dim>",
+                if self.dry_run { "[dry-run] " } else { "" },
+                args.join(" "),
+                stdin_data.len()
+            ),
+        }
         if self.dry_run {
-            match std::str::from_utf8(stdin_data) {
-                Ok(text) => cprintln!(
-                    "<dim>[dry-run]</dim> {} << <blue><<{} bytes>></blue>\n<dim>{}</dim>",
-                    args.join(" "),
-                    stdin_data.len(),
-                    text
-                ),
-                Err(_) => cprintln!(
-                    "<dim>[dry-run]</dim> {} << <blue><<{} bytes>></blue>",
-                    args.join(" "),
-                    stdin_data.len()
-                ),
-            }
             return Ok(String::new());
         }
         let mut child = Command::new(args[0])

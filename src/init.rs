@@ -28,29 +28,49 @@ fn generate_toml(app_name: &str, bundle_id: &str, version: &str, build_number: &
         r#"# strudel.toml — strudel build configuration
 #
 # Commands:
-#   strudel bundle   — build app bundle only (no signing/notarization)
-#   strudel run      — full build: bundle, sign, notarize, and package DMG
+#   strudel build    — build app bundle only (no signing/notarization)
+#   strudel sign     — build and sign the app bundle (no notarization/DMG); local dev
+#   strudel release  — full release: build, sign, notarize, and package DMG
 #
-# Signing credentials are read from environment variables (required for `run`):
-#   TEAM_ID        — 10-character Apple Developer Team ID
-#   SIGN_IDENTITY  — e.g. "Developer ID Application: Your Name (XXXXXXXXXX)"
-#   APPLE_ID       — Your Apple ID email address
-#   APPLE_PASSWORD — App-specific password
+# Signing & notarization (required for `release`). Identifiers may go here or in the
+# environment; secrets are read from the environment ONLY.
+#
+# Identifiers (here or env): SIGN_IDENTITY, TEAM_ID, APPLE_ID,
+#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_PATH
+# Secrets (env only): APPLE_PASSWORD, APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD
+#
+# Notarization uses the App Store Connect API key ([notarize] api_*) when fully
+# set, otherwise falls back to Apple ID (apple_id + APPLE_PASSWORD + team_id).
 
-app_name     = "{app_name}"
+[app]
+name         = "{app_name}"
 bundle_id    = "{bundle_id}"
 version      = "{version}"
 build_number = "{build_number}"
 
 # Paths are relative to this file's directory unless absolute.
 # Uncomment and edit to override.
+[build]
 # source_dir             = "."                  # Swift package directory
 # build_dir              = ".build/dist"        # artifacts (relative to source_dir)
 # info_json_path         = "info.json"          # optional; empty object if unset
 # entitlements_json_path = "entitlements.json"
 # icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"  # optional; no icon if unset
 # archs                  = ["arm64", "x86_64"]  # default: host arch only
-# target_name            = "{app_name}"         # Swift target, if it differs from app_name
+# target_name            = "{app_name}"         # Swift target, if it differs from the app name
+
+# Signing identifiers — or set via SIGN_IDENTITY / TEAM_ID.
+[signing]
+# identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
+# team_id  = "XXXXXXXXXX"
+
+# Notarization identifiers — or set via APPLE_ID / APPLE_API_*.
+[notarize]
+# apple_id     = "you@example.com"
+# api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+# api_key      = "2X9R4HXF34"
+# api_key_path = "AuthKey_2X9R4HXF34.p8"
+# timeout      = 600
 "#,
         app_name = app_name,
         bundle_id = bundle_id,
@@ -83,8 +103,9 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
 
     println!("\nCreated {}", out_path.display());
     println!("\nNext steps:");
-    println!("  strudel bundle   # build app bundle");
-    println!("  strudel run      # full build (sign, notarize, DMG)");
+    println!("  strudel build    # build app bundle");
+    println!("  strudel sign     # build + sign for local dev (ad-hoc if no identity)");
+    println!("  strudel release  # full release (sign, notarize, DMG)");
 
     Ok(())
 }
