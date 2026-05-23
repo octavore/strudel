@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use color_print::{cformat, cprintln};
 use serde_json::Value;
 
 use crate::config::ResolvedConfig;
@@ -74,7 +74,10 @@ impl Builder {
         step("Cleaning previous build...");
         if self.dry_run() {
             cprintln!("<dim>[dry-run]</dim> rm -rf {}", self.p.build_dir.display());
-            cprintln!("<dim>[dry-run]</dim> mkdir -p {}", self.p.build_dir.display());
+            cprintln!(
+                "<dim>[dry-run]</dim> mkdir -p {}",
+                self.p.build_dir.display()
+            );
             return Ok(());
         }
         if self.p.build_dir.exists() {
@@ -349,8 +352,50 @@ impl Builder {
         Ok(())
     }
 
+    /// Verify the credentials required for signing and notarization are present.
+    /// Bails early so a missing value doesn't surface deep into the pipeline (e.g.
+    /// `codesign: no identity found`). In dry-run, only warns — there's nothing to sign.
+    fn preflight_credentials(&self) -> Result<()> {
+        let missing: Vec<&str> = [
+            ("SIGN_IDENTITY", &self.cfg.sign_identity),
+            ("TEAM_ID", &self.cfg.team_id),
+            ("APPLE_ID", &self.cfg.apple_id),
+            ("APPLE_PASSWORD", &self.cfg.apple_password),
+        ]
+        .iter()
+        .filter(|(_, v)| v.is_empty())
+        .map(|(env, _)| *env)
+        .collect();
+
+        if missing.is_empty() {
+            return Ok(());
+        }
+
+        let hint = "Set each via an environment variable or in strudel.toml \
+                    (config value takes precedence). See the README's \
+                    \"Signing credentials\" section.";
+
+        if self.dry_run() {
+            for env in &missing {
+                cprintln!(
+                    "<yellow>[warning]</yellow> Missing signing credential: <blue>{env}</blue>"
+                );
+            }
+            cprintln!("<yellow>[warning]</yellow> {hint}");
+            Ok(())
+        } else {
+            let mut msg = String::from("Missing signing credentials required for `run`:");
+            for env in &missing {
+                msg.push_str(&cformat!("\n  - <yellow>{env}</yellow>"));
+            }
+            msg.push_str(&format!("\n{hint}"));
+            bail!(msg);
+        }
+    }
+
     /// Full pipeline: clean → binary → assemble → sign → notarize → DMG.
     pub fn run(&self) -> Result<()> {
+        self.preflight_credentials()?;
         self.clean()?;
         let binary_path = self.build_binary()?;
         self.assemble_bundle(&binary_path)?;
