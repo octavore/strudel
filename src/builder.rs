@@ -62,7 +62,7 @@ impl Builder {
         let build_refs: Vec<&str> = std::iter::once("swift")
             .chain(base.iter().map(String::as_str))
             .collect();
-        self.sh.run(&build_refs)?;
+        self.sh.run_streamed(&build_refs)?;
 
         let mut show_base = base.clone();
         show_base.push("--show-bin-path".to_string());
