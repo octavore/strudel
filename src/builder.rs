@@ -11,6 +11,8 @@ mod keychain;
 mod steps;
 mod validators;
 
+use std::path::Path;
+
 use anyhow::Result;
 use color_print::{cformat, cprintln};
 use indoc::formatdoc;
@@ -45,6 +47,15 @@ impl Builder {
         self.sh.dry_run
     }
 
+    /// Assemble every configured app extension under
+    /// `<app>.app/Contents/PlugIns/`. No-op when no extensions are configured.
+    fn assemble_extensions(&self, bin_dir: &Path) -> Result<()> {
+        for (ext, ext_paths) in self.cfg.extensions.iter().zip(self.paths.extensions.iter()) {
+            self.assemble_appex(ext, ext_paths, bin_dir)?;
+        }
+        Ok(())
+    }
+
     fn open_app(&self) -> Result<()> {
         if self.dry_run() {
             return Ok(());
@@ -59,9 +70,11 @@ impl Builder {
     /// Build bundle only (clean → binary → assemble).
     pub fn build(&self) -> Result<()> {
         self.clean()?;
-        let binary_path = self.build_binary()?;
-        let app_bundle = self.assemble_bundle(&binary_path)?;
+        let bin_dir = self.build_binary()?;
+        let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
+        let app_bundle = self.assemble_bundle(&host_binary)?;
         self.embed_libraries(&app_bundle)?;
+        self.assemble_extensions(&bin_dir)?;
         println!();
         cprintln!("<green>Done! App bundle:</green>");
         cprintln!("<cyan>{}</cyan>", app_bundle.display());
@@ -79,9 +92,11 @@ impl Builder {
         // imported Developer ID identity here too, but ad-hoc needs nothing.
         // let _keychain = self.import_certificate()?;
         self.clean()?;
-        let binary_path = self.build_binary()?;
-        let app_bundle = self.assemble_bundle(&binary_path)?;
+        let bin_dir = self.build_binary()?;
+        let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
+        let app_bundle = self.assemble_bundle(&host_binary)?;
         self.embed_libraries(&app_bundle)?;
+        self.assemble_extensions(&bin_dir)?;
         self.sign()?;
 
         println!();
@@ -104,9 +119,11 @@ impl Builder {
         // end of this function, which tears the temporary keychain back down.
         // let _keychain = self.import_certificate()?;
         self.clean()?;
-        let binary_path = self.build_binary()?;
-        let app_bundle = self.assemble_bundle(&binary_path)?;
+        let bin_dir = self.build_binary()?;
+        let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
+        let app_bundle = self.assemble_bundle(&host_binary)?;
         self.embed_libraries(&app_bundle)?;
+        self.assemble_extensions(&bin_dir)?;
         self.sign()?;
         self.notarize()?;
         self.package_dmg()?;

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, ResolvedExtension};
 
 pub struct Paths {
     pub build_dir: PathBuf,
@@ -9,6 +9,40 @@ pub struct Paths {
     pub zip: PathBuf,
     pub info_plist: PathBuf,
     pub entitlements_plist: PathBuf,
+    /// One entry per [`ResolvedExtension`], in the same order. Empty when no
+    /// extensions are configured.
+    pub extensions: Vec<ExtensionPaths>,
+}
+
+/// All bundle-internal paths for a single app extension. The `.appex` lives at
+/// `<host>.app/Contents/PlugIns/<name>.appex/`.
+pub struct ExtensionPaths {
+    pub appex: PathBuf,
+    pub binary: PathBuf,
+    pub info_plist: PathBuf,
+    pub resources: PathBuf,
+    /// Generated plist for codesign — lives next to the host's
+    /// `Entitlements.plist` in the build dir.
+    pub entitlements_plist: PathBuf,
+}
+
+impl ExtensionPaths {
+    fn for_extension(
+        app_bundle: &std::path::Path,
+        build_dir: &std::path::Path,
+        ext: &ResolvedExtension,
+    ) -> Self {
+        let appex = app_bundle
+            .join("Contents/PlugIns")
+            .join(format!("{}.appex", ext.name));
+        ExtensionPaths {
+            binary: appex.join("Contents/MacOS").join(&ext.target_name),
+            info_plist: appex.join("Contents/Info.plist"),
+            resources: appex.join("Contents/Resources"),
+            entitlements_plist: build_dir.join(format!("{}.entitlements.plist", ext.name)),
+            appex,
+        }
+    }
 }
 
 impl Paths {
@@ -17,9 +51,14 @@ impl Paths {
             build_dir,
             app_name,
             version,
+            extensions,
             ..
         } = cfg;
         let app_bundle = build_dir.join(format!("{app_name}.app"));
+        let extension_paths = extensions
+            .iter()
+            .map(|ext| ExtensionPaths::for_extension(&app_bundle, build_dir, ext))
+            .collect();
         Paths {
             dmg: build_dir.join(format!("{app_name}-{version}.dmg")),
             zip: build_dir.join(format!("{app_name}-{version}.zip")),
@@ -27,6 +66,7 @@ impl Paths {
             entitlements_plist: build_dir.join("Entitlements.plist"),
             build_dir: build_dir.clone(),
             app_bundle,
+            extensions: extension_paths,
         }
     }
 }
@@ -55,6 +95,7 @@ mod tests {
             build_env: HashMap::new(),
             embed_libs: Vec::new(),
             provisioning_profile: None,
+            extensions: Vec::new(),
             team_id: String::new(),
             apple_id: String::new(),
             apple_api_issuer: String::new(),
@@ -90,5 +131,50 @@ mod tests {
         let p = Paths::new(&cfg("/out", "My App", "1.0"));
         assert_eq!(p.app_bundle, PathBuf::from("/out/My App.app"));
         assert_eq!(p.dmg, PathBuf::from("/out/My App-1.0.dmg"));
+    }
+
+    #[test]
+    fn extension_paths_nest_under_plugins() {
+        use crate::config::{ExtensionKind, ResolvedExtension};
+        let mut c = cfg("/out", "MyApp", "1.0");
+        c.extensions.push(ResolvedExtension {
+            kind: ExtensionKind::SafariWebExtension,
+            target_name: "MyAppExtension".into(),
+            bundle_id: "com.example.myapp.Extension".into(),
+            name: "MyAppExtension".into(),
+            info_json_path: None,
+            entitlements_json_path: PathBuf::from("/ext/e.json"),
+            resources_dir: Some(PathBuf::from("/ext/dist")),
+            principal_class: Some("MyAppExtension.SafariWebExtensionHandler".into()),
+        });
+        let p = Paths::new(&c);
+        assert_eq!(p.extensions.len(), 1);
+        let e = &p.extensions[0];
+        assert_eq!(
+            e.appex,
+            PathBuf::from("/out/MyApp.app/Contents/PlugIns/MyAppExtension.appex")
+        );
+        assert_eq!(
+            e.binary,
+            PathBuf::from(
+                "/out/MyApp.app/Contents/PlugIns/MyAppExtension.appex/Contents/MacOS/MyAppExtension"
+            )
+        );
+        assert_eq!(
+            e.info_plist,
+            PathBuf::from(
+                "/out/MyApp.app/Contents/PlugIns/MyAppExtension.appex/Contents/Info.plist"
+            )
+        );
+        assert_eq!(
+            e.resources,
+            PathBuf::from(
+                "/out/MyApp.app/Contents/PlugIns/MyAppExtension.appex/Contents/Resources"
+            )
+        );
+        assert_eq!(
+            e.entitlements_plist,
+            PathBuf::from("/out/MyAppExtension.entitlements.plist")
+        );
     }
 }

@@ -146,7 +146,7 @@ mod tests {
         // required derived fields, no path resolution panics).
         let t = generate_toml("MyApp", "com.example.myapp", "1.0", "1");
         let cfg: BuildConfig = toml::from_str(&t).unwrap();
-        let r = resolve_config(cfg, Path::new("/cfg"));
+        let r = resolve_config(cfg, Path::new("/cfg")).unwrap();
         assert_eq!(r.app_name, "MyApp");
         assert_eq!(r.target_name, "MyApp"); // default = app.name
         assert_eq!(r.notarize_timeout, 600); // default

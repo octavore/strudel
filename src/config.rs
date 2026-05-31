@@ -16,6 +16,10 @@ pub struct BuildConfig {
     pub signing: SigningSection,
     #[serde(default)]
     pub notarize: NotarizeSection,
+    /// Zero or more app extensions embedded under `Contents/PlugIns/` in the
+    /// host bundle. See [`ExtensionSection`].
+    #[serde(default, rename = "extensions")]
+    pub extensions: Vec<ExtensionSection>,
 }
 
 /// `[app]` — required application metadata.
@@ -58,6 +62,62 @@ pub struct SigningSection {
     pub team_id: Option<String>,
 }
 
+/// `[[extensions]]` — one entry per app extension embedded in the host bundle.
+/// Fields shared by all extension kinds live at the top level; kind-specific
+/// fields are carried by the flattened, `kind`-tagged [`ExtensionKindConfig`].
+// note: not deny_unknown_fields because enum is internally tagged and deny_unknown_fields would
+// reject the tag
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ExtensionSection {
+    /// Swift executable target name in `Package.swift`. The compiled binary
+    /// is placed at `<name>.appex/Contents/MacOS/<target_name>`.
+    pub target_name: String,
+    /// `CFBundleIdentifier` of the extension — typically a child of the host
+    /// app's bundle id (e.g. `com.example.myapp.Extension`).
+    pub bundle_id: String,
+    /// Display/bundle name. Defaults to `target_name`. Used for both the
+    /// `.appex` directory name and `CFBundleName` / `CFBundleDisplayName`.
+    pub name: Option<String>,
+    /// JSON describing extra `Info.plist` keys for the extension. strudel
+    /// always injects `CFBundle*` identity keys and the kind-specific
+    /// `NSExtension` dict on top of this. Optional; defaults to an empty
+    /// object.
+    pub info_json_path: Option<PathBuf>,
+    /// JSON entitlements for the extension — required, since extensions are
+    /// sandboxed independently of the host app.
+    pub entitlements_json_path: Option<PathBuf>,
+    /// Discriminator (`kind = "..."`) plus the kind-specific fields. Internally
+    /// tagged so the variant's fields sit flat alongside the common ones.
+    #[serde(flatten)]
+    pub kind: ExtensionKindConfig,
+}
+
+/// Kind-specific deserialized fields for an [`ExtensionSection`]. Internally
+/// tagged on `kind`: each variant's fields appear at the same level as the
+/// common extension fields in TOML.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExtensionKindConfig {
+    SafariWebExtension {
+        /// Directory whose contents (manifest.json, JS, HTML, icons, …) are
+        /// copied wholesale into `<name>.appex/Contents/Resources/`.
+        resources_dir: PathBuf,
+        /// `NSExtensionPrincipalClass`. Defaults to
+        /// `"<target_name>.SafariWebExtensionHandler"` — the Apple Xcode
+        /// template convention.
+        principal_class: Option<String>,
+    },
+    // Future: AppExtension (generic NSExtension), ContentBlocker, …
+}
+
+/// The kind of app extension after resolution. A flat discriminator used by
+/// downstream build steps; the kind-specific data has already been unpacked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtensionKind {
+    SafariWebExtension,
+}
+
 /// `[notarize]` — non-secret notarization identifiers (env vars `APPLE_ID`,
 /// `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`). Secrets
 /// (`APPLE_PASSWORD`, `APPLE_CERTIFICATE*`) are read from the environment only.
@@ -92,6 +152,8 @@ pub struct ResolvedConfig {
     pub embed_libs: Vec<PathBuf>,
     /// Provisioning profile to embed in the bundle, if configured.
     pub provisioning_profile: Option<PathBuf>,
+    /// App extensions to assemble and sign inside `Contents/PlugIns/`.
+    pub extensions: Vec<ResolvedExtension>,
 
     // Notarization identifiers (from strudel.toml or the environment).
     pub team_id: String,
@@ -104,6 +166,24 @@ pub struct ResolvedConfig {
     pub apple_password: String,
     pub apple_certificate: String,
     pub apple_certificate_password: String,
+}
+
+/// An [`ExtensionSection`] after path resolution and kind-specific validation.
+/// All paths are absolute (resolved relative to the config file's directory).
+#[derive(Debug, Clone)]
+pub struct ResolvedExtension {
+    pub kind: ExtensionKind,
+    pub target_name: String,
+    pub bundle_id: String,
+    /// Resolved display name (defaults to `target_name`).
+    pub name: String,
+    pub info_json_path: Option<PathBuf>,
+    pub entitlements_json_path: PathBuf,
+    /// Required for [`ExtensionKind::SafariWebExtension`]; the directory whose
+    /// contents become the extension's `Resources/`.
+    pub resources_dir: Option<PathBuf>,
+    /// Resolved `NSExtensionPrincipalClass` for Safari Web Extensions.
+    pub principal_class: Option<String>,
 }
 
 /// How `notarytool` authenticates with Apple's notary service. The App Store
@@ -171,19 +251,82 @@ fn env_or(cfg_val: Option<String>, env_key: &str) -> String {
         .unwrap_or_default()
 }
 
-pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> ResolvedConfig {
+/// Resolve a parsed extension entry against the config directory, applying
+/// defaults and validating kind-specific required fields.
+fn resolve_extension(ext: ExtensionSection, config_dir: &Path) -> Result<ResolvedExtension> {
+    let ExtensionSection {
+        target_name,
+        bundle_id,
+        name,
+        info_json_path,
+        entitlements_json_path,
+        kind,
+    } = ext;
+
+    let resolved_name = name.unwrap_or_else(|| target_name.clone());
+    let resolve = |p: PathBuf| {
+        if p.is_absolute() {
+            p
+        } else {
+            config_dir.join(p)
+        }
+    };
+
+    let entitlements_json_path = entitlements_json_path.map(resolve).with_context(|| {
+        format!(
+            "extension `{target_name}` is missing required field `entitlements_json_path` \
+             (extensions are sandboxed independently of the host app)"
+        )
+    })?;
+
+    let info_json_path = info_json_path.map(resolve);
+
+    let (kind, resources_dir, principal_class) = match kind {
+        ExtensionKindConfig::SafariWebExtension {
+            resources_dir,
+            principal_class,
+        } => {
+            let principal_class = principal_class
+                .unwrap_or_else(|| format!("{target_name}.SafariWebExtensionHandler"));
+            (
+                ExtensionKind::SafariWebExtension,
+                Some(resolve(resources_dir)),
+                Some(principal_class),
+            )
+        },
+    };
+
+    Ok(ResolvedExtension {
+        kind,
+        target_name,
+        bundle_id,
+        name: resolved_name,
+        info_json_path,
+        entitlements_json_path,
+        resources_dir,
+        principal_class,
+    })
+}
+
+pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> Result<ResolvedConfig> {
     let BuildConfig {
         app,
         build,
         signing,
         notarize,
+        extensions,
     } = cfg;
 
     let source_dir = resolve_path(config_dir, build.source_dir, ".");
     let build_dir = resolve_path(&source_dir, build.build_dir, ".build/dist");
     let target_name = build.target_name.unwrap_or_else(|| app.name.clone());
 
-    ResolvedConfig {
+    let extensions = extensions
+        .into_iter()
+        .map(|ext| resolve_extension(ext, config_dir))
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(ResolvedConfig {
         // User-supplied input paths are resolved relative to the config file's
         // directory (the one fixed anchor the user reasons about), independent of
         // `source_dir`. info_json_path and icon_path are optional with no default.
@@ -262,7 +405,8 @@ pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> ResolvedConfig {
         source_dir,
         build_dir,
         target_name,
-    }
+        extensions,
+    })
 }
 
 pub fn load_config(config_path: &Path) -> Result<ResolvedConfig> {
@@ -271,7 +415,7 @@ pub fn load_config(config_path: &Path) -> Result<ResolvedConfig> {
     let cfg: BuildConfig = toml::from_str(&content)
         .with_context(|| format!("Failed to parse config: {}", config_path.display()))?;
     let config_dir = config_path.parent().unwrap_or(Path::new("."));
-    Ok(resolve_config(cfg, config_dir))
+    resolve_config(cfg, config_dir)
 }
 
 #[cfg(test)]
@@ -396,7 +540,7 @@ mod tests {
     #[test]
     fn resolves_paths_relative_to_config_dir() {
         let cfg = parse(FULL).unwrap();
-        let r = resolve_config(cfg, Path::new("/cfg"));
+        let r = resolve_config(cfg, Path::new("/cfg")).unwrap();
         // source_dir is relative to the config dir; build_dir is relative to
         // source_dir.
         assert_eq!(r.source_dir, PathBuf::from("/cfg/src"));
@@ -420,7 +564,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        let r = resolve_config(cfg, Path::new("/cfg"));
+        let r = resolve_config(cfg, Path::new("/cfg")).unwrap();
         assert_eq!(r.entitlements_json_path, PathBuf::from("/abs/ent.json"));
     }
 
@@ -436,7 +580,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        let r = resolve_config(cfg, Path::new("/cfg"));
+        let r = resolve_config(cfg, Path::new("/cfg")).unwrap();
         assert_eq!(r.build_dir, PathBuf::from("/cfg/.build/dist"));
         assert_eq!(
             r.entitlements_json_path,
@@ -454,7 +598,7 @@ mod tests {
         // A value present in the file is used verbatim, independent of any
         // ambient APPLE_SIGNING_IDENTITY in the environment (config takes precedence).
         let cfg = parse(FULL).unwrap();
-        let r = resolve_config(cfg, Path::new("/cfg"));
+        let r = resolve_config(cfg, Path::new("/cfg")).unwrap();
         assert_eq!(r.sign_identity, "Developer ID Application: Me (TEAM123456)");
         assert_eq!(r.team_id, "TEAM123456");
     }
@@ -479,6 +623,7 @@ mod tests {
             build_env: HashMap::new(),
             embed_libs: Vec::new(),
             provisioning_profile: None,
+            extensions: Vec::new(),
             team_id: String::new(),
             apple_id: String::new(),
             apple_api_issuer: String::new(),
@@ -546,5 +691,128 @@ mod tests {
         r.apple_certificate = "BASE64".into();
         r.apple_certificate_password = "pw".into();
         assert_eq!(r.signing_cert(), Some(("BASE64", "pw")));
+    }
+
+    // ── Extensions ──────────────────────────────────────────────────────────
+
+    const WITH_EXTENSION: &str = r#"
+        [app]
+        name = "MyApp"
+        bundle_id = "com.example.myapp"
+        version = "1.0.0"
+        build_number = "1"
+
+        [[extensions]]
+        kind = "safari_web_extension"
+        target_name = "MyAppExtension"
+        bundle_id = "com.example.myapp.Extension"
+        resources_dir = "ext/dist"
+        entitlements_json_path = "ext/entitlements.json"
+    "#;
+
+    #[test]
+    fn parses_and_resolves_safari_web_extension() {
+        let cfg = parse(WITH_EXTENSION).unwrap();
+        let r = resolve_config(cfg, Path::new("/cfg")).unwrap();
+        assert_eq!(r.extensions.len(), 1);
+        let ext = &r.extensions[0];
+        assert_eq!(ext.kind, ExtensionKind::SafariWebExtension);
+        assert_eq!(ext.target_name, "MyAppExtension");
+        // name defaults to target_name
+        assert_eq!(ext.name, "MyAppExtension");
+        assert_eq!(ext.bundle_id, "com.example.myapp.Extension");
+        assert_eq!(ext.resources_dir, Some(PathBuf::from("/cfg/ext/dist")));
+        assert_eq!(
+            ext.entitlements_json_path,
+            PathBuf::from("/cfg/ext/entitlements.json")
+        );
+        // principal_class defaults to "<target_name>.SafariWebExtensionHandler"
+        assert_eq!(
+            ext.principal_class.as_deref(),
+            Some("MyAppExtension.SafariWebExtensionHandler")
+        );
+    }
+
+    #[test]
+    fn safari_web_extension_requires_resources_dir() {
+        let err = parse(
+            r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+            [[extensions]]
+            kind = "safari_web_extension"
+            target_name = "Ext"
+            bundle_id = "y.Ext"
+            entitlements_json_path = "e.json"
+        "#,
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("resources_dir"), "got: {msg}");
+    }
+
+    #[test]
+    fn extension_requires_entitlements() {
+        let cfg = parse(
+            r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+            [[extensions]]
+            kind = "safari_web_extension"
+            target_name = "Ext"
+            bundle_id = "y.Ext"
+            resources_dir = "ext"
+        "#,
+        )
+        .unwrap();
+        let err = resolve_config(cfg, Path::new("/cfg")).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("entitlements_json_path"), "got: {msg}");
+    }
+
+    #[test]
+    fn extension_unknown_field_is_rejected() {
+        let err = parse(
+            r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+            [[extensions]]
+            kind = "safari_web_extension"
+            target_name = "Ext"
+            bundle_id = "y.Ext"
+            resources_dir = "ext"
+            entitlements_json_path = "e.json"
+            unknown_field = "boom"
+        "#,
+        );
+        assert!(err.is_err(), "typo'd extension key should be rejected");
+    }
+
+    #[test]
+    fn unknown_extension_kind_is_rejected() {
+        let err = parse(
+            r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+            [[extensions]]
+            kind = "share_extension"
+            target_name = "Ext"
+            bundle_id = "y.Ext"
+            entitlements_json_path = "e.json"
+        "#,
+        );
+        assert!(err.is_err(), "unknown extension kind should be rejected");
     }
 }

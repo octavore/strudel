@@ -266,6 +266,7 @@ mod tests {
             build_env: HashMap::new(),
             embed_libs: Vec::new(),
             provisioning_profile: None,
+            extensions: Vec::new(),
             team_id: String::new(),
             apple_id: String::new(),
             apple_api_issuer: String::new(),

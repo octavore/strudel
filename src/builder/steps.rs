@@ -11,7 +11,8 @@ use indoc::formatdoc;
 use serde_json::{Value, json};
 
 use super::{Builder, step};
-use crate::config::NotaryAuth;
+use crate::config::{ExtensionKind, NotaryAuth, ResolvedExtension};
+use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;
 
 impl Builder {
@@ -35,7 +36,9 @@ impl Builder {
         Ok(())
     }
 
-    /// At a high-level, this wraps `swift build`.
+    /// At a high-level, this wraps `swift build`. Returns the swift build bin
+    /// directory, which contains the host binary and any extension binaries.
+    /// Use [`Self::find_binary_in`] to locate a specific target's binary.
     pub fn build_binary(&self) -> Result<PathBuf> {
         step("Building release binary...");
 
@@ -67,54 +70,57 @@ impl Builder {
         // run the build_cmd
         self.sh.run_streamed_env(build_cmd)?;
 
-        // run show_bin_cmd to find the path of the compiled binary
+        // run show_bin_cmd to find the swift build output directory
         let bin_dir = show_bin_cmd.run(&self.sh)?;
         let bin_dir = bin_dir.trim();
-        let binary_path = if bin_dir.is_empty() {
+        let bin_dir = if bin_dir.is_empty() {
             // dry-run: fall back to expected location
-            self.cfg
-                .source_dir
-                .join(".build/release")
-                .join(&self.cfg.target_name)
+            self.cfg.source_dir.join(".build/release")
         } else {
-            PathBuf::from(bin_dir).join(&self.cfg.target_name)
+            PathBuf::from(bin_dir)
         };
+        Ok(bin_dir)
+    }
 
-        // if no bin dir or bin path, do some extra work to help users debug missing
-        // binary
-        if !bin_dir.is_empty() && !binary_path.exists() {
-            let found: Vec<String> = fs::read_dir(bin_dir)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-                .filter_map(|e| e.file_name().into_string().ok())
-                .filter(|n| !n.contains('.'))
-                .collect();
-
-            let hint = if found.is_empty() {
-                "No executables were found in the build directory.".to_string()
-            } else {
-                formatdoc! {r#"
-                    Executables found in the build directory: {}.
-                    If one of these is the right binary, set `target_name` in your strudel.toml to its name.
-                    "#,
-                    found.join(", ")
-                }
-            };
-
-            bail!(formatdoc! {r#"
-                Could not locate built binary at:
-                {}
-                strudel looks for an executable named `{}` (from `target_name`, which defaults to `app_name`).
-                {hint}
-                "#,
-                binary_path.display(),
-                self.cfg.target_name,
-            });
+    /// Locate the binary for `target_name` in the swift build output. In
+    /// dry-run, returns the expected path without checking the filesystem.
+    /// On a real run with the binary missing, emits a hint listing the
+    /// executables that *were* built, so users can fix `target_name`.
+    pub fn find_binary_in(&self, bin_dir: &Path, target_name: &str) -> Result<PathBuf> {
+        let binary_path = bin_dir.join(target_name);
+        if self.dry_run() {
+            return Ok(binary_path);
+        }
+        if binary_path.exists() {
+            return Ok(binary_path);
         }
 
-        Ok(binary_path)
+        let found: Vec<String> = fs::read_dir(bin_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| !n.contains('.'))
+            .collect();
+        let hint = if found.is_empty() {
+            "No executables were found in the build directory.".to_string()
+        } else {
+            formatdoc! {r#"
+                Executables found in the build directory: {}.
+                If one of these is the right binary, set the matching `target_name` in your strudel.toml.
+                "#,
+                found.join(", ")
+            }
+        };
+        bail!(formatdoc! {r#"
+            Could not locate built binary at:
+            {}
+            strudel was looking for an executable named `{target_name}`.
+            {hint}
+            "#,
+            binary_path.display(),
+        });
     }
 
     // assemble the .app bundle by creating the bundle structure:
@@ -277,6 +283,102 @@ impl Builder {
         Ok(())
     }
 
+    /// Assemble one app extension `.appex` bundle under the host's
+    /// `Contents/PlugIns/`. Builds the extension `Info.plist` (injecting
+    /// kind-specific `NSExtension` keys), copies the binary, and copies the
+    /// kind-specific resource payload (for Safari Web Extensions, the entire
+    /// webpack output directory).
+    pub fn assemble_appex(
+        &self,
+        ext: &ResolvedExtension,
+        paths: &ExtensionPaths,
+        bin_dir: &Path,
+    ) -> Result<()> {
+        step(&format!("Assembling extension `{}`...", ext.name));
+
+        // Locate the extension binary that `swift build` produced. Building
+        // all package targets is intentional: a Package.swift that declares
+        // both the host and the extension as executableTargets produces both
+        // binaries from a single `swift build` invocation.
+        let binary_path = self.find_binary_in(bin_dir, &ext.target_name)?;
+
+        self.create_dir(&paths.appex.join("Contents/MacOS"))?;
+        self.create_dir(&paths.resources)?;
+        self.copy_file(&binary_path, &paths.binary)?;
+
+        // Start from any user-supplied JSON, then layer required keys on top.
+        let mut info: Value = match &ext.info_json_path {
+            Some(p) => {
+                let s = fs::read_to_string(p).with_context(|| {
+                    format!(
+                        "Failed to read extension info JSON at {} (set in \
+                         `info_json_path` for extension `{}` in strudel.toml).",
+                        p.display(),
+                        ext.name
+                    )
+                })?;
+                serde_json::from_str(&s).with_context(|| {
+                    format!("Failed to parse extension info JSON at {}", p.display())
+                })?
+            },
+            None => Value::Object(Default::default()),
+        };
+        let obj = info.as_object_mut().with_context(|| {
+            format!(
+                "Extension info JSON for `{}` must be a JSON object at the top level.",
+                ext.name
+            )
+        })?;
+        obj.insert("CFBundleName".into(), json!(ext.name.clone()));
+        obj.insert("CFBundleDisplayName".into(), json!(ext.name.clone()));
+        obj.insert("CFBundleExecutable".into(), json!(ext.target_name.clone()));
+        obj.insert("CFBundleIdentifier".into(), json!(ext.bundle_id.clone()));
+        obj.insert(
+            "CFBundleShortVersionString".into(),
+            json!(self.cfg.version.clone()),
+        );
+        obj.insert(
+            "CFBundleVersion".into(),
+            json!(self.cfg.build_number.clone()),
+        );
+        obj.insert("CFBundleInfoDictionaryVersion".into(), json!("6.0"));
+        // App extensions use the XPC bundle package type.
+        obj.insert("CFBundlePackageType".into(), json!("XPC!"));
+
+        match ext.kind {
+            ExtensionKind::SafariWebExtension => {
+                // `NSExtensionPrincipalClass` was filled in during resolve.
+                let principal = ext.principal_class.as_deref().unwrap_or("");
+                obj.insert(
+                    "NSExtension".into(),
+                    json!({
+                        "NSExtensionPointIdentifier": "com.apple.Safari.web-extension",
+                        "NSExtensionPrincipalClass": principal,
+                        "SFSafariWebExtensionManifestPath": "Resources/manifest.json",
+                    }),
+                );
+            },
+        }
+
+        let json_bytes = serde_json::to_vec_pretty(&info)?;
+        let plist_path = paths
+            .info_plist
+            .to_str()
+            .context("Invalid extension Info.plist path.")?;
+        self.sh.run_stdin(
+            &["plutil", "-convert", "xml1", "-o", plist_path, "-"],
+            &json_bytes,
+        )?;
+
+        // Copy the kind-specific resource payload. For Safari Web Extensions
+        // this is the entire webpack output (manifest.json, JS, HTML, icons).
+        if let Some(src_resources) = &ext.resources_dir {
+            self.copy_tree(src_resources, &paths.resources)?;
+        }
+
+        Ok(())
+    }
+
     pub fn sign(&self) -> Result<()> {
         let app_bundle = self.paths.app_bundle.to_str().unwrap();
         let ent_plist = self.paths.entitlements_plist.to_str().unwrap();
@@ -333,6 +435,16 @@ impl Builder {
             }
         }
 
+        // Sign extensions inside-out: each `.appex` must be signed with its
+        // own entitlements before the host bundle is sealed. A single
+        // `codesign --deep` pass over the host would re-use the host's
+        // entitlements for the nested bundle, which is wrong — the
+        // extension is sandboxed independently and typically needs a
+        // different set.
+        for (ext, ext_paths) in self.cfg.extensions.iter().zip(self.paths.extensions.iter()) {
+            self.sign_extension(ext, ext_paths, &codesign_cmd, adhoc, msg)?;
+        }
+
         // Run bundle codesign with entitlements
         step(&format!("Signing app bundle...{msg}"));
 
@@ -363,6 +475,60 @@ impl Builder {
             .run(&["spctl", "--assess", "-vv", "--type", "exec", app_bundle])
             .inspect_err(|e| cprintln!("<yellow>warning:</yellow> spctl assessment failed: {e}"));
 
+        Ok(())
+    }
+
+    /// Sign one nested `.appex` with its own entitlements. Called by [`sign`]
+    /// for each configured extension, after embedded dylibs are signed and
+    /// before the host bundle is sealed.
+    fn sign_extension(
+        &self,
+        ext: &ResolvedExtension,
+        paths: &ExtensionPaths,
+        base_cmd: &ShellCommand,
+        adhoc: bool,
+        msg: &str,
+    ) -> Result<()> {
+        let appex_str = paths
+            .appex
+            .to_str()
+            .context("Invalid extension bundle path.")?;
+        let ent_json_path = &ext.entitlements_json_path;
+        let ent_json_str = ent_json_path
+            .to_str()
+            .context("Invalid extension entitlements path.")?;
+        let ent_plist_str = paths
+            .entitlements_plist
+            .to_str()
+            .context("Invalid extension entitlements plist path.")?;
+
+        let ent_raw = fs::read_to_string(ent_json_path).with_context(|| {
+            format!(
+                "Failed to read entitlements JSON for extension `{}` at {ent_json_str}",
+                ext.name
+            )
+        })?;
+        let ent_value: Value = serde_json::from_str(&ent_raw).with_context(|| {
+            format!("Extension entitlements file is not valid JSON: {ent_json_str}")
+        })?;
+        self.sh.run(&[
+            "plutil",
+            "-convert",
+            "xml1",
+            ent_json_str,
+            "-o",
+            ent_plist_str,
+        ])?;
+
+        step(&format!("Signing extension `{}`...{msg}", ext.name));
+        if adhoc {
+            self.validate_entitlements_for_adhoc(&ent_value, ent_json_str);
+        }
+        let appex_cmd = base_cmd
+            .clone()
+            .arg_group(&["--entitlements", ent_plist_str])
+            .arg(appex_str);
+        appex_cmd.run(&self.sh)?;
         Ok(())
     }
 

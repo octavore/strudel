@@ -34,6 +34,20 @@ impl Builder {
         Ok(())
     }
 
+    /// Recursively copy a directory tree using `ditto`, which preserves macOS
+    /// metadata, resource forks, and symlinks. Note that the *contents* of
+    /// `from` are placed inside `to`. `to` is created if missing.
+    pub(super) fn copy_tree(&self, from: &Path, to: &Path) -> Result<()> {
+        let from_str = from
+            .to_str()
+            .with_context(|| format!("invalid source path: {}", from.display()))?;
+        let to_str = to
+            .to_str()
+            .with_context(|| format!("invalid destination path: {}", to.display()))?;
+        self.sh.run(&["ditto", from_str, to_str])?;
+        Ok(())
+    }
+
     /// Write a file's contents, logging dest in dry-run instead of acting.
     #[allow(dead_code)]
     pub(super) fn write_file(&self, path: &Path, contents: &str) -> Result<()> {
