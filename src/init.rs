@@ -60,6 +60,21 @@ fn generate_toml(app_name: &str, bundle_id: &str, version: &str, build_number: &
         # archs                  = ["arm64", "x86_64"]  # default: host arch only
         # target_name            = "{app_name}"         # Swift target, if it differs from the app name
 
+        # Dynamic C FFI libraries to embed in Contents/Frameworks and sign.
+        # Paths are relative to this file's directory unless absolute.
+        # Build-time flags (-I, -L, -l, rpath, modulemap) belong in Package.swift
+        # (cSettings / linkerSettings); static libs need nothing here.
+        # embed_libs             = ["path/to/libFoo.dylib"]
+
+        # Provisioning profile embedded as Contents/embedded.provisionprofile.
+        # Required for certain entitlements (e.g. push notifications, iCloud).
+        # provisioning_profile   = "{app_name}.provisionprofile"
+
+        # Extra environment variables forwarded to `swift build` (e.g. for
+        # pkg-config or library discovery). Values are passed through verbatim.
+        # [build_env]
+        # PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
+
         # Signing identifiers — or set via SIGN_IDENTITY / TEAM_ID.
         [signing]
         # identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
@@ -77,7 +92,6 @@ fn generate_toml(app_name: &str, bundle_id: &str, version: &str, build_number: &
 
 pub fn run_init(output_dir: &Path) -> Result<()> {
     let out_path = output_dir.join("strudel.toml");
-
     if out_path.exists() {
         bail!(
             "{} already exists. Remove it first or choose a different directory.",

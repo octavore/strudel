@@ -1,0 +1,605 @@
+//! The individual stages of the build pipeline: compiling the binary,
+//! assembling the `.app` bundle, embedding/signing libraries, signing,
+//! notarizing, and packaging the DMG.
+
+use std::fs;
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::SystemTime;
+
+use anyhow::{Context, Result, bail};
+use color_print::cprintln;
+use indoc::formatdoc;
+use serde_json::{Value, json};
+
+use super::{Builder, step};
+use crate::config::NotaryAuth;
+use crate::shell::ShellCommand;
+
+impl Builder {
+    pub fn clean(&self) -> Result<()> {
+        step("Cleaning previous build...");
+        if self.dry_run() {
+            cprintln!(
+                "<dim>[dry-run]</dim> rm -rf {}",
+                self.paths.build_dir.display()
+            );
+            cprintln!(
+                "<dim>[dry-run]</dim> mkdir -p {}",
+                self.paths.build_dir.display()
+            );
+            return Ok(());
+        }
+        if self.paths.build_dir.exists() {
+            fs::remove_dir_all(&self.paths.build_dir)?;
+        }
+        fs::create_dir_all(&self.paths.build_dir)?;
+        Ok(())
+    }
+
+    /// At a high-level, this wraps `swift build`.
+    pub fn build_binary(&self) -> Result<PathBuf> {
+        step("Building release binary...");
+
+        // Build base args shared between both swift invocations
+        let source = self.cfg.source_dir.to_str().unwrap();
+        let mut build_cmd = ShellCommand::new("swift")
+            .args(&["build", "-c", "release", "--package-path", source])
+            .envs(&self.cfg.build_env);
+
+        // add archs from cfg
+        for arch in &self.cfg.archs {
+            build_cmd = build_cmd.args(&["--arch", arch]);
+        }
+
+        // embed the Frameworks rpath at link time if we're embedding libraries
+        if !self.cfg.embed_libs.is_empty() {
+            build_cmd = build_cmd.arg_group(&[
+                "-Xlinker",
+                "-rpath",
+                "-Xlinker",
+                "@executable_path/../Frameworks",
+            ]);
+        }
+
+        // clone of the build command with --show-bin-path to find the binary after
+        // building
+        let show_bin_cmd = build_cmd.clone().arg("--show-bin-path").hide_dry_run();
+
+        // run the build_cmd
+        self.sh.run_streamed_env(build_cmd)?;
+
+        // run show_bin_cmd to find the path of the compiled binary
+        let bin_dir = show_bin_cmd.run(&self.sh)?;
+        let bin_dir = bin_dir.trim();
+        let binary_path = if bin_dir.is_empty() {
+            // dry-run: fall back to expected location
+            self.cfg
+                .source_dir
+                .join(".build/release")
+                .join(&self.cfg.target_name)
+        } else {
+            PathBuf::from(bin_dir).join(&self.cfg.target_name)
+        };
+
+        // if no bin dir or bin path, do some extra work to help users debug missing
+        // binary
+        if !bin_dir.is_empty() && !binary_path.exists() {
+            let found: Vec<String> = fs::read_dir(bin_dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| !n.contains('.'))
+                .collect();
+
+            let hint = if found.is_empty() {
+                "No executables were found in the build directory.".to_string()
+            } else {
+                formatdoc! {r#"
+                    Executables found in the build directory: {}.
+                    If one of these is the right binary, set `target_name` in your strudel.toml to its name.
+                    "#,
+                    found.join(", ")
+                }
+            };
+
+            bail!(formatdoc! {r#"
+                Could not locate built binary at:
+                {}
+                strudel looks for an executable named `{}` (from `target_name`, which defaults to `app_name`).
+                {hint}
+                "#,
+                binary_path.display(),
+                self.cfg.target_name,
+            });
+        }
+
+        Ok(binary_path)
+    }
+
+    // assemble the .app bundle by creating the bundle structure:
+    // 1. copy in the binary and other resources
+    // 2. generate the Info.plist from the info JSON
+    pub fn assemble_bundle(&self, binary_path: &Path) -> Result<PathBuf> {
+        step("Assembling app bundle...");
+        let app_bundle = &self.paths.app_bundle;
+
+        // create structure
+        self.create_dir(&app_bundle.join("Contents/MacOS"))?;
+        self.create_dir(&app_bundle.join("Contents/Resources"))?;
+
+        // copy the binary into the bundle
+        self.copy_file(
+            binary_path,
+            &app_bundle.join("Contents/MacOS").join(&self.cfg.app_name),
+        )?;
+
+        // Read info JSON for Info.plist
+        let mut info: Value = match &self.cfg.info_json_path {
+            Some(path) => {
+                let info_str = fs::read_to_string(path).with_context(|| {
+                    format!(
+                        "Failed to read info JSON at {} (set in `info_json_path` in strudel.toml).",
+                        path.display()
+                    )
+                })?;
+                serde_json::from_str(&info_str)
+                    .with_context(|| format!("Failed to parse info JSON at {}", path.display()))?
+            },
+            None => Value::Object(Default::default()),
+        };
+
+        // set/override version and identifier keys
+        let obj = info
+            .as_object_mut()
+            .context("Info JSON must be a JSON object at the top level.")?;
+        obj.insert(
+            "CFBundleExecutable".to_string(),
+            json!(self.cfg.app_name.clone()),
+        );
+        obj.insert(
+            "CFBundleShortVersionString".to_string(),
+            json!(self.cfg.version.clone()),
+        );
+        obj.insert(
+            "CFBundleVersion".to_string(),
+            json!(self.cfg.build_number.clone()),
+        );
+        obj.insert(
+            "CFBundleIdentifier".to_string(),
+            json!(self.cfg.bundle_id.clone()),
+        );
+
+        // set CFBundleIconFile if bundle icon_path is provided
+        // todo: also support CFBundleIconName, the newer format.
+        // see https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+        if let Some(icon_path) = &self.cfg.icon_path {
+            self.copy_file(
+                icon_path,
+                &app_bundle.join("Contents/Resources/AppIcon.icns"),
+            )?;
+            obj.insert("CFBundleIconFile".to_string(), json!("AppIcon.icns"));
+        }
+
+        // copy provisioning profile if provided
+        if let Some(profile_path) = &self.cfg.provisioning_profile {
+            self.copy_file(
+                profile_path,
+                &app_bundle.join("Contents/embedded.provisionprofile"),
+            )?;
+        }
+
+        // pipe JSON into plutil to produce Info.plist
+        let json_bytes = serde_json::to_vec_pretty(&info)?;
+        let plist_path = self
+            .paths
+            .info_plist
+            .to_str()
+            .context("Invalid Info.plist path.")?;
+        self.sh.run_stdin(
+            &["plutil", "-convert", "xml1", "-o", plist_path, "-"],
+            &json_bytes,
+        )?;
+
+        // note: we don't really need PkgInfo, it's a legacy file
+        // self.write_file(&app_bundle.join("Contents/PkgInfo"), "APPL????")?;
+        Ok(app_bundle.clone())
+    }
+
+    /// Embed dynamic libraries into `Contents/Frameworks`, fix their install
+    /// names and the executable's rpath, so the bundle is self-contained.
+    /// No-op when `cfg.embed_libs` is empty.
+    pub fn embed_libraries(&self, app_bundle: &Path) -> Result<()> {
+        if self.cfg.embed_libs.is_empty() {
+            return Ok(());
+        }
+
+        step("Embedding dynamic libraries...");
+
+        let frameworks_dir = app_bundle.join("Contents/Frameworks");
+        self.create_dir(&frameworks_dir)?;
+
+        let executable = app_bundle.join("Contents/MacOS").join(&self.cfg.app_name);
+        let executable_str = executable
+            .to_str()
+            .context("embed: Invalid executable path.")?;
+
+        for lib_path in &self.cfg.embed_libs {
+            let file_name = lib_path.file_name().with_context(|| {
+                format!("embed_libs entry has no filename: {}", lib_path.display())
+            })?;
+            let dest = frameworks_dir.join(file_name);
+            let file_name_str = file_name.to_str().context("embed: Invalid file name.")?;
+            let rpath_entry = format!("@rpath/{file_name_str}");
+            self.copy_file(lib_path, &dest)?;
+
+            // Find the original install name as seen by the executable.
+            let otool_out = self.sh.run(&["otool", "-L", executable_str])?;
+            let orig_install_name = if self.dry_run() {
+                // In dry-run we can't run otool; use the filename as a stand-in.
+                format!("<otool:{file_name_str}>")
+            } else {
+                otool_out
+                    .lines()
+                    .skip(1)
+                    .map(|l| l.split_whitespace().next().unwrap_or(""))
+                    .find(|name| {
+                        Path::new(name)
+                            .file_name()
+                            .map(|n| n == file_name)
+                            .unwrap_or(false)
+                    })
+                    .map(|s| s.to_string())
+                    .with_context(|| {
+                        format!(
+                            "Could not find {file_name_str} in `otool -L {executable_str}`.\n\
+                             Ensure your Package.swift links this library."
+                        )
+                    })?
+            };
+
+            // Update the dylib (at `dest_str`): change install name to @rpath/{dylib_name}
+            let dest_str = dest.to_str().context("embed: Invalid destination path.")?;
+            self.sh
+                .run(&["install_name_tool", "-id", &rpath_entry, dest_str])?;
+
+            // Updated the executable (at `executable_str`): change its reference to the
+            // dylib from the `orig_install_name` to `@rpath/{dylib_name}``.
+            self.sh.run(&[
+                "install_name_tool",
+                "-change",
+                &orig_install_name,
+                &rpath_entry,
+                executable_str,
+            ])?;
+        }
+
+        Ok(())
+    }
+
+    pub fn sign(&self) -> Result<()> {
+        let app_bundle = self.paths.app_bundle.to_str().unwrap();
+        let ent_plist = self.paths.entitlements_plist.to_str().unwrap();
+        let ent_json_path = &self.cfg.entitlements_json_path;
+        let ent_json = ent_json_path.to_str().unwrap();
+
+        let ent_raw = fs::read_to_string(ent_json_path)
+            .with_context(|| format!("Failed to read entitlements JSON at {ent_json}"))?;
+        let ent_value: Value = serde_json::from_str(&ent_raw)
+            .with_context(|| format!("Entitlements file is not valid JSON: {ent_json}"))?;
+        self.sh
+            .run(&["plutil", "-convert", "xml1", ent_json, "-o", ent_plist])?;
+
+        if let Some(profile_path) = &self.cfg.provisioning_profile {
+            self.validate_provisioning_profile(profile_path)?;
+        }
+
+        // With no identity configured, sign ad-hoc (`--sign -`): no certificate
+        // or account needed, enough to exercise entitlements locally. A real
+        // identity (and notarization) is required to distribute — see `release`.
+        let adhoc = self.cfg.sign_identity.is_empty();
+
+        // Some entitlements only work when the signature is backed by a
+        // provisioning profile. Ad-hoc signatures carry no profile, so the system
+        // (launchd) refuses to spawn the process with a cryptic "Launchd job
+        // spawn failed" error. This helps the user to debug
+        if adhoc {
+            let profile_only: &[&str] = &[
+                "com.apple.developer.team-identifier",
+                "keychain-access-groups",
+            ];
+            let bad_keys: Vec<&str> = profile_only
+                .iter()
+                .copied()
+                .filter(|k| ent_value.get(k).is_some())
+                .chain(
+                    ent_value
+                        .as_object()
+                        .into_iter()
+                        .flat_map(|m| m.keys())
+                        .filter(|k| k.starts_with("com.apple.developer."))
+                        .map(|k| k.as_str()),
+                )
+                .collect();
+            if !bad_keys.is_empty() {
+                cprintln!("<yellow>warning:</yellow> Ad-hoc signing cannot be used with entitlements that
+                    require a provisioning profile. The following keys in {ent_json} require a real provisioning profile and signing identity:");
+                println!("  {}", bad_keys.join("\n  "));
+                println!();
+                println!(
+                    "The app may fail to launch. Set SIGN_IDENTITY env var or signing identity in strudel.toml to your Apple Development or Developer ID certificate, and ensure the corresponding provisioning profile includes these entitlements.",
+                );
+            }
+        }
+        let identity = if adhoc {
+            step("Signing app bundle (ad-hoc — no signing identity configured)...");
+            "-"
+        } else {
+            step("Signing app bundle...");
+            self.cfg.sign_identity.as_str()
+        };
+
+        // Sign each embedded dylib individually before signing the bundle.
+        // codesign --verify --deep --strict and notarization both require nested
+        // Mach-O files to carry valid signatures.
+        if !self.cfg.embed_libs.is_empty() {
+            step("Signing embedded libraries...");
+            let frameworks_dir = self.paths.app_bundle.join("Contents/Frameworks");
+            for lib_path in &self.cfg.embed_libs {
+                if let Some(file_name) = lib_path.file_name() {
+                    let mut lib_codesign_cmd =
+                        ShellCommand::new("codesign").args(&["--force", "--sign", identity]);
+                    if !adhoc {
+                        lib_codesign_cmd =
+                            lib_codesign_cmd.args(&["--options", "runtime", "--timestamp"]);
+                    }
+                    let dylib = frameworks_dir.join(file_name);
+                    let dylib_str = dylib.to_str().unwrap();
+                    lib_codesign_cmd = lib_codesign_cmd.arg(dylib_str);
+                    lib_codesign_cmd.run(&self.sh)?;
+                }
+            }
+        }
+
+        let mut codesign_cmd = ShellCommand::new("codesign").args(&[
+            "--force",
+            "--entitlements",
+            ent_plist,
+            "--sign",
+            identity,
+        ]);
+
+        // The hardened runtime and a trusted timestamp both require a real
+        // Developer ID certificate; skip them for ad-hoc signatures.
+        //
+        // This is necessary to prevent crashes when the app attempts to load embedded
+        // frameworks that do not share the same Team ID.
+        if !adhoc {
+            codesign_cmd = codesign_cmd.args(&["--options", "runtime", "--timestamp"]);
+        }
+        self.sh.run(codesign_cmd.arg(app_bundle))?;
+
+        step("Verifying signature...");
+        self.sh.run(&[
+            "codesign",
+            "--verify",
+            "--deep",
+            "--strict",
+            "--verbose=2",
+            app_bundle,
+        ])?;
+
+        // spctl may return non-zero for unnotarized bundles, ignore the error
+        let _ = self
+            .sh
+            .run(&["spctl", "--assess", "-vv", "--type", "exec", app_bundle])
+            .inspect_err(|e| cprintln!("<yellow>warning:</yellow> spctl assessment failed: {e}"));
+
+        Ok(())
+    }
+
+    /// Decode a provisioning profile with `security cms` and warn about
+    /// expiry, team ID mismatches, and bundle ID mismatches.
+    fn validate_provisioning_profile(&self, profile_path: &Path) -> Result<()> {
+        step("Validating provisioning profile...");
+        let profile_str = profile_path.to_str().unwrap();
+
+        // 1. Decode the CMS envelope in memory and parse with the `plist` crate.
+        // Capture raw bytes via Command so binary plist data is never corrupted
+        // by a UTF-8 String conversion.
+        let output = Command::new("security")
+            .args(["cms", "-D", "-i", profile_str])
+            .output()
+            .context("Failed to run `security cms`")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("Failed to decode provisioning profile: {stderr}");
+        }
+        let profile = plist::Value::from_reader(Cursor::new(output.stdout))
+            .context("Failed to parse provisioning profile")?;
+        let dict = profile
+            .as_dictionary()
+            .context("Provisioning profile is not a dictionary")?;
+
+        // 2. Check and warn if the profile is expired.
+        if let Some(exp) = dict.get("ExpirationDate").and_then(plist::Value::as_date)
+            && SystemTime::from(exp) < SystemTime::now()
+        {
+            cprintln!(
+                "<yellow>warning:</yellow> Provisioning profile expired on {:?}",
+                SystemTime::from(exp)
+            );
+        }
+
+        // 3. Check and warn if the config team_id is not in the provisioning profile's
+        //    TeamIdentifier array.
+        if !self.cfg.team_id.is_empty() {
+            let profile_teams: Vec<&str> = dict
+                .get("TeamIdentifier")
+                .and_then(plist::Value::as_array)
+                .map(|a| a.iter().filter_map(plist::Value::as_string).collect())
+                .unwrap_or_default();
+            if !profile_teams.is_empty() && !profile_teams.contains(&self.cfg.team_id.as_str()) {
+                cprintln!(
+                    "<yellow>warning:</yellow> Provisioning profile team {profile_teams:?} does not \
+                     match configured team_id \"{}\".",
+                    self.cfg.team_id
+                );
+            }
+        }
+
+        // 4. Check and warn if the config bundle ID does not match the provisioning
+        //    profile's application-identifier entitlement (which is required for the
+        //    profile to apply to the app). app_id is "TEAMID.com.example.app" or e.g.
+        //    "TEAMID.com.example.*" (wildcard). todo: correctly handle wildcard app_id
+        if let Some(app_id) = dict
+            .get("Entitlements")
+            .and_then(plist::Value::as_dictionary)
+            .and_then(|e| e.get("application-identifier"))
+            .and_then(plist::Value::as_string)
+        {
+            let matches = app_id.ends_with(&format!(".{}", self.cfg.bundle_id))
+                || app_id == self.cfg.bundle_id.as_str();
+            if !matches {
+                cprintln!(
+                    "<yellow>warning:</yellow> Provisioning profile app identifier \
+                     \"{app_id}\" does not match bundle ID \"{}\".",
+                    self.cfg.bundle_id
+                );
+            }
+        }
+
+        cprintln!("<green>✔ Provisioning profile validated</green>");
+        Ok(())
+    }
+
+    pub fn notarize(&self) -> Result<()> {
+        step("Creating zip for notarization...");
+        let app_bundle = self.paths.app_bundle.to_str().unwrap();
+        let zip = self.paths.zip.to_str().unwrap();
+
+        ShellCommand::new("ditto")
+            // -c: create an archive
+            // -k: use zip format
+            // --keepParent: include the parent directory in the archive, so the .app bundle
+            // structure is preserved.
+            .args(&["-c", "-k", "--keepParent", app_bundle, zip])
+            .run(&self.sh)?;
+
+        step("Stapling notarization ticket...");
+        self.sh.run(&["xcrun", "stapler", "staple", app_bundle])?;
+        self.sh.run(&["xcrun", "stapler", "validate", app_bundle])?;
+
+        Ok(())
+    }
+
+    pub fn package_dmg(&self) -> Result<()> {
+        let app_bundle = self.paths.app_bundle.to_str().unwrap();
+        let dmg = self.paths.dmg.to_str().unwrap();
+        let vol_name = format!("{} {}", self.cfg.app_name, self.cfg.version);
+        let timeout_str = self.cfg.notarize_timeout.to_string();
+
+        step("Creating DMG...");
+        self.sh.run(&[
+            "hdiutil",
+            "create",
+            "-volname",
+            &vol_name,
+            "-srcfolder",
+            app_bundle,
+            "-ov",
+            "-format",
+            "UDZO",
+            dmg,
+        ])?;
+
+        self.sh.run(&[
+            "codesign",
+            "--force",
+            "--sign",
+            &self.cfg.sign_identity,
+            "--timestamp",
+            dmg,
+        ])?;
+
+        step("Submitting DMG for notarization...");
+        // Build the real args alongside a redacted display: the API key path,
+        // key id, and issuer are identifiers, but the app-specific password is a
+        // secret and must not reach the terminal or an error message.
+        let mut args: Vec<String> = ["xcrun", "notarytool", "submit", dmg]
+            .map(String::from)
+            .to_vec();
+        let mut display = args.clone();
+        match self.cfg.notary_auth() {
+            Some(NotaryAuth::ApiKey {
+                key_path,
+                key_id,
+                issuer,
+            }) => {
+                let auth = [
+                    "--key".into(),
+                    key_path.to_string_lossy().into_owned(),
+                    "--key-id".into(),
+                    key_id,
+                    "--issuer".into(),
+                    issuer,
+                ];
+                display.extend(auth.clone());
+                args.extend(auth);
+            },
+            Some(NotaryAuth::AppleId {
+                apple_id,
+                password,
+                team_id,
+            }) => {
+                args.extend([
+                    "--apple-id".into(),
+                    apple_id.clone(),
+                    "--team-id".into(),
+                    team_id.clone(),
+                    "--password".into(),
+                    password,
+                ]);
+                display.extend([
+                    "--apple-id".into(),
+                    apple_id,
+                    "--team-id".into(),
+                    team_id,
+                    "--password".into(),
+                    "<redacted>".into(),
+                ]);
+            },
+            None => {
+                if self.dry_run() {
+                    cprintln!("<red>Error: No notarization credentials configured.</red>");
+                    let auth = [
+                        "--key".into(),
+                        "MISSING!".into(),
+                        "--key-id".into(),
+                        "MISSING!".into(),
+                        "--issuer".into(),
+                        "MISSING!".into(),
+                    ];
+                    display.extend(auth.clone());
+                    args.extend(auth);
+                } else {
+                    // preflight_credentials should guarantee a complete set before `run`.
+                    bail!("No notarization credentials configured");
+                }
+            },
+        }
+        let tail = ["--wait".into(), "--timeout".into(), timeout_str];
+        display.extend(tail.clone());
+        args.extend(tail);
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.sh.run_redacted(&arg_refs, &display.join(" "))?;
+
+        step("Stapling DMG...");
+        self.sh.run(&["xcrun", "stapler", "staple", dmg])?;
+
+        Ok(())
+    }
+}

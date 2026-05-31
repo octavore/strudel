@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -39,6 +40,12 @@ pub struct BuildSection {
     pub archs: Option<Vec<String>>,
     /// Swift executable target name. Defaults to the app name.
     pub target_name: Option<String>,
+    /// Extra environment variables forwarded to `swift build`.
+    pub build_env: Option<HashMap<String, String>>,
+    /// Dynamic libraries to embed in `Contents/Frameworks` and sign.
+    pub embed_libs: Option<Vec<PathBuf>>,
+    /// Provisioning profile to embed as `Contents/embedded.provisionprofile`.
+    pub provisioning_profile: Option<PathBuf>,
 }
 
 /// `[signing]` — non-secret signing identifiers. Each may also come from the
@@ -78,6 +85,12 @@ pub struct ResolvedConfig {
     pub target_name: String,
     pub sign_identity: String,
     pub notarize_timeout: u64,
+    /// Extra environment variables forwarded to `swift build`.
+    pub build_env: HashMap<String, String>,
+    /// Dynamic libraries resolved and ready to embed in `Contents/Frameworks`.
+    pub embed_libs: Vec<PathBuf>,
+    /// Provisioning profile to embed in the bundle, if configured.
+    pub provisioning_profile: Option<PathBuf>,
 
     // Notarization identifiers (from strudel.toml or the environment).
     pub team_id: String,
@@ -221,6 +234,26 @@ pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> ResolvedConfig {
         apple_certificate: std::env::var("APPLE_CERTIFICATE").unwrap_or_default(),
         apple_certificate_password: std::env::var("APPLE_CERTIFICATE_PASSWORD").unwrap_or_default(),
         notarize_timeout: notarize.timeout.unwrap_or(600),
+        build_env: build.build_env.unwrap_or_default(),
+        embed_libs: build
+            .embed_libs
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| {
+                if p.is_absolute() {
+                    p
+                } else {
+                    config_dir.join(&p)
+                }
+            })
+            .collect(),
+        provisioning_profile: build.provisioning_profile.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                config_dir.join(&p)
+            }
+        }),
         app_name: app.name,
         bundle_id: app.bundle_id,
         version: app.version,
@@ -442,6 +475,9 @@ mod tests {
             target_name: "A".into(),
             sign_identity: String::new(),
             notarize_timeout: 600,
+            build_env: HashMap::new(),
+            embed_libs: Vec::new(),
+            provisioning_profile: None,
             team_id: String::new(),
             apple_id: String::new(),
             apple_api_issuer: String::new(),

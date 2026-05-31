@@ -9,6 +9,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use color_print::ceprintln;
+
+use crate::builder::Builder;
 
 #[derive(Parser)]
 #[command(
@@ -25,6 +28,34 @@ struct Cli {
     command: Cmd,
 }
 
+impl Cli {
+    fn execute() -> Result<()> {
+        let cli = Self::parse();
+        match cli.command {
+            Cmd::Init { output_dir } => {
+                let dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
+                init::run_init(&dir)?;
+            },
+            Cmd::Build { dry_run, open } => {
+                let cfg = config::load_config(&cli.config)?;
+                Builder::new(cfg, dry_run, open).build()?;
+            },
+            Cmd::Sign { dry_run, open } => {
+                let cfg = config::load_config(&cli.config)?;
+                Builder::new(cfg, dry_run, open).sign_app()?;
+            },
+            Cmd::Release { dry_run, open } => {
+                let cfg = config::load_config(&cli.config)?;
+                Builder::new(cfg, dry_run, open).release()?;
+            },
+            Cmd::MakeIcns { png, icns } => {
+                icns::make_icns(&png, &icns, false)?;
+            },
+        };
+        Ok(())
+    }
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Build the app bundle only (no signing/notarization)
@@ -32,6 +63,9 @@ enum Cmd {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,
+        /// Open the app bundle after a successful build
+        #[arg(long)]
+        open: bool,
     },
     /// Build and sign the app bundle (no notarization or DMG); for local dev.
     /// Signs ad-hoc when no signing identity is configured.
@@ -39,12 +73,18 @@ enum Cmd {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,
+        /// Open the app bundle after a successful build
+        #[arg(long)]
+        open: bool,
     },
     /// Full release: build, sign, notarize, and package DMG
     Release {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,
+        /// Open the app bundle after a successful build
+        #[arg(long)]
+        open: bool,
     },
     /// Scaffold a strudel.toml in the given directory
     Init {
@@ -60,30 +100,11 @@ enum Cmd {
     },
 }
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
+fn main() -> ! {
+    let exit_code = Cli::execute().map(|_| 0).unwrap_or_else(|e| {
+        ceprintln!("<red>Error: {e:#}</red>");
+        1
+    });
 
-    match cli.command {
-        Cmd::Init { output_dir } => {
-            let dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
-            init::run_init(&dir)?;
-        },
-        Cmd::Build { dry_run } => {
-            let cfg = config::load_config(&cli.config)?;
-            builder::Builder::new(cfg, dry_run).build()?;
-        },
-        Cmd::Sign { dry_run } => {
-            let cfg = config::load_config(&cli.config)?;
-            builder::Builder::new(cfg, dry_run).sign_app()?;
-        },
-        Cmd::Release { dry_run } => {
-            let cfg = config::load_config(&cli.config)?;
-            builder::Builder::new(cfg, dry_run).release()?;
-        },
-        Cmd::MakeIcns { png, icns } => {
-            icns::make_icns(&png, &icns, false)?;
-        },
-    }
-
-    Ok(())
+    std::process::exit(exit_code);
 }

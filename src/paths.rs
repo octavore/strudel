@@ -13,17 +13,19 @@ pub struct Paths {
 
 impl Paths {
     pub fn new(cfg: &ResolvedConfig) -> Self {
-        let app_bundle = cfg.build_dir.join(format!("{}.app", cfg.app_name));
+        let ResolvedConfig {
+            build_dir,
+            app_name,
+            version,
+            ..
+        } = cfg;
+        let app_bundle = build_dir.join(format!("{app_name}.app"));
         Paths {
-            dmg: cfg
-                .build_dir
-                .join(format!("{}-{}.dmg", cfg.app_name, cfg.version)),
-            zip: cfg
-                .build_dir
-                .join(format!("{}-{}.zip", cfg.app_name, cfg.version)),
+            dmg: build_dir.join(format!("{app_name}-{version}.dmg")),
+            zip: build_dir.join(format!("{app_name}-{version}.zip")),
             info_plist: app_bundle.join("Contents/Info.plist"),
-            entitlements_plist: cfg.build_dir.join("entitlements.plist"),
-            build_dir: cfg.build_dir.clone(),
+            entitlements_plist: build_dir.join("Entitlements.plist"),
+            build_dir: build_dir.clone(),
             app_bundle,
         }
     }
