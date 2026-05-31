@@ -9,6 +9,7 @@
 mod fs;
 mod keychain;
 mod steps;
+mod validators;
 
 use anyhow::Result;
 use color_print::{cformat, cprintln};

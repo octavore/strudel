@@ -3,10 +3,7 @@
 //! notarizing, and packaging the DMG.
 
 use std::fs;
-use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
@@ -302,60 +299,32 @@ impl Builder {
         // identity (and notarization) is required to distribute — see `release`.
         let adhoc = self.cfg.sign_identity.is_empty();
 
-        // Some entitlements only work when the signature is backed by a
-        // provisioning profile. Ad-hoc signatures carry no profile, so the system
-        // (launchd) refuses to spawn the process with a cryptic "Launchd job
-        // spawn failed" error. This helps the user to debug
-        if adhoc {
-            let profile_only: &[&str] = &[
-                "com.apple.developer.team-identifier",
-                "keychain-access-groups",
-            ];
-            let bad_keys: Vec<&str> = profile_only
-                .iter()
-                .copied()
-                .filter(|k| ent_value.get(k).is_some())
-                .chain(
-                    ent_value
-                        .as_object()
-                        .into_iter()
-                        .flat_map(|m| m.keys())
-                        .filter(|k| k.starts_with("com.apple.developer."))
-                        .map(|k| k.as_str()),
-                )
-                .collect();
-            if !bad_keys.is_empty() {
-                cprintln!("<yellow>warning:</yellow> Ad-hoc signing cannot be used with entitlements that
-                    require a provisioning profile. The following keys in {ent_json} require a real provisioning profile and signing identity:");
-                println!("  {}", bad_keys.join("\n  "));
-                println!();
-                println!(
-                    "The app may fail to launch. Set APPLE_SIGNING_IDENTITY env var or signing identity in strudel.toml to your Apple Development or Developer ID certificate, and ensure the corresponding provisioning profile includes these entitlements.",
-                );
-            }
-        }
-        let identity = if adhoc {
-            step("Signing app bundle (ad-hoc — no signing identity configured)...");
-            "-"
+        // Create the base codesign command. The hardened runtime and a trusted
+        // timestamp both require a real Developer ID certificate; skip them for
+        // ad-hoc signatures.
+        //
+        // This is necessary to prevent crashes when the app attempts to load embedded
+        // frameworks that do not share the same Team ID.
+        let (identity, msg) = if adhoc {
+            ("-", " (ad-hoc — no signing identity configured)...")
         } else {
-            step("Signing app bundle...");
-            self.cfg.sign_identity.as_str()
+            (self.cfg.sign_identity.as_str(), "")
         };
+
+        let mut codesign_cmd = ShellCommand::new("codesign").args(&["--force", "--sign", identity]);
+        if !adhoc {
+            codesign_cmd = codesign_cmd.args(&["--options", "runtime", "--timestamp"]);
+        }
 
         // Sign each embedded dylib individually before signing the bundle.
         // codesign --verify --deep --strict and notarization both require nested
         // Mach-O files to carry valid signatures.
         if !self.cfg.embed_libs.is_empty() {
-            step("Signing embedded libraries...");
+            step(&format!("Signing embedded libraries...{msg}"));
             let frameworks_dir = self.paths.app_bundle.join("Contents/Frameworks");
             for lib_path in &self.cfg.embed_libs {
                 if let Some(file_name) = lib_path.file_name() {
-                    let mut lib_codesign_cmd =
-                        ShellCommand::new("codesign").args(&["--force", "--sign", identity]);
-                    if !adhoc {
-                        lib_codesign_cmd =
-                            lib_codesign_cmd.args(&["--options", "runtime", "--timestamp"]);
-                    }
+                    let mut lib_codesign_cmd = codesign_cmd.clone();
                     let dylib = frameworks_dir.join(file_name);
                     let dylib_str = dylib.to_str().unwrap();
                     lib_codesign_cmd = lib_codesign_cmd.arg(dylib_str);
@@ -364,22 +333,18 @@ impl Builder {
             }
         }
 
-        let mut codesign_cmd = ShellCommand::new("codesign").args(&[
-            "--force",
-            "--entitlements",
-            ent_plist,
-            "--sign",
-            identity,
-        ]);
+        // Run bundle codesign with entitlements
+        step(&format!("Signing app bundle...{msg}"));
 
-        // The hardened runtime and a trusted timestamp both require a real
-        // Developer ID certificate; skip them for ad-hoc signatures.
-        //
-        // This is necessary to prevent crashes when the app attempts to load embedded
-        // frameworks that do not share the same Team ID.
-        if !adhoc {
-            codesign_cmd = codesign_cmd.args(&["--options", "runtime", "--timestamp"]);
+        // Some entitlements only work when the signature is backed by a
+        // provisioning profile. Ad-hoc signatures carry no profile, so the system
+        // (launchd) refuses to spawn the process with a cryptic "Launchd job
+        // spawn failed" error. This helps the user to debug
+        if adhoc {
+            self.validate_entitlements_for_adhoc(&ent_value, ent_json);
         }
+
+        codesign_cmd = codesign_cmd.arg_group(&["--entitlements", ent_plist]);
         self.sh.run(codesign_cmd.arg(app_bundle))?;
 
         step("Verifying signature...");
@@ -398,81 +363,6 @@ impl Builder {
             .run(&["spctl", "--assess", "-vv", "--type", "exec", app_bundle])
             .inspect_err(|e| cprintln!("<yellow>warning:</yellow> spctl assessment failed: {e}"));
 
-        Ok(())
-    }
-
-    /// Decode a provisioning profile with `security cms` and warn about
-    /// expiry, team ID mismatches, and bundle ID mismatches.
-    fn validate_provisioning_profile(&self, profile_path: &Path) -> Result<()> {
-        step("Validating provisioning profile...");
-        let profile_str = profile_path.to_str().unwrap();
-
-        // 1. Decode the CMS envelope in memory and parse with the `plist` crate.
-        // Capture raw bytes via Command so binary plist data is never corrupted
-        // by a UTF-8 String conversion.
-        let output = Command::new("security")
-            .args(["cms", "-D", "-i", profile_str])
-            .output()
-            .context("Failed to run `security cms`")?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to decode provisioning profile: {stderr}");
-        }
-        let profile = plist::Value::from_reader(Cursor::new(output.stdout))
-            .context("Failed to parse provisioning profile")?;
-        let dict = profile
-            .as_dictionary()
-            .context("Provisioning profile is not a dictionary")?;
-
-        // 2. Check and warn if the profile is expired.
-        if let Some(exp) = dict.get("ExpirationDate").and_then(plist::Value::as_date)
-            && SystemTime::from(exp) < SystemTime::now()
-        {
-            cprintln!(
-                "<yellow>warning:</yellow> Provisioning profile expired on {:?}",
-                SystemTime::from(exp)
-            );
-        }
-
-        // 3. Check and warn if the config team_id is not in the provisioning profile's
-        //    TeamIdentifier array.
-        if !self.cfg.team_id.is_empty() {
-            let profile_teams: Vec<&str> = dict
-                .get("TeamIdentifier")
-                .and_then(plist::Value::as_array)
-                .map(|a| a.iter().filter_map(plist::Value::as_string).collect())
-                .unwrap_or_default();
-            if !profile_teams.is_empty() && !profile_teams.contains(&self.cfg.team_id.as_str()) {
-                cprintln!(
-                    "<yellow>warning:</yellow> Provisioning profile team {profile_teams:?} does not \
-                     match configured team_id \"{}\".",
-                    self.cfg.team_id
-                );
-            }
-        }
-
-        // 4. Check and warn if the config bundle ID does not match the provisioning
-        //    profile's application-identifier entitlement (which is required for the
-        //    profile to apply to the app). app_id is "TEAMID.com.example.app" or e.g.
-        //    "TEAMID.com.example.*" (wildcard). todo: correctly handle wildcard app_id
-        if let Some(app_id) = dict
-            .get("Entitlements")
-            .and_then(plist::Value::as_dictionary)
-            .and_then(|e| e.get("application-identifier"))
-            .and_then(plist::Value::as_string)
-        {
-            let matches = app_id.ends_with(&format!(".{}", self.cfg.bundle_id))
-                || app_id == self.cfg.bundle_id.as_str();
-            if !matches {
-                cprintln!(
-                    "<yellow>warning:</yellow> Provisioning profile app identifier \
-                     \"{app_id}\" does not match bundle ID \"{}\".",
-                    self.cfg.bundle_id
-                );
-            }
-        }
-
-        cprintln!("<green>✔ Provisioning profile validated</green>");
         Ok(())
     }
 
