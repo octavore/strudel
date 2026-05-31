@@ -47,3 +47,22 @@ pub fn make_icns(png_path: &Path, icns_path: &Path, dry_run: bool) -> Result<()>
     let _ = fs::remove_dir_all(&iconset_dir);
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn missing_source_png_errors_before_any_work() {
+        // Guard the user against `sips`/`iconutil` producing a cryptic error;
+        // we should fail fast with a clear message that names the missing file.
+        let missing = PathBuf::from("/definitely/does/not/exist.png");
+        let dest = std::env::temp_dir().join("strudel-icns-test.icns");
+        let err = make_icns(&missing, &dest, true).expect_err("must error on missing PNG");
+        let msg = err.to_string();
+        assert!(msg.contains("Source PNG not found"), "got: {msg}");
+        assert!(msg.contains("exist.png"), "msg should name the path: {msg}");
+    }
+}

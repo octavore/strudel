@@ -239,3 +239,92 @@ impl Drop for TempKeychain<'_> {
         let _ = self.sh.run(&["security", "delete-keychain", &self.path]);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::config::ResolvedConfig;
+
+    fn empty_cfg() -> ResolvedConfig {
+        ResolvedConfig {
+            app_name: "A".into(),
+            bundle_id: "b".into(),
+            version: "1".into(),
+            build_number: "1".into(),
+            source_dir: PathBuf::from("/x"),
+            build_dir: PathBuf::from("/x"),
+            info_json_path: None,
+            entitlements_json_path: PathBuf::from("/x/e.json"),
+            icon_path: None,
+            archs: vec!["arm64".into()],
+            target_name: "A".into(),
+            sign_identity: String::new(),
+            notarize_timeout: 600,
+            build_env: HashMap::new(),
+            embed_libs: Vec::new(),
+            provisioning_profile: None,
+            team_id: String::new(),
+            apple_id: String::new(),
+            apple_api_issuer: String::new(),
+            apple_api_key: String::new(),
+            apple_api_key_path: None,
+            apple_password: String::new(),
+            apple_certificate: String::new(),
+            apple_certificate_password: String::new(),
+        }
+    }
+
+    fn builder(cfg: ResolvedConfig) -> Builder {
+        Builder::new(cfg, true, false)
+    }
+
+    #[test]
+    fn problems_reports_missing_identity_and_notary() {
+        let b = builder(empty_cfg());
+        let problems = b.credential_problems();
+        assert_eq!(problems.len(), 2);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("APPLE_SIGNING_IDENTITY"))
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("notarization credentials"))
+        );
+    }
+
+    #[test]
+    fn problems_empty_when_api_key_set() {
+        let mut cfg = empty_cfg();
+        cfg.sign_identity = "Developer ID Application: X (TEAM)".into();
+        cfg.apple_api_key_path = Some(PathBuf::from("/k.p8"));
+        cfg.apple_api_key = "KID".into();
+        cfg.apple_api_issuer = "ISS".into();
+        assert!(builder(cfg).credential_problems().is_empty());
+    }
+
+    #[test]
+    fn problems_empty_when_apple_id_complete() {
+        let mut cfg = empty_cfg();
+        cfg.sign_identity = "Developer ID Application: X (TEAM)".into();
+        cfg.apple_id = "me@example.com".into();
+        cfg.apple_password = "pw".into();
+        cfg.team_id = "TEAM".into();
+        assert!(builder(cfg).credential_problems().is_empty());
+    }
+
+    #[test]
+    fn preflight_warns_but_passes_in_dry_run() {
+        // Dry-run must not bail: a missing-credential dry-run is the user
+        // explicitly checking what `release` would do — they shouldn't have to
+        // populate every secret just to preview the pipeline.
+        let b = builder(empty_cfg());
+        b.preflight_credentials()
+            .expect("dry-run preflight must succeed even without credentials");
+    }
+}

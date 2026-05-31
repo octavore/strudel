@@ -119,3 +119,46 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::config::{BuildConfig, resolve_config};
+
+    #[test]
+    fn generated_toml_parses_into_build_config() {
+        // The scaffolded file must be valid input to the config loader —
+        // otherwise `strudel init` produces a file `strudel build` rejects.
+        let t = generate_toml("MyApp", "com.example.myapp", "1.2.3", "42");
+        let cfg: BuildConfig = toml::from_str(&t).expect("scaffolded TOML must parse");
+        assert_eq!(cfg.app.name, "MyApp");
+        assert_eq!(cfg.app.bundle_id, "com.example.myapp");
+        assert_eq!(cfg.app.version, "1.2.3");
+        assert_eq!(cfg.app.build_number, "42");
+    }
+
+    #[test]
+    fn generated_toml_resolves_with_defaults() {
+        // After parsing it must also resolve cleanly — i.e. every key the
+        // template emits round-trips through resolve_config (no missing
+        // required derived fields, no path resolution panics).
+        let t = generate_toml("MyApp", "com.example.myapp", "1.0", "1");
+        let cfg: BuildConfig = toml::from_str(&t).unwrap();
+        let r = resolve_config(cfg, Path::new("/cfg"));
+        assert_eq!(r.app_name, "MyApp");
+        assert_eq!(r.target_name, "MyApp"); // default = app.name
+        assert_eq!(r.notarize_timeout, 600); // default
+    }
+
+    #[test]
+    fn run_init_refuses_to_overwrite() {
+        let dir = std::env::temp_dir().join(format!("strudel-init-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("strudel.toml"), "existing").unwrap();
+        let err = run_init(&dir).expect_err("must refuse to overwrite");
+        assert!(err.to_string().contains("already exists"), "got: {err}",);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

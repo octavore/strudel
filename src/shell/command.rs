@@ -142,3 +142,94 @@ impl From<ShellArg> for Vec<String> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Display` is used as the user-facing log line for every command, so a
+    /// regression in its output is a UX regression. Strip ANSI so tests don't
+    /// depend on terminal detection.
+    fn rendered(cmd: &ShellCommand) -> String {
+        let s = format!("{cmd}");
+        strip_ansi(&s)
+    }
+
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                // Skip CSI sequence: ESC [ ... letter
+                if chars.next() == Some('[') {
+                    for c in chars.by_ref() {
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn display_renders_program_and_args() {
+        let cmd = ShellCommand::new("codesign").args(&["--force", "--sign", "-"]);
+        assert_eq!(rendered(&cmd), "codesign --force --sign -");
+    }
+
+    #[test]
+    fn display_renders_env_prefix() {
+        let cmd = ShellCommand::new("swift").arg("build").envs(
+            &[("PKG_CONFIG_PATH".to_string(), "/opt/lib".to_string())]
+                .into_iter()
+                .collect(),
+        );
+        let s = rendered(&cmd);
+        assert!(
+            s.starts_with("PKG_CONFIG_PATH=/opt/lib swift build"),
+            "got: {s}",
+        );
+    }
+
+    #[test]
+    fn display_renders_arg_group_inline() {
+        // Argument groups render as a single space-joined unit (visually
+        // underlined in a real terminal; structurally still all of them).
+        let cmd = ShellCommand::new("swift").args(&["build"]).arg_group(&[
+            "-Xlinker",
+            "-rpath",
+            "-Xlinker",
+            "@executable_path/../Frameworks",
+        ]);
+        let s = rendered(&cmd);
+        assert_eq!(
+            s,
+            "swift build -Xlinker -rpath -Xlinker @executable_path/../Frameworks"
+        );
+    }
+
+    #[test]
+    fn command_expands_arg_groups_into_separate_argv_entries() {
+        // Visual grouping in Display must not bleed into the actual process
+        // arguments — argv must still be split per element.
+        let cmd = ShellCommand::new("echo")
+            .arg("a")
+            .arg_group(&["b", "c"])
+            .arg("d");
+        let process_cmd = cmd.command();
+        let args: Vec<&std::ffi::OsStr> = process_cmd.get_args().collect();
+        let args: Vec<&str> = args.iter().map(|a| a.to_str().unwrap()).collect();
+        assert_eq!(args, vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn from_slice_uses_first_element_as_program() {
+        let cmd: ShellCommand = (&["plutil", "-convert", "xml1"][..]).into();
+        assert_eq!(cmd.program, "plutil");
+        assert_eq!(rendered(&cmd), "plutil -convert xml1");
+    }
+}
