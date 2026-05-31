@@ -49,7 +49,8 @@ pub struct BuildSection {
 }
 
 /// `[signing]` — non-secret signing identifiers. Each may also come from the
-/// matching env var (`SIGN_IDENTITY`, `TEAM_ID`); the config value wins.
+/// matching env var (`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`); the config
+/// value wins.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct SigningSection {
@@ -213,8 +214,8 @@ pub fn resolve_config(cfg: BuildConfig, config_dir: &Path) -> ResolvedConfig {
             vec![arch.to_string()]
         }),
         // Identifiers: strudel.toml value wins, else the matching env var.
-        sign_identity: env_or(signing.identity, "SIGN_IDENTITY"),
-        team_id: env_or(signing.team_id, "TEAM_ID"),
+        sign_identity: env_or(signing.identity, "APPLE_SIGNING_IDENTITY"),
+        team_id: env_or(signing.team_id, "APPLE_TEAM_ID"),
         apple_id: env_or(notarize.apple_id, "APPLE_ID"),
         apple_api_issuer: env_or(notarize.api_issuer, "APPLE_API_ISSUER"),
         apple_api_key: env_or(notarize.api_key, "APPLE_API_KEY"),
@@ -451,7 +452,7 @@ mod tests {
     #[test]
     fn config_value_wins_over_environment() {
         // A value present in the file is used verbatim, independent of any
-        // ambient SIGN_IDENTITY in the environment (config takes precedence).
+        // ambient APPLE_SIGNING_IDENTITY in the environment (config takes precedence).
         let cfg = parse(FULL).unwrap();
         let r = resolve_config(cfg, Path::new("/cfg"));
         assert_eq!(r.sign_identity, "Developer ID Application: Me (TEAM123456)");

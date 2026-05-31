@@ -330,7 +330,7 @@ impl Builder {
                 println!("  {}", bad_keys.join("\n  "));
                 println!();
                 println!(
-                    "The app may fail to launch. Set SIGN_IDENTITY env var or signing identity in strudel.toml to your Apple Development or Developer ID certificate, and ensure the corresponding provisioning profile includes these entitlements.",
+                    "The app may fail to launch. Set APPLE_SIGNING_IDENTITY env var or signing identity in strudel.toml to your Apple Development or Developer ID certificate, and ensure the corresponding provisioning profile includes these entitlements.",
                 );
             }
         }

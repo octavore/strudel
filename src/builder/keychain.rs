@@ -18,14 +18,14 @@ impl Builder {
     pub(super) fn credential_problems(&self) -> Vec<String> {
         let mut problems = Vec::new();
         if self.cfg.sign_identity.is_empty() {
-            problems.push("SIGN_IDENTITY (signing identity) is not set".to_string());
+            problems.push("APPLE_SIGNING_IDENTITY (signing identity) is not set".to_string());
         }
         if self.cfg.notary_auth().is_none() {
             problems.push(
                 indoc! {r#"
                     no complete notarization credentials. One of the following must be provided:
                         1. App Store Connect API key (APPLE_API_KEY_PATH, APPLE_API_KEY, APPLE_API_ISSUER)
-                        2. Apple ID (APPLE_ID, APPLE_PASSWORD, TEAM_ID)
+                        2. Apple ID (APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID)
                     "#
                 }
                 .to_string(),

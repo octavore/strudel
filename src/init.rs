@@ -36,7 +36,7 @@ fn generate_toml(app_name: &str, bundle_id: &str, version: &str, build_number: &
         # Signing & notarization (required for `release`). Identifiers may go here or in the
         # environment; secrets are read from the environment ONLY.
         #
-        # Identifiers (here or env): SIGN_IDENTITY, TEAM_ID, APPLE_ID,
+        # Identifiers (here or env): APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID, APPLE_ID,
         #   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_PATH
         # Secrets (env only): APPLE_PASSWORD, APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD
         #
@@ -75,7 +75,7 @@ fn generate_toml(app_name: &str, bundle_id: &str, version: &str, build_number: &
         # [build_env]
         # PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 
-        # Signing identifiers — or set via SIGN_IDENTITY / TEAM_ID.
+        # Signing identifiers — or set via APPLE_SIGNING_IDENTITY / APPLE_TEAM_ID.
         [signing]
         # identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         # team_id  = "XXXXXXXXXX"
