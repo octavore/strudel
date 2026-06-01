@@ -108,7 +108,15 @@ pub enum ExtensionKindConfig {
         /// template convention.
         principal_class: Option<String>,
     },
-    // Future: AppExtension (generic NSExtension), ContentBlocker, …
+    AppExtension {
+        /// `NSExtensionPointIdentifier` — identifies the extension point this
+        /// extension targets (e.g. `"com.apple.share-services"` for a Share
+        /// Extension, `"com.apple.FinderSync"` for a Finder Sync Extension).
+        extension_point_identifier: String,
+        /// `NSExtensionPrincipalClass`. Optional — some extension points require
+        /// it, others do not.
+        principal_class: Option<String>,
+    },
 }
 
 /// The kind of app extension after resolution. A flat discriminator used by
@@ -116,6 +124,7 @@ pub enum ExtensionKindConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtensionKind {
     SafariWebExtension,
+    AppExtension,
 }
 
 /// `[notarize]` — non-secret notarization identifiers (env vars `APPLE_ID`,
@@ -182,8 +191,12 @@ pub struct ResolvedExtension {
     /// Required for [`ExtensionKind::SafariWebExtension`]; the directory whose
     /// contents become the extension's `Resources/`.
     pub resources_dir: Option<PathBuf>,
-    /// Resolved `NSExtensionPrincipalClass` for Safari Web Extensions.
+    /// Resolved `NSExtensionPrincipalClass`. Used by both
+    /// [`ExtensionKind::SafariWebExtension`] and [`ExtensionKind::AppExtension`].
     pub principal_class: Option<String>,
+    /// `NSExtensionPointIdentifier`. Required for [`ExtensionKind::AppExtension`];
+    /// always `None` for other kinds (the identifier is hardcoded per-kind).
+    pub extension_point_identifier: Option<String>,
 }
 
 /// How `notarytool` authenticates with Apple's notary service. The App Store
@@ -281,7 +294,7 @@ fn resolve_extension(ext: ExtensionSection, config_dir: &Path) -> Result<Resolve
 
     let info_json_path = info_json_path.map(resolve);
 
-    let (kind, resources_dir, principal_class) = match kind {
+    let (kind, resources_dir, principal_class, extension_point_identifier) = match kind {
         ExtensionKindConfig::SafariWebExtension {
             resources_dir,
             principal_class,
@@ -292,8 +305,18 @@ fn resolve_extension(ext: ExtensionSection, config_dir: &Path) -> Result<Resolve
                 ExtensionKind::SafariWebExtension,
                 Some(resolve(resources_dir)),
                 Some(principal_class),
+                None,
             )
         },
+        ExtensionKindConfig::AppExtension {
+            extension_point_identifier,
+            principal_class,
+        } => (
+            ExtensionKind::AppExtension,
+            None,
+            principal_class,
+            Some(extension_point_identifier),
+        ),
     };
 
     Ok(ResolvedExtension {
@@ -305,6 +328,7 @@ fn resolve_extension(ext: ExtensionSection, config_dir: &Path) -> Result<Resolve
         entitlements_json_path,
         resources_dir,
         principal_class,
+        extension_point_identifier,
     })
 }
 
@@ -635,6 +659,7 @@ mod tests {
         }
     }
 
+
     #[test]
     fn notary_auth_prefers_complete_api_key() {
         let mut r = resolved();
@@ -814,5 +839,87 @@ mod tests {
         "#,
         );
         assert!(err.is_err(), "unknown extension kind should be rejected");
+    }
+
+    const WITH_APP_EXTENSION: &str = r#"
+        [app]
+        name = "MyApp"
+        bundle_id = "com.example.myapp"
+        version = "1.0.0"
+        build_number = "1"
+
+        [[extensions]]
+        kind = "app_extension"
+        target_name = "MyShareExtension"
+        bundle_id = "com.example.myapp.Share"
+        extension_point_identifier = "com.apple.share-services"
+        entitlements_json_path = "share/entitlements.json"
+    "#;
+
+    #[test]
+    fn parses_and_resolves_app_extension() {
+        let cfg = parse(WITH_APP_EXTENSION).unwrap();
+        let r = resolve_config(cfg, Path::new("/cfg")).unwrap();
+        assert_eq!(r.extensions.len(), 1);
+        let ext = &r.extensions[0];
+        assert_eq!(ext.kind, ExtensionKind::AppExtension);
+        assert_eq!(ext.target_name, "MyShareExtension");
+        assert_eq!(ext.name, "MyShareExtension");
+        assert_eq!(ext.bundle_id, "com.example.myapp.Share");
+        assert_eq!(
+            ext.extension_point_identifier.as_deref(),
+            Some("com.apple.share-services")
+        );
+        assert!(ext.principal_class.is_none());
+        assert!(ext.resources_dir.is_none());
+        assert_eq!(
+            ext.entitlements_json_path,
+            PathBuf::from("/cfg/share/entitlements.json")
+        );
+    }
+
+    #[test]
+    fn app_extension_accepts_optional_principal_class() {
+        let cfg = parse(
+            r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+            [[extensions]]
+            kind = "app_extension"
+            target_name = "Ext"
+            bundle_id = "y.Ext"
+            extension_point_identifier = "com.apple.FinderSync"
+            principal_class = "Ext.FinderSyncController"
+            entitlements_json_path = "e.json"
+        "#,
+        )
+        .unwrap();
+        let r = resolve_config(cfg, Path::new("/cfg")).unwrap();
+        let ext = &r.extensions[0];
+        assert_eq!(ext.principal_class.as_deref(), Some("Ext.FinderSyncController"));
+    }
+
+    #[test]
+    fn app_extension_requires_extension_point_identifier() {
+        let err = parse(
+            r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+            [[extensions]]
+            kind = "app_extension"
+            target_name = "Ext"
+            bundle_id = "y.Ext"
+            entitlements_json_path = "e.json"
+        "#,
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("extension_point_identifier"), "got: {msg}");
     }
 }

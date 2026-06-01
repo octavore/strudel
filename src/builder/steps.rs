@@ -358,6 +358,15 @@ impl Builder {
                     }),
                 );
             },
+            ExtensionKind::AppExtension => {
+                let ident = ext.extension_point_identifier.as_deref().unwrap_or("");
+                let mut ns_ext = serde_json::Map::new();
+                ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
+                if let Some(class) = ext.principal_class.as_deref() {
+                    ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
+                }
+                obj.insert("NSExtension".into(), Value::Object(ns_ext));
+            },
         }
 
         let json_bytes = serde_json::to_vec_pretty(&info)?;

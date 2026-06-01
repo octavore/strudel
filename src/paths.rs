@@ -146,6 +146,7 @@ mod tests {
             entitlements_json_path: PathBuf::from("/ext/e.json"),
             resources_dir: Some(PathBuf::from("/ext/dist")),
             principal_class: Some("MyAppExtension.SafariWebExtensionHandler".into()),
+            extension_point_identifier: None,
         });
         let p = Paths::new(&c);
         assert_eq!(p.extensions.len(), 1);
