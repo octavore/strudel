@@ -40,7 +40,7 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
     let app_name = prompt("App name", Some("MyApp"))?;
     let default_id = format!("com.example.{}", app_name.to_lowercase());
     let bundle_id = prompt("Bundle ID", Some(&default_id))?;
-    let version = prompt("Version", Some("1.0.0"))?;
+    let version = prompt("Version", Some("0.1.0"))?;
     let build_number = prompt("Build number", Some("1"))?;
 
     let content = generate_initial_toml(&app_name, &bundle_id, &version, &build_number);
