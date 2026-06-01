@@ -1,0 +1,64 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::LazyLock;
+
+use crate::config::ResolvedConfig;
+use crate::config::user::BuildConfig;
+
+pub const FULL: &str = indoc::indoc! {r#"
+  [app]
+  name = "MyApp"
+  bundle_id = "com.example.myapp"
+  version = "1.2.3"
+  build_number = "42"
+
+  [build]
+  source_dir = "src"
+  build_dir = "out"
+  entitlements_json_path = "ent.json"
+  archs = ["arm64", "x86_64"]
+  target_name = "MyAppBin"
+
+  [signing]
+  identity = "Developer ID Application: Me (TEAM123456)"
+  team_id = "TEAM123456"
+
+  [notarize]
+  apple_id = "me@example.com"
+  api_issuer = "issuer-uuid"
+  api_key = "KEYID123"
+  api_key_path = "AuthKey.p8"
+  timeout = 1200
+"#};
+
+pub const RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
+    app_name: "A".into(),
+    bundle_id: "b".into(),
+    version: "1".into(),
+    build_number: "1".into(),
+    source_dir: PathBuf::from("/x"),
+    build_dir: PathBuf::from("/x"),
+    info_json_path: None,
+    entitlements_json_path: PathBuf::from("/x/e.json"),
+    icon_path: None,
+    archs: vec!["arm64".into()],
+    target_name: "A".into(),
+    sign_identity: String::new(),
+    notarize_timeout: 600,
+    build_env: HashMap::new(),
+    embed_libs: Vec::new(),
+    provisioning_profile: None,
+    extensions: Vec::new(),
+    team_id: String::new(),
+    apple_id: String::new(),
+    apple_api_issuer: String::new(),
+    apple_api_key: String::new(),
+    apple_api_key_path: None,
+    apple_password: String::new(),
+    apple_certificate: String::new(),
+    apple_certificate_password: String::new(),
+});
+
+pub fn parse_build_config(s: &str) -> Result<BuildConfig, toml::de::Error> {
+    toml::from_str(s)
+}
