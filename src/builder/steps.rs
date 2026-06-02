@@ -431,6 +431,10 @@ impl Builder {
             (self.cfg.sign_identity.as_str(), "")
         };
 
+        if !adhoc && self.validate_sign_identity()? {
+            self.validate_entitlements_for_adhoc(&ent_value);
+        }
+
         let mut codesign_cmd = ShellCommand::new("codesign").args(&["--force", "--sign", identity]);
         if !adhoc {
             codesign_cmd = codesign_cmd.args(&["--options", "runtime", "--timestamp"]);
@@ -471,7 +475,7 @@ impl Builder {
         // (launchd) refuses to spawn the process with a cryptic "Launchd job
         // spawn failed" error. This helps the user to debug
         if adhoc {
-            self.validate_entitlements_for_adhoc(&ent_value, &ent_value.to_string());
+            self.validate_entitlements_for_adhoc(&ent_value);
         }
 
         codesign_cmd = codesign_cmd.arg_group(&["--entitlements", ent_plist_path]);
@@ -540,7 +544,7 @@ impl Builder {
 
         step(&format!("Signing extension `{}`...{msg}", ext.name));
         if adhoc {
-            self.validate_entitlements_for_adhoc(&ent_value, ent_json_str);
+            self.validate_entitlements_for_adhoc(&ent_value);
         }
         let appex_cmd = base_cmd
             .clone()

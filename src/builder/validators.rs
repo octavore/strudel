@@ -10,6 +10,44 @@ use serde_json::Value;
 use super::{Builder, step};
 
 impl Builder {
+    /// Check that the configured signing identity exists in the keychain by
+    /// running `security find-identity -v -p codesigning` and looking for
+    /// the identity name in the output. Skipped in dry-run.
+    /// Returns `true` if the identity is self-signed (present without `-v`).
+    pub(crate) fn validate_sign_identity(&self) -> Result<bool> {
+        if self.dry_run() {
+            return Ok(false);
+        }
+        step("Validating signing identity...");
+        let identity = &self.cfg.sign_identity;
+
+        let identity_in = |args: &[&str]| -> Result<bool> {
+            let out = Command::new("security")
+                .args(args)
+                .output()
+                .context("Failed to run `security find-identity`")?;
+            Ok(String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .any(|line| line.contains(&format!("\"{identity}\""))))
+        };
+
+        if identity_in(&["find-identity", "-v", "-p", "codesigning"])? {
+            cprintln!("<green>✔</green> Signing identity found");
+            Ok(false)
+        } else if identity_in(&["find-identity", "-p", "codesigning"])? {
+            cprintln!(
+                "<yellow>warning:</yellow> Signing identity \"{identity}\" is self-signed \
+                 and will not be trusted by other machines."
+            );
+            Ok(true)
+        } else {
+            bail!(
+                "Signing identity \"{identity}\" was not found in the keychain.\n\
+                 Run `security find-identity -v -p codesigning` to see available identities."
+            );
+        }
+    }
+
     /// Decode a provisioning profile with `security cms` and warn about
     /// expiry, team ID mismatches, and bundle ID mismatches.
     pub(crate) fn validate_provisioning_profile(&self, profile_path: &Path) -> Result<()> {
@@ -85,11 +123,8 @@ impl Builder {
         Ok(())
     }
 
-    pub(crate) fn validate_entitlements_for_adhoc(&self, ent_value: &Value, ent_json: &str) {
-        let profile_only: &[&str] = &[
-            "com.apple.developer.team-identifier",
-            "keychain-access-groups",
-        ];
+    pub(crate) fn validate_entitlements_for_adhoc(&self, ent_value: &Value) {
+        let profile_only: &[&str] = &["keychain-access-groups"];
         let bad_keys: Vec<&str> = profile_only
             .iter()
             .copied()
@@ -105,8 +140,9 @@ impl Builder {
             .collect();
         if !bad_keys.is_empty() {
             println!();
-            cprintln!("<yellow>==> Warning:</yellow> Ad-hoc signing cannot be used with entitlements that
-                    require a provisioning profile. The following keys in {ent_json} require a real provisioning profile and signing identity:");
+            cprintln!(
+                "<yellow>warning:</yellow> Ad-hoc/self-signed certificates cannot be used with entitlements that require a provisioning profile. The following entitlement keys require a real signing identity:"
+            );
             println!("  {}", bad_keys.join("\n  "));
             println!();
             println!(
