@@ -53,19 +53,24 @@ impl BuildConfig {
                 if p.is_absolute() {
                     p
                 } else {
-                    config_dir.join(&p)
+                    // default is always ignored here.
+                    resolve_path(config_dir, Some(p), "info.json")
                 }
             }),
-            entitlements_json_path: resolve_path(
-                config_dir,
-                build.entitlements_json_path,
-                "entitlements.json",
-            ),
+            entitlements_json_path: build.entitlements_json_path.map(|p| {
+                if p.is_absolute() {
+                    p
+                } else {
+                    // default is always ignored here.
+                    resolve_path(config_dir, Some(p), "entitlements.json")
+                }
+            }),
             icon_path: build.icon_path.map(|p| {
                 if p.is_absolute() {
                     p
                 } else {
-                    config_dir.join(&p)
+                    // default is always ignored here.
+                    resolve_path(config_dir, Some(p), "icon.png")
                 }
             }),
             archs: build.archs.unwrap_or_else(|| {
@@ -373,7 +378,10 @@ mod tests {
         assert_eq!(r.source_dir, PathBuf::from("/cfg/src"));
         assert_eq!(r.build_dir, PathBuf::from("/cfg/src/out"));
         // Input paths anchor on the config dir regardless of source_dir.
-        assert_eq!(r.entitlements_json_path, PathBuf::from("/cfg/ent.json"));
+        assert_eq!(
+            r.entitlements_json_path,
+            Some(PathBuf::from("/cfg/ent.json"))
+        );
         assert_eq!(r.apple_api_key_path, Some(PathBuf::from("/cfg/AuthKey.p8")));
     }
 
@@ -390,7 +398,10 @@ mod tests {
         "#})
         .unwrap();
         let r = cfg.resolve(Path::new("/cfg")).unwrap();
-        assert_eq!(r.entitlements_json_path, PathBuf::from("/abs/ent.json"));
+        assert_eq!(
+            r.entitlements_json_path,
+            Some(PathBuf::from("/abs/ent.json"))
+        );
     }
 
     #[test]
@@ -405,10 +416,7 @@ mod tests {
         .unwrap();
         let r = cfg.resolve(Path::new("/cfg")).unwrap();
         assert_eq!(r.build_dir, PathBuf::from("/cfg/.build/dist"));
-        assert_eq!(
-            r.entitlements_json_path,
-            PathBuf::from("/cfg/entitlements.json")
-        );
+        assert_eq!(r.entitlements_json_path, None);
         assert_eq!(r.target_name, "Defaulted"); // defaults to app.name
         assert_eq!(r.notarize_timeout, 600);
         assert_eq!(r.archs.len(), 1); // host arch

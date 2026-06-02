@@ -390,16 +390,25 @@ impl Builder {
 
     pub fn sign(&self) -> Result<()> {
         let app_bundle = self.paths.app_bundle.to_str().unwrap();
-        let ent_plist = self.paths.entitlements_plist.to_str().unwrap();
-        let ent_json_path = &self.cfg.entitlements_json_path;
-        let ent_json = ent_json_path.to_str().unwrap();
+        let ent_plist_path = self.paths.entitlements_plist.to_str().unwrap();
 
-        let ent_raw = fs::read_to_string(ent_json_path)
-            .with_context(|| format!("Failed to read entitlements JSON at {ent_json}"))?;
-        let ent_value: Value = serde_json::from_str(&ent_raw)
-            .with_context(|| format!("Entitlements file is not valid JSON: {ent_json}"))?;
-        self.sh
-            .run(&["plutil", "-convert", "xml1", ent_json, "-o", ent_plist])?;
+        let ent_value: Value = match self.cfg.entitlements_json_path {
+            Some(ref path) => {
+                let ent_raw = fs::read_to_string(path).with_context(|| {
+                    format!("Failed to read entitlements JSON at {}", path.display())
+                })?;
+                serde_json::from_str(&ent_raw).with_context(|| {
+                    format!("Entitlements file is not valid JSON: {}", path.display())
+                })?
+            },
+            None => Value::Object(Default::default()),
+        };
+
+        let ent_bytes = serde_json::to_vec_pretty(&ent_value)?;
+        self.sh.run_stdin(
+            &["plutil", "-convert", "xml1", "-o", ent_plist_path, "-"],
+            &ent_bytes,
+        )?;
 
         if let Some(profile_path) = &self.cfg.provisioning_profile {
             self.validate_provisioning_profile(profile_path)?;
@@ -462,10 +471,10 @@ impl Builder {
         // (launchd) refuses to spawn the process with a cryptic "Launchd job
         // spawn failed" error. This helps the user to debug
         if adhoc {
-            self.validate_entitlements_for_adhoc(&ent_value, ent_json);
+            self.validate_entitlements_for_adhoc(&ent_value, &ent_value.to_string());
         }
 
-        codesign_cmd = codesign_cmd.arg_group(&["--entitlements", ent_plist]);
+        codesign_cmd = codesign_cmd.arg_group(&["--entitlements", ent_plist_path]);
         self.sh.run(codesign_cmd.arg(app_bundle))?;
 
         step("Verifying signature...");

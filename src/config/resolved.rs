@@ -13,7 +13,7 @@ pub struct ResolvedConfig {
     pub source_dir: PathBuf,
     pub build_dir: PathBuf,
     pub info_json_path: Option<PathBuf>,
-    pub entitlements_json_path: PathBuf,
+    pub entitlements_json_path: Option<PathBuf>,
     pub icon_path: Option<PathBuf>,
     pub archs: Vec<String>,
     pub target_name: String,
