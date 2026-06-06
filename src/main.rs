@@ -1,5 +1,6 @@
 mod builder;
 mod config;
+mod help;
 mod icns;
 mod init;
 mod paths;
@@ -17,7 +18,8 @@ use crate::builder::Builder;
 #[command(
     name = "strudel",
     about = "Build, sign, notarize, and package macOS Swift apps",
-    version
+    version,
+    disable_help_subcommand = true
 )]
 struct Cli {
     /// Path to strudel.toml config file
@@ -32,6 +34,9 @@ impl Cli {
     fn execute() -> Result<()> {
         let cli = Self::parse();
         match cli.command {
+            Cmd::Help { topic } => {
+                help::run(topic.as_deref());
+            },
             Cmd::Init { output_dir } => {
                 let dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
                 init::run_init(&dir)?;
@@ -111,6 +116,12 @@ enum Cmd {
         png: PathBuf,
         /// Destination .icns path
         icns: PathBuf,
+    },
+    /// Show documentation for a topic (config, signing, notarize, entitlements,
+    /// extensions, dylibs, universal, ci). Run with no argument to list topics.
+    Help {
+        /// Topic to show docs for
+        topic: Option<String>,
     },
 }
 
