@@ -40,12 +40,17 @@ impl Builder {
     /// directory, which contains the host binary and any extension binaries.
     /// Use [`Self::find_binary_in`] to locate a specific target's binary.
     pub fn build_binary(&self) -> Result<PathBuf> {
-        step("Building release binary...");
+        let (config_flag, config_name) = if self.debug {
+            ("debug", "debug")
+        } else {
+            ("release", "release")
+        };
+        step(&format!("Building {config_name} binary..."));
 
         // Build base args shared between both swift invocations
         let source = self.cfg.source_dir.to_str().unwrap();
         let mut build_cmd = ShellCommand::new("swift")
-            .args(&["build", "-c", "release", "--package-path", source])
+            .args(&["build", "-c", config_flag, "--package-path", source])
             .envs(&self.cfg.build_env);
 
         // add archs from cfg
@@ -75,7 +80,7 @@ impl Builder {
         let bin_dir = bin_dir.trim();
         let bin_dir = if bin_dir.is_empty() {
             // dry-run: fall back to expected location
-            self.cfg.source_dir.join(".build/release")
+            self.cfg.source_dir.join(format!(".build/{config_name}"))
         } else {
             PathBuf::from(bin_dir)
         };

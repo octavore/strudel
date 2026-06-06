@@ -36,17 +36,25 @@ impl Cli {
                 let dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
                 init::run_init(&dir)?;
             },
-            Cmd::Build { dry_run, open } => {
+            Cmd::Build {
+                dry_run,
+                open,
+                debug,
+            } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open).build()?;
+                Builder::new(cfg, dry_run, open, debug).build()?;
             },
-            Cmd::Sign { dry_run, open } => {
+            Cmd::Sign {
+                dry_run,
+                open,
+                debug,
+            } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open).sign_app()?;
+                Builder::new(cfg, dry_run, open, debug).sign_app()?;
             },
             Cmd::Release { dry_run, open } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open).release()?;
+                Builder::new(cfg, dry_run, open, false).release()?;
             },
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
@@ -66,6 +74,9 @@ enum Cmd {
         /// Open the app bundle after a successful build
         #[arg(long)]
         open: bool,
+        /// Build with the debug configuration instead of release
+        #[arg(long)]
+        debug: bool,
     },
     /// Build and sign the app bundle (no notarization or DMG); for local dev.
     /// Signs ad-hoc when no signing identity is configured.
@@ -76,6 +87,9 @@ enum Cmd {
         /// Open the app bundle after a successful build
         #[arg(long)]
         open: bool,
+        /// Build with the debug configuration instead of release
+        #[arg(long)]
+        debug: bool,
     },
     /// Full release: build, sign, notarize, and package DMG
     Release {

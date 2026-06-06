@@ -26,6 +26,7 @@ pub struct Builder {
     paths: Paths,
     sh: Shell,
     open: bool,
+    debug: bool,
 }
 
 /// Print a green progress header for a build step.
@@ -34,12 +35,13 @@ fn step(msg: &str) {
 }
 
 impl Builder {
-    pub fn new(cfg: ResolvedConfig, dry_run: bool, open: bool) -> Self {
+    pub fn new(cfg: ResolvedConfig, dry_run: bool, open: bool, debug: bool) -> Self {
         Builder {
             paths: Paths::new(&cfg),
             sh: Shell::new(dry_run),
             cfg,
             open,
+            debug,
         }
     }
 
