@@ -65,6 +65,22 @@ impl Cli {
                 let cfg = config::load_config(&cli.config)?;
                 Builder::new(cfg, dry_run, open, false, resume).release()?;
             },
+            Cmd::Sim {
+                dry_run,
+                debug,
+                simulator,
+            } => {
+                let cfg = config::load_config(&cli.config)?;
+                Builder::new(cfg, dry_run, false, debug, None).sim(simulator.as_deref())?;
+            },
+            Cmd::Device {
+                dry_run,
+                debug,
+                device,
+            } => {
+                let cfg = config::load_config(&cli.config)?;
+                Builder::new(cfg, dry_run, false, debug, None).device(device.as_deref())?;
+            },
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
             },
@@ -117,6 +133,31 @@ enum Cmd {
     Init {
         /// Directory to create strudel.toml in (defaults to current directory)
         output_dir: Option<PathBuf>,
+    },
+    /// Build for the iOS Simulator and launch in Simulator.app
+    Sim {
+        /// Print commands without executing them
+        #[arg(long)]
+        dry_run: bool,
+        /// Build with the Debug configuration instead of Release
+        #[arg(long)]
+        debug: bool,
+        /// Override the simulator name (default from [ios] config or "iPhone
+        /// 16")
+        #[arg(long)]
+        simulator: Option<String>,
+    },
+    /// Build for a connected iOS device, then install and launch
+    Device {
+        /// Print commands without executing them
+        #[arg(long)]
+        dry_run: bool,
+        /// Build with the Debug configuration instead of Release
+        #[arg(long)]
+        debug: bool,
+        /// Device name or UDID (default from [ios] config or auto-detected)
+        #[arg(long)]
+        device: Option<String>,
     },
     /// Convert a PNG to .icns using sips + iconutil
     MakeIcns {

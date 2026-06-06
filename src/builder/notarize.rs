@@ -151,25 +151,6 @@ impl Builder {
         self.sh
             .run(&["ditto", "-c", "-k", "--keepParent", app_bundle_str, zip_str])?;
 
-        // Rebuild the DMG from the now-stapled .app. The original DMG was
-        // created before notarization, so the .app inside it has no ticket.
-        // Without this, users see "cannot be checked for malicious software"
-        // when Gatekeeper's online fallback fails on the extracted .app.
-        step("Rebuilding DMG with stapled app bundle...");
-        let vol_name = format!("{} {}", self.cfg.app_name, self.cfg.version);
-        self.sh.run(&[
-            "hdiutil",
-            "create",
-            "-volname",
-            &vol_name,
-            "-srcfolder",
-            app_bundle_str,
-            "-ov",
-            "-format",
-            "UDZO",
-            pending_dmg_str,
-        ])?;
-
         step("Stapling DMG...");
         self.sh
             .run(&["xcrun", "stapler", "staple", pending_dmg_str])?;

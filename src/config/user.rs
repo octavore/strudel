@@ -24,6 +24,8 @@ pub struct BuildConfig {
     /// host bundle. See [`ExtensionSection`].
     #[serde(default, rename = "extensions")]
     pub extensions: Vec<ExtensionSection>,
+    #[serde(default)]
+    pub ios: IosSection,
 }
 
 impl BuildConfig {
@@ -34,11 +36,23 @@ impl BuildConfig {
             signing,
             notarize,
             extensions,
+            ios,
         } = self;
 
         let source_dir = resolve_path(config_dir, build.source_dir, ".");
         let build_dir = resolve_path(&source_dir, build.build_dir, ".build/dist");
         let target_name = build.target_name.unwrap_or_else(|| app.name.clone());
+        let ios_simulator = ios.simulator.unwrap_or_else(|| "iPhone 16".to_string());
+        let ios_device = ios.device;
+        let ios_deployment_target = ios.deployment_target.unwrap_or_else(|| "18.0".to_string());
+        let ios_assets_dir = ios.assets_dir.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                config_dir.join(p)
+            }
+        });
+        let ios_app_icon_name = ios.app_icon_name.unwrap_or_else(|| "AppIcon".to_string());
 
         let extensions = extensions
             .into_iter()
@@ -152,6 +166,11 @@ impl BuildConfig {
             build_dir,
             target_name,
             extensions,
+            ios_simulator,
+            ios_device,
+            ios_deployment_target,
+            ios_assets_dir,
+            ios_app_icon_name,
         })
     }
 }
@@ -210,6 +229,24 @@ pub struct NotarizeSection {
     pub api_key: Option<String>,
     pub api_key_path: Option<PathBuf>,
     pub timeout: Option<u64>,
+}
+
+/// `[ios]` — optional settings for iOS simulator and device workflows.
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IosSection {
+    /// iOS Simulator name for `strudel sim`. Default: `"iPhone 16"`.
+    pub simulator: Option<String>,
+    /// Connected device name or UDID for `strudel device`.
+    /// If unset, strudel auto-detects the first connected device.
+    pub device: Option<String>,
+    /// iOS deployment target (e.g. `"18.0"`). Default: `"18.0"`.
+    pub deployment_target: Option<String>,
+    /// Path to a `.xcassets` directory to compile into the bundle with
+    /// `xcrun actool`. Optional; skipped when unset.
+    pub assets_dir: Option<PathBuf>,
+    /// Name of the app icon set inside `assets_dir`. Default: `"AppIcon"`.
+    pub app_icon_name: Option<String>,
 }
 
 /// App Store Connect API key credentials for `notarytool`.
@@ -288,6 +325,14 @@ pub fn generate_initial_toml(
         # api_key      = "2X9R4HXF34"
         # api_key_path = "AuthKey_2X9R4HXF34.p8"
         # timeout      = 600
+
+        # iOS simulator and device settings for `strudel sim` and `strudel device`.
+        [ios]
+        # simulator         = "iPhone 16"         # simulator name; default shown
+        # device            = "My iPhone"          # name or UDID; auto-detected if unset
+        # deployment_target = "18.0"               # iOS deployment target; default shown
+        # assets_dir        = "Sources/{app_name}/Assets.xcassets"  # xcassets for actool
+        # app_icon_name     = "AppIcon"            # icon set name inside assets_dir
     "#}
 }
 
@@ -437,6 +482,49 @@ mod tests {
         assert_eq!(r.archs.len(), 1); // host arch
         assert!(r.info_json_path.is_none());
         assert!(r.icon_path.is_none());
+    }
+
+    #[test]
+    fn ios_defaults_when_absent() {
+        let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0", "1");
+        let cfg: BuildConfig = toml::from_str(&t).unwrap();
+        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        assert_eq!(r.ios_simulator, "iPhone 16");
+        assert_eq!(r.ios_deployment_target, "18.0");
+        assert_eq!(r.ios_app_icon_name, "AppIcon");
+        assert!(r.ios_device.is_none());
+        assert!(r.ios_assets_dir.is_none());
+    }
+
+    #[test]
+    fn ios_section_overrides() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+
+            [ios]
+            simulator = "iPhone 15 Pro"
+            device = "00000000-0000-0000-0000-000000000000"
+            deployment_target = "17.0"
+            assets_dir = "Sources/Assets.xcassets"
+            app_icon_name = "MyIcon"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        assert_eq!(r.ios_simulator, "iPhone 15 Pro");
+        assert_eq!(r.ios_deployment_target, "17.0");
+        assert_eq!(r.ios_app_icon_name, "MyIcon");
+        assert_eq!(
+            r.ios_device.as_deref(),
+            Some("00000000-0000-0000-0000-000000000000")
+        );
+        assert_eq!(
+            r.ios_assets_dir,
+            Some(PathBuf::from("/cfg/Sources/Assets.xcassets"))
+        );
     }
 
     #[test]

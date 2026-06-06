@@ -7,6 +7,7 @@
 //! - [`keychain`] — signing-credential preflight and certificate import
 
 mod fs;
+mod ios;
 mod keychain;
 mod notarize;
 mod steps;

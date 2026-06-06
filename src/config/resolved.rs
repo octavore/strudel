@@ -34,6 +34,13 @@ pub struct ResolvedConfig {
     /// Individual files to copy into `Contents/Resources/`.
     pub resources: Vec<PathBuf>,
 
+    // iOS simulator and device settings.
+    pub ios_simulator: String,
+    pub ios_device: Option<String>,
+    pub ios_deployment_target: String,
+    pub ios_assets_dir: Option<PathBuf>,
+    pub ios_app_icon_name: String,
+
     // Notarization identifiers (from strudel.toml or the environment).
     pub team_id: String,
     pub apple_api_issuer: String,
