@@ -3,3 +3,10 @@ project_name = "strudel-build"
 [tasks]
 install = "cargo install --path ."
 fmt = ["cargo clippy", "cargo +nightly fmt"]
+check = "cargo +nightly fmt -- --check"
+test = "cargo test --locked"
+lint = "cargo clippy --all-targets --locked -- -D warnings"
+ci = [":check", ":lint", ":test"]
+
+[global_packages]
+rust = "stable"
