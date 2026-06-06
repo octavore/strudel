@@ -27,6 +27,10 @@ pub struct ResolvedConfig {
     pub provisioning_profile: Option<PathBuf>,
     /// App extensions to assemble and sign inside `Contents/PlugIns/`.
     pub extensions: Vec<ResolvedExtension>,
+    /// Directory whose contents are merged into `Contents/Resources/`.
+    pub resources_dir: Option<PathBuf>,
+    /// Individual files to copy into `Contents/Resources/`.
+    pub resources: Vec<PathBuf>,
 
     // Notarization identifiers (from strudel.toml or the environment).
     pub team_id: String,

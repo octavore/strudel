@@ -89,6 +89,8 @@ fn print_config() {
         target_name            = "MyApp"                 # Swift executableTarget; default: app.name
         embed_libs             = ["path/to/libFoo.dylib"] # dylibs → Contents/Frameworks
         provisioning_profile   = "MyApp.provisionprofile" # required for some entitlements
+        resources_dir          = "Resources"               # dir contents → Contents/Resources/
+        resources              = ["Assets/logo.png"]       # individual files → Contents/Resources/
 
         ## [build_env] — optional
 

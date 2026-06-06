@@ -275,6 +275,8 @@ mod tests {
             apple_password: String::new(),
             apple_certificate: String::new(),
             apple_certificate_password: String::new(),
+            resources_dir: None,
+            resources: Vec::new(),
         }
     }
 

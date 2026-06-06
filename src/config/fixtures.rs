@@ -49,6 +49,8 @@ pub const RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
     embed_libs: Vec::new(),
     provisioning_profile: None,
     extensions: Vec::new(),
+    resources_dir: None,
+    resources: Vec::new(),
     team_id: String::new(),
     apple_id: String::new(),
     apple_api_issuer: String::new(),

@@ -212,6 +212,28 @@ impl Builder {
             &json_bytes,
         )?;
 
+        let resources_dir = app_bundle.join("Contents/Resources");
+
+        // Copy user-configured resources_dir contents into Contents/Resources/.
+        if let Some(rdir) = &self.cfg.resources_dir {
+            step("Copying resource directory...");
+            self.copy_tree(rdir, &resources_dir)?;
+        }
+
+        // Copy individual user-configured resource files into Contents/Resources/.
+        if !self.cfg.resources.is_empty() {
+            step("Copying resources...");
+            for resource in &self.cfg.resources {
+                let name = resource.file_name().with_context(|| {
+                    format!(
+                        "Resource path has no filename: {}",
+                        resource.display()
+                    )
+                })?;
+                self.copy_file(resource, &resources_dir.join(name))?;
+            }
+        }
+
         // note: we don't really need PkgInfo, it's a legacy file
         // self.write_file(&app_bundle.join("Contents/PkgInfo"), "APPL????")?;
         Ok(app_bundle.clone())

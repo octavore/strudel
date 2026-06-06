@@ -123,6 +123,25 @@ impl BuildConfig {
                     config_dir.join(&p)
                 }
             }),
+            resources_dir: build.resources_dir.map(|p| {
+                if p.is_absolute() {
+                    p
+                } else {
+                    config_dir.join(&p)
+                }
+            }),
+            resources: build
+                .resources
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| {
+                    if p.is_absolute() {
+                        p
+                    } else {
+                        config_dir.join(&p)
+                    }
+                })
+                .collect(),
             app_name: app.name,
             bundle_id: app.bundle_id,
             version: app.version,
@@ -163,6 +182,10 @@ pub struct BuildSection {
     pub embed_libs: Option<Vec<PathBuf>>,
     /// Provisioning profile to embed as `Contents/embedded.provisionprofile`.
     pub provisioning_profile: Option<PathBuf>,
+    /// Directory whose contents are merged into `Contents/Resources/`.
+    pub resources_dir: Option<PathBuf>,
+    /// Individual files to copy into `Contents/Resources/`.
+    pub resources: Option<Vec<PathBuf>>,
 }
 
 /// `[signing]` — non-secret signing identifiers. Each may also come from the
@@ -251,6 +274,10 @@ pub fn generate_initial_toml(
         # Build-time flags (-I, -L, -l, rpath, modulemap) belong in Package.swift
         # (cSettings / linkerSettings); static libs need nothing here.
         # embed_libs             = ["path/to/libFoo.dylib"]
+
+        # Resources copied into Contents/Resources/ during bundle assembly.
+        # resources_dir = "Resources"               # directory; contents merged into Contents/Resources/
+        # resources     = ["Assets/logo.png"]       # individual files copied by name
 
         # Provisioning profile embedded as Contents/embedded.provisionprofile.
         # Required for certain entitlements (e.g. push notifications, iCloud).
