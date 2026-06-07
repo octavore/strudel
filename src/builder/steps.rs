@@ -18,21 +18,22 @@ use crate::shell::ShellCommand;
 impl Builder {
     pub fn clean(&self) -> Result<()> {
         step("Cleaning previous build...");
+        let build_dir = &self.paths.build_dir;
+        if build_dir.as_os_str().is_empty() || build_dir == Path::new("/") {
+            bail!("build_dir is empty or root, refusing to clean");
+        }
+
         if self.dry_run {
-            cprintln!(
-                "<dim>[dry-run]</dim> rm -rf {}",
-                self.paths.build_dir.display()
-            );
-            cprintln!(
-                "<dim>[dry-run]</dim> mkdir -p {}",
-                self.paths.build_dir.display()
-            );
+            let build_dir = build_dir.display();
+            cprintln!("<dim>[dry-run]</dim> rm -rf {build_dir}");
+            cprintln!("<dim>[dry-run]</dim> mkdir -p {build_dir}");
             return Ok(());
         }
-        if self.paths.build_dir.exists() {
-            fs::remove_dir_all(&self.paths.build_dir)?;
+
+        if build_dir.exists() {
+            fs::remove_dir_all(build_dir)?;
         }
-        fs::create_dir_all(&self.paths.build_dir)?;
+        fs::create_dir_all(build_dir)?;
         Ok(())
     }
 
@@ -40,12 +41,8 @@ impl Builder {
     /// directory, which contains the host binary and any extension binaries.
     /// Use [`Self::find_binary_in`] to locate a specific target's binary.
     pub fn build_binary(&self) -> Result<PathBuf> {
-        let (config_flag, config_name) = if self.debug {
-            ("debug", "debug")
-        } else {
-            ("release", "release")
-        };
-        step(&format!("Building {config_name} binary..."));
+        let config_flag = if self.debug { "debug" } else { "release" };
+        step(&format!("Building {config_flag} binary..."));
 
         // Build base args shared between both swift invocations
         let source = self.cfg.source_dir.to_str().unwrap();
@@ -80,7 +77,7 @@ impl Builder {
         let bin_dir = bin_dir.trim();
         let bin_dir = if bin_dir.is_empty() {
             // dry-run: fall back to expected location
-            self.cfg.source_dir.join(format!(".build/{config_name}"))
+            self.cfg.source_dir.join(format!(".build/{config_flag}"))
         } else {
             PathBuf::from(bin_dir)
         };
