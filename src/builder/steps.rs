@@ -2,6 +2,7 @@
 //! assembling the `.app` bundle, embedding/signing libraries, signing,
 //! notarizing, and packaging the DMG.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -37,9 +38,10 @@ impl Builder {
         Ok(())
     }
 
-    /// At a high-level, this wraps `swift build`. Returns the swift build bin
-    /// directory, which contains the host binary and any extension binaries.
-    /// Use [`Self::find_binary_in`] to locate a specific target's binary.
+    /// `swift build` wrapper, which also adds rpath if there are embedded
+    /// libraries. Returns the swift build bin directory which contains the host
+    /// binary and any extension binaries. Use [`Self::find_binary_in`] to
+    /// locate a specific target's binary.
     pub fn build_binary(&self) -> Result<PathBuf> {
         let config_flag = if self.debug { "debug" } else { "release" };
         step(&format!("Building {config_flag} binary..."));
@@ -76,7 +78,7 @@ impl Builder {
         let bin_dir = show_bin_cmd.run(&self.sh)?;
         let bin_dir = bin_dir.trim();
         let bin_dir = if bin_dir.is_empty() {
-            // dry-run: fall back to expected location
+            // dry-run: fall back to default swift location
             self.cfg.source_dir.join(format!(".build/{config_flag}"))
         } else {
             PathBuf::from(bin_dir)
@@ -84,7 +86,7 @@ impl Builder {
         Ok(bin_dir)
     }
 
-    /// Locate the binary for `target_name` in the swift build output. In
+    /// Locate the binary for `target_name` in the swift build output dir. In
     /// dry-run, returns the expected path without checking the filesystem.
     /// On a real run with the binary missing, emits a hint listing the
     /// executables that *were* built, so users can fix `target_name`.
@@ -97,13 +99,18 @@ impl Builder {
             return Ok(binary_path);
         }
 
+        // The rest of this function is only for the error message when the binary is
+        // missing on a real run.
+
+        // Collect extension-free filenames (i.e. executables) for the error hint.
         let found: Vec<String> = fs::read_dir(bin_dir)
             .into_iter()
             .flatten()
             .flatten()
-            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-            .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| !n.contains('.'))
+            .filter_map(|e| {
+                let name = e.file_name().into_string().ok()?;
+                (e.file_type().ok()?.is_file() && !name.contains('.')).then_some(name)
+            })
             .collect();
         let hint = if found.is_empty() {
             "No executables were found in the build directory.".to_string()
@@ -131,10 +138,11 @@ impl Builder {
     pub fn assemble_bundle(&self, binary_path: &Path) -> Result<PathBuf> {
         step("Assembling app bundle...");
         let app_bundle = &self.paths.app_bundle;
+        let app_bundle_resources_dir = app_bundle.join("Contents/Resources");
 
         // create structure
         self.create_dir(&app_bundle.join("Contents/MacOS"))?;
-        self.create_dir(&app_bundle.join("Contents/Resources"))?;
+        self.create_dir(&app_bundle_resources_dir)?;
 
         // copy the binary into the bundle
         self.copy_file(
@@ -142,63 +150,26 @@ impl Builder {
             &app_bundle.join("Contents/MacOS").join(&self.cfg.app_name),
         )?;
 
-        // Read info JSON for Info.plist
-        let mut info: Value = match &self.cfg.info_json_path {
-            Some(path) => {
-                let info_str = fs::read_to_string(path).with_context(|| {
-                    format!(
-                        "Failed to read info JSON at {} (set in `info_json_path` in strudel.toml).",
-                        path.display()
-                    )
-                })?;
-                serde_json::from_str(&info_str)
-                    .with_context(|| format!("Failed to parse info JSON at {}", path.display()))?
-            },
-            None => Value::Object(Default::default()),
-        };
-
-        // set/override version and identifier keys
-        let obj = info
-            .as_object_mut()
-            .context("Info JSON must be a JSON object at the top level.")?;
-        obj.insert(
-            "CFBundleExecutable".to_string(),
-            json!(self.cfg.app_name.clone()),
-        );
-        obj.insert(
-            "CFBundleShortVersionString".to_string(),
-            json!(self.cfg.version.clone()),
-        );
-        obj.insert(
-            "CFBundleVersion".to_string(),
-            json!(self.cfg.build_number.clone()),
-        );
-        obj.insert(
-            "CFBundleIdentifier".to_string(),
-            json!(self.cfg.bundle_id.clone()),
-        );
+        // Read info JSON for Info.plist and extract the top-level object for inserting
+        // keys.
+        let mut info_json = self.build_info_json(
+            self.cfg.info_json_path.clone(),
+            HashMap::from([
+                ("CFBundleExecutable".into(), self.cfg.app_name.clone()),
+                ("CFBundleIdentifier".into(), self.cfg.bundle_id.clone()),
+            ]),
+        )?;
 
         // set CFBundleIconFile if bundle icon_path is provided
         // todo: also support CFBundleIconName, the newer format.
         // see https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
         if let Some(icon_path) = &self.cfg.icon_path {
-            self.copy_file(
-                icon_path,
-                &app_bundle.join("Contents/Resources/AppIcon.icns"),
-            )?;
-            obj.insert("CFBundleIconFile".to_string(), json!("AppIcon.icns"));
-        }
-
-        // copy provisioning profile if provided
-        if let Some(profile_path) = &self.cfg.provisioning_profile {
-            self.copy_file(
-                profile_path,
-                &app_bundle.join("Contents/embedded.provisionprofile"),
-            )?;
+            self.copy_file(icon_path, &app_bundle_resources_dir.join("AppIcon.icns"))?;
+            info_json.insert("CFBundleIconFile".to_string(), json!("AppIcon.icns"));
         }
 
         // pipe JSON into plutil to produce Info.plist
-        let json_bytes = serde_json::to_vec_pretty(&info)?;
+        let json_bytes = serde_json::to_vec_pretty(&info_json)?;
         let plist_path = self
             .paths
             .info_plist
@@ -209,12 +180,30 @@ impl Builder {
             &json_bytes,
         )?;
 
-        let resources_dir = app_bundle.join("Contents/Resources");
+        // copy provisioning profile if provided (for non-app-store macos apps)
+        //
+        // from apple: https://developer.apple.com/Documentation/technotes/tn3125-inside-code-signing-provisioning-profiles
+        // In the early days of iOS development it was common to install a provisioning
+        // profile on the device as a whole (in the Settings app). That’s still
+        // possible, but current best practice is to embed the profile within the app
+        // itself:
+        //
+        // - macOS expects to find the profile at
+        //   MyApp.app/Contents/embedded.provisionprofile.
+        // - Other Apple platforms expect to find the profile at
+        //   MyApp.app/embedded.mobileprovision.
+        //
+        if let Some(profile_path) = &self.cfg.provisioning_profile {
+            self.copy_file(
+                profile_path,
+                &app_bundle.join("Contents/embedded.provisionprofile"),
+            )?;
+        }
 
         // Copy user-configured resources_dir contents into Contents/Resources/.
         if let Some(rdir) = &self.cfg.resources_dir {
             step("Copying resource directory...");
-            self.copy_tree(rdir, &resources_dir)?;
+            self.copy_tree(rdir, &app_bundle_resources_dir)?;
         }
 
         // Copy individual user-configured resource files into Contents/Resources/.
@@ -224,12 +213,10 @@ impl Builder {
                 let name = resource.file_name().with_context(|| {
                     format!("Resource path has no filename: {}", resource.display())
                 })?;
-                self.copy_file(resource, &resources_dir.join(name))?;
+                self.copy_file(resource, &app_bundle_resources_dir.join(name))?;
             }
         }
 
-        // note: we don't really need PkgInfo, it's a legacy file
-        // self.write_file(&app_bundle.join("Contents/PkgInfo"), "APPL????")?;
         Ok(app_bundle.clone())
     }
 
@@ -305,10 +292,12 @@ impl Builder {
     }
 
     /// Assemble one app extension `.appex` bundle under the host's
-    /// `Contents/PlugIns/`. Builds the extension `Info.plist` (injecting
-    /// kind-specific `NSExtension` keys), copies the binary, and copies the
-    /// kind-specific resource payload (for Safari Web Extensions, the entire
-    /// webpack output directory).
+    /// `Contents/PlugIns/`:
+    /// 1. Builds the extension `Info.plist` (injecting kind-specific
+    ///    `NSExtension` keys)
+    /// 2. Copies the binary
+    /// 3. Copies the kind-specific resource payload (e.g. for Safari Web
+    ///    Extensions, this might be the entire webpack output directory).
     pub fn assemble_appex(
         &self,
         ext: &ResolvedExtension,
@@ -327,50 +316,25 @@ impl Builder {
         self.create_dir(&paths.resources)?;
         self.copy_file(&binary_path, &paths.binary)?;
 
-        // Start from any user-supplied JSON, then layer required keys on top.
-        let mut info: Value = match &ext.info_json_path {
-            Some(p) => {
-                let s = fs::read_to_string(p).with_context(|| {
-                    format!(
-                        "Failed to read extension info JSON at {} (set in \
-                         `info_json_path` for extension `{}` in strudel.toml).",
-                        p.display(),
-                        ext.name
-                    )
-                })?;
-                serde_json::from_str(&s).with_context(|| {
-                    format!("Failed to parse extension info JSON at {}", p.display())
-                })?
-            },
-            None => Value::Object(Default::default()),
-        };
-        let obj = info.as_object_mut().with_context(|| {
-            format!(
-                "Extension info JSON for `{}` must be a JSON object at the top level.",
-                ext.name
-            )
-        })?;
-        obj.insert("CFBundleName".into(), json!(ext.name.clone()));
-        obj.insert("CFBundleDisplayName".into(), json!(ext.name.clone()));
-        obj.insert("CFBundleExecutable".into(), json!(ext.target_name.clone()));
-        obj.insert("CFBundleIdentifier".into(), json!(ext.bundle_id.clone()));
-        obj.insert(
-            "CFBundleShortVersionString".into(),
-            json!(self.cfg.version.clone()),
-        );
-        obj.insert(
-            "CFBundleVersion".into(),
-            json!(self.cfg.build_number.clone()),
-        );
-        obj.insert("CFBundleInfoDictionaryVersion".into(), json!("6.0"));
-        // App extensions use the XPC bundle package type.
-        obj.insert("CFBundlePackageType".into(), json!("XPC!"));
+        let mut info_json = self.build_info_json(
+            ext.info_json_path.clone(),
+            HashMap::from([
+                ("CFBundleExecutable".into(), ext.target_name.clone()),
+                ("CFBundleIdentifier".into(), ext.bundle_id.clone()),
+                ("CFBundleName".into(), ext.name.clone()),
+                ("CFBundleDisplayName".into(), ext.name.clone()),
+                ("CFBundleInfoDictionaryVersion".into(), "6.0".into()),
+                // App extensions use the XPC bundle package type.
+                ("CFBundlePackageType".into(), "XPC!".into()),
+            ]),
+        )?;
 
         match ext.kind {
             ExtensionKind::SafariWebExtension => {
-                // `NSExtensionPrincipalClass` was filled in during resolve.
+                // `NSExtensionPrincipalClass` was filled in during resolve (todo: clean up, a
+                // little spooky?)
                 let principal = ext.principal_class.as_deref().unwrap_or("");
-                obj.insert(
+                info_json.insert(
                     "NSExtension".into(),
                     json!({
                         "NSExtensionPointIdentifier": "com.apple.Safari.web-extension",
@@ -385,12 +349,17 @@ impl Builder {
                 ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
                 if let Some(class) = ext.principal_class.as_deref() {
                     ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
+                } else {
+                    cprintln!(
+                        "<yellow>warning:</yellow> App Extension `{}` is missing `principal_class`, which may be required depending on the extension point.",
+                        ext.name
+                    );
                 }
-                obj.insert("NSExtension".into(), Value::Object(ns_ext));
+                info_json.insert("NSExtension".into(), Value::Object(ns_ext));
             },
         }
 
-        let json_bytes = serde_json::to_vec_pretty(&info)?;
+        let json_bytes = serde_json::to_vec_pretty(&info_json)?;
         let plist_path = paths
             .info_plist
             .to_str()
@@ -401,7 +370,7 @@ impl Builder {
         )?;
 
         // Copy the kind-specific resource payload. For Safari Web Extensions
-        // this is the entire webpack output (manifest.json, JS, HTML, icons).
+        // this is the extension source code (manifest.json, JS, HTML, icons).
         if let Some(src_resources) = &ext.resources_dir {
             self.copy_tree(src_resources, &paths.resources)?;
         }
@@ -494,7 +463,7 @@ impl Builder {
         // Some entitlements only work when the signature is backed by a
         // provisioning profile. Ad-hoc signatures carry no profile, so the system
         // (launchd) refuses to spawn the process with a cryptic "Launchd job
-        // spawn failed" error. This helps the user to debug
+        // spawn failed" error. This helps the user to debug.
         if adhoc {
             self.validate_entitlements_for_adhoc(&ent_value);
         }
@@ -512,11 +481,11 @@ impl Builder {
             app_bundle,
         ])?;
 
+        // spctl may return non-zero for unnotarized bundles, warn but allow build to
+        // continue. We only run this for release builds to debug notarization issues;
+        // for dev builds the signature often fails, even with a Apple Developer
+        // certificate.
         if spctl {
-            // spctl may return non-zero for unnotarized bundles, warn but allow build to
-            // continue. We only run this for release builds to debug notarization issues;
-            // for dev builds the signature often fails, even with a Apple Developer
-            // certificate.
             let _ = self
                 .sh
                 .run(&["spctl", "--assess", "-vv", "--type", "exec", app_bundle])
@@ -697,6 +666,8 @@ impl Builder {
                 }
             },
         }
+        // note: for initial runs, the wait is going to be several hours probably. we
+        // should handle this correctly.
         let tail = ["--wait".into(), "--timeout".into(), timeout_str];
         display.extend(tail.clone());
         args.extend(tail);
@@ -707,5 +678,36 @@ impl Builder {
         self.sh.run(&["xcrun", "stapler", "staple", dmg])?;
 
         Ok(())
+    }
+
+    fn build_info_json(
+        self: &Self,
+        path: Option<PathBuf>,
+        additional_data: HashMap<String, String>,
+    ) -> Result<serde_json::Map<String, Value>> {
+        let mut info_json = match path {
+            Some(path) => {
+                let path_str = path.display();
+                fs::read_to_string(&path)
+                    .with_context(|| format!("Failed to read {path_str}."))
+                    .and_then(|s| {
+                        serde_json::from_str::<serde_json::Map<String, Value>>(&s)
+                            .with_context(|| format!("Failed to parse {path_str}, must be a map."))
+                    })?
+            },
+            None => serde_json::Map::new(),
+        };
+        for (k, v) in additional_data {
+            info_json.insert(k, json!(v));
+        }
+        info_json.insert(
+            "CFBundleShortVersionString".to_string(),
+            json!(self.cfg.version.clone()),
+        );
+        info_json.insert(
+            "CFBundleVersion".to_string(),
+            json!(self.cfg.build_number.clone()),
+        );
+        Ok(info_json)
     }
 }
