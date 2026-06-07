@@ -15,7 +15,7 @@ impl Builder {
     /// the identity name in the output. Skipped in dry-run.
     /// Returns `true` if the identity is self-signed (present without `-v`).
     pub(crate) fn validate_sign_identity(&self) -> Result<bool> {
-        if self.dry_run() {
+        if self.dry_run {
             return Ok(false);
         }
         step("Validating signing identity...");

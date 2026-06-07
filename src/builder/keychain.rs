@@ -48,7 +48,7 @@ impl Builder {
                     secrets (passwords, certificate) in the environment only. \
                     See the README's \"Signing & notarization\" section.";
 
-        if self.dry_run() {
+        if self.dry_run {
             for p in &problems {
                 cprintln!("<yellow>[warning]</yellow> {p}");
             }
@@ -110,7 +110,7 @@ impl Builder {
         // keychain is deleted on drop.
         let kc_pw = format!("strudel-{pid}");
 
-        if self.dry_run() {
+        if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> security create-keychain -p <<redacted>> {keychain}");
             cprintln!(
                 "<dim>[dry-run]</dim> decode $APPLE_CERTIFICATE ({} b64 chars) -> <<temp>>.p12",

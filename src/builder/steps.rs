@@ -18,7 +18,7 @@ use crate::shell::ShellCommand;
 impl Builder {
     pub fn clean(&self) -> Result<()> {
         step("Cleaning previous build...");
-        if self.dry_run() {
+        if self.dry_run {
             cprintln!(
                 "<dim>[dry-run]</dim> rm -rf {}",
                 self.paths.build_dir.display()
@@ -93,7 +93,7 @@ impl Builder {
     /// executables that *were* built, so users can fix `target_name`.
     pub fn find_binary_in(&self, bin_dir: &Path, target_name: &str) -> Result<PathBuf> {
         let binary_path = bin_dir.join(target_name);
-        if self.dry_run() {
+        if self.dry_run {
             return Ok(binary_path);
         }
         if binary_path.exists() {
@@ -225,10 +225,7 @@ impl Builder {
             step("Copying resources...");
             for resource in &self.cfg.resources {
                 let name = resource.file_name().with_context(|| {
-                    format!(
-                        "Resource path has no filename: {}",
-                        resource.display()
-                    )
+                    format!("Resource path has no filename: {}", resource.display())
                 })?;
                 self.copy_file(resource, &resources_dir.join(name))?;
             }
@@ -268,7 +265,7 @@ impl Builder {
 
             // Find the original install name as seen by the executable.
             let otool_out = self.sh.run(&["otool", "-L", executable_str])?;
-            let orig_install_name = if self.dry_run() {
+            let orig_install_name = if self.dry_run {
                 // In dry-run we can't run otool; use the filename as a stand-in.
                 format!("<otool:{file_name_str}>")
             } else {
@@ -685,7 +682,7 @@ impl Builder {
                 ]);
             },
             None => {
-                if self.dry_run() {
+                if self.dry_run {
                     cprintln!("<red>Error: No notarization credentials configured.</red>");
                     let auth = [
                         "--key".into(),

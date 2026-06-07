@@ -12,7 +12,7 @@ use super::Builder;
 impl Builder {
     /// Create a directory (and parents), logging in dry-run instead of acting.
     pub(super) fn create_dir(&self, path: &Path) -> Result<()> {
-        if self.dry_run() {
+        if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> mkdir -p {}", path.display());
             return Ok(());
         }
@@ -21,7 +21,7 @@ impl Builder {
 
     /// Copy a file, logging source → dest in dry-run instead of acting.
     pub(super) fn copy_file(&self, from: &Path, to: &Path) -> Result<()> {
-        if self.dry_run() {
+        if self.dry_run {
             cprintln!(
                 "<dim>[dry-run]</dim> copy <blue>{}</blue> -> <blue>{}</blue>",
                 from.display(),
@@ -51,7 +51,7 @@ impl Builder {
     /// Write a file's contents, logging dest in dry-run instead of acting.
     #[allow(dead_code)]
     pub(super) fn write_file(&self, path: &Path, contents: &str) -> Result<()> {
-        if self.dry_run() {
+        if self.dry_run {
             cprintln!(
                 "<dim>[dry-run]</dim> write {} ({} bytes)",
                 path.display(),

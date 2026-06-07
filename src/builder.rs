@@ -25,6 +25,7 @@ pub struct Builder {
     cfg: ResolvedConfig,
     paths: Paths,
     sh: Shell,
+    dry_run: bool,
     open: bool,
     debug: bool,
 }
@@ -39,14 +40,11 @@ impl Builder {
         Builder {
             paths: Paths::new(&cfg),
             sh: Shell::new(dry_run),
+            dry_run,
             cfg,
             open,
             debug,
         }
-    }
-
-    fn dry_run(&self) -> bool {
-        self.sh.dry_run
     }
 
     /// Assemble every configured app extension under
@@ -59,7 +57,7 @@ impl Builder {
     }
 
     fn open_app(&self) -> Result<()> {
-        if self.dry_run() {
+        if self.dry_run {
             return Ok(());
         }
         if self.open {
@@ -102,7 +100,7 @@ impl Builder {
         self.sign(false)?;
 
         println!();
-        if self.dry_run() {
+        if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> Dry run complete. Signed app bundle would be at:");
         } else {
             println!("Done! Signed app bundle:");
@@ -139,7 +137,7 @@ impl Builder {
             DMG:        {dmg_path}
             Zip:        {zip_path}
         "#};
-        if self.dry_run() {
+        if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> Dry run complete. Artifacts would be at:");
             println!("{msg}");
             let problems = self.credential_problems();
