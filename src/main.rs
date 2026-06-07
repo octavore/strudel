@@ -41,7 +41,7 @@ impl Cli {
                 let dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
                 init::run_init(&dir)?;
             },
-            Cmd::Build {
+            Cmd::Bundle {
                 dry_run,
                 open,
                 debug,
@@ -49,7 +49,7 @@ impl Cli {
                 let cfg = config::load_config(&cli.config)?;
                 Builder::new(cfg, dry_run, open, debug).build()?;
             },
-            Cmd::Sign {
+            Cmd::Build {
                 dry_run,
                 open,
                 debug,
@@ -72,7 +72,7 @@ impl Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Build the app bundle only (no signing/notarization)
-    Build {
+    Bundle {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,
@@ -85,7 +85,7 @@ enum Cmd {
     },
     /// Build and sign the app bundle (no notarization or DMG); for local dev.
     /// Signs ad-hoc when no signing identity is configured.
-    Sign {
+    Build {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,

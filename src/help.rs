@@ -152,7 +152,7 @@ fn print_signing() {
 
         ## Ad-hoc signing (local dev)
 
-        When no identity is configured, `strudel sign` uses ad-hoc signing (--sign -).
+        When no identity is configured, `strudel build` uses ad-hoc signing (--sign -).
         Ad-hoc signatures let you run the app locally but the app cannot be distributed
         or notarized.
 

@@ -49,8 +49,8 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
 
     println!("\nCreated {}", out_path.display());
     println!("\nNext steps:");
-    println!("  strudel build    # build app bundle");
-    println!("  strudel sign     # build + sign for local dev (ad-hoc if no identity)");
+    println!("  strudel bundle   # build app bundle (unsigned)");
+    println!("  strudel build    # build + sign for local dev (ad-hoc if no identity)");
     println!("  strudel release  # full release (sign, notarize, DMG)");
 
     Ok(())

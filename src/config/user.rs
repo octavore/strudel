@@ -238,8 +238,8 @@ pub fn generate_initial_toml(
         # strudel.toml — strudel build configuration
         #
         # Commands:
-        #   strudel build    — build app bundle only (no signing/notarization)
-        #   strudel sign     — build and sign the app bundle (no notarization/DMG); local dev
+        #   strudel bundle   — build app bundle only (no signing/notarization)
+        #   strudel build    — build and sign the app bundle (no notarization/DMG); local dev
         #   strudel release  — full release: build, sign, notarize, and package DMG
         #
         # Signing & notarization (required for `release`). Identifiers may go here or in the
