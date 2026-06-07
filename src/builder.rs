@@ -99,7 +99,7 @@ impl Builder {
         let app_bundle = self.assemble_bundle(&host_binary)?;
         self.embed_libraries(&app_bundle)?;
         self.assemble_extensions(&bin_dir)?;
-        self.sign()?;
+        self.sign(false)?;
 
         println!();
         if self.dry_run() {
@@ -126,7 +126,7 @@ impl Builder {
         let app_bundle = self.assemble_bundle(&host_binary)?;
         self.embed_libraries(&app_bundle)?;
         self.assemble_extensions(&bin_dir)?;
-        self.sign()?;
+        self.sign(true)?;
         self.notarize()?;
         self.package_dmg()?;
 

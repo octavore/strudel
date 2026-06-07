@@ -415,7 +415,7 @@ impl Builder {
         Ok(())
     }
 
-    pub fn sign(&self) -> Result<()> {
+    pub fn sign(&self, spctl: bool) -> Result<()> {
         let app_bundle = self.paths.app_bundle.to_str().unwrap();
         let ent_plist_path = self.paths.entitlements_plist.to_str().unwrap();
 
@@ -518,11 +518,18 @@ impl Builder {
             app_bundle,
         ])?;
 
-        // spctl may return non-zero for unnotarized bundles, ignore the error
-        let _ = self
-            .sh
-            .run(&["spctl", "--assess", "-vv", "--type", "exec", app_bundle])
-            .inspect_err(|e| cprintln!("<yellow>warning:</yellow> spctl assessment failed: {e}"));
+        if spctl {
+            // spctl may return non-zero for unnotarized bundles, warn but allow build to
+            // continue. We only run this for release builds to debug notarization issues;
+            // for dev builds the signature often fails, even with a Apple Developer
+            // certificate.
+            let _ = self
+                .sh
+                .run(&["spctl", "--assess", "-vv", "--type", "exec", app_bundle])
+                .inspect_err(|e| {
+                    cprintln!("<yellow>warning:</yellow> spctl assessment failed: {e}")
+                });
+        }
 
         Ok(())
     }
