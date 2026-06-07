@@ -51,7 +51,9 @@ impl Shell {
     /// In dry-run, the env is printed for transparency.
     pub fn run<C: Into<ShellCommand>>(&self, shell_cmd: C) -> Result<String> {
         let shell_cmd = shell_cmd.into();
-        shell_cmd.log(self.dry_run);
+        if !self.dry_run || !shell_cmd.hide_dry_run {
+            shell_cmd.log(self.dry_run);
+        }
         if self.dry_run {
             return Ok(String::new());
         }
