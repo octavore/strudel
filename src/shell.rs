@@ -93,6 +93,39 @@ impl Shell {
         Ok(())
     }
 
+    /// Like [`run_redacted`] but returns stdout. Use when the output must be
+    /// parsed (e.g. JSON from `notarytool submit`).
+    pub fn run_redacted_capture(&self, args: &[&str], display: &str) -> Result<String> {
+        if args.is_empty() {
+            bail!("Empty command");
+        }
+        let prefix = if self.dry_run { "[dry-run] " } else { "" };
+        cprintln!("<dim>{prefix}{display}</dim>");
+        if self.dry_run {
+            return Ok(String::new());
+        }
+        let output = Command::new(args[0]).args(&args[1..]).output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let code = exit_code_str(&output.status);
+            let mut msg = format!("{} failed (exit {code}):", args[0]);
+            msg.push_str(&format!("\n  command: {display}"));
+            let stderr = stderr.trim();
+            let stdout = stdout.trim();
+            if !stderr.is_empty() {
+                msg.push_str(&format!("\n--- stderr ---\n{stderr}"));
+            }
+            if !stdout.is_empty() {
+                msg.push_str(&format!("\n--- stdout ---\n{stdout}"));
+            }
+            bail!(msg);
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string())
+    }
+
     /// Run a command with data piped to stdin. Fails on non-zero exit.
     pub fn run_stdin<C: Into<ShellCommand>>(
         &self,

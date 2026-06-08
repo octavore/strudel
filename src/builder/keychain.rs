@@ -281,7 +281,7 @@ mod tests {
     }
 
     fn builder(cfg: ResolvedConfig) -> Builder {
-        Builder::new(cfg, true, false, false)
+        Builder::new(cfg, true, false, false, None)
     }
 
     #[test]

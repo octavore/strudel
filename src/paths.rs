@@ -2,6 +2,12 @@ use std::path::PathBuf;
 
 use crate::config::{ResolvedConfig, ResolvedExtension};
 
+pub struct PendingSubmission {
+    pub dir: PathBuf,
+    pub dmg: PathBuf,
+    pub state: PathBuf,
+}
+
 pub struct Paths {
     pub build_dir: PathBuf,
     pub app_bundle: PathBuf,
@@ -9,6 +15,8 @@ pub struct Paths {
     pub zip: PathBuf,
     pub info_plist: PathBuf,
     pub entitlements_plist: PathBuf,
+    pub strudel_dir: PathBuf,
+    pub strudel_temp_dmg: PathBuf,
     /// One entry per [`ResolvedExtension`], in the same order. Empty when no
     /// extensions are configured.
     pub extensions: Vec<ExtensionPaths>,
@@ -49,24 +57,39 @@ impl Paths {
     pub fn new(cfg: &ResolvedConfig) -> Self {
         let ResolvedConfig {
             build_dir,
+            source_dir,
             app_name,
             version,
             extensions,
             ..
         } = cfg;
         let app_bundle = build_dir.join(format!("{app_name}.app"));
+        let dmg_name = format!("{app_name}-{version}.dmg");
+        let strudel_dir = source_dir.join(".strudel");
         let extension_paths = extensions
             .iter()
             .map(|ext| ExtensionPaths::for_extension(&app_bundle, build_dir, ext))
             .collect();
         Paths {
-            dmg: build_dir.join(format!("{app_name}-{version}.dmg")),
+            strudel_temp_dmg: strudel_dir.join(&dmg_name),
+            dmg: build_dir.join(dmg_name),
             zip: build_dir.join(format!("{app_name}-{version}.zip")),
             info_plist: app_bundle.join("Contents/Info.plist"),
             entitlements_plist: build_dir.join("Entitlements.plist"),
             build_dir: build_dir.clone(),
             app_bundle,
+            strudel_dir,
             extensions: extension_paths,
+        }
+    }
+
+    pub fn pending_submission(&self, uuid: &str) -> PendingSubmission {
+        let dir = self.strudel_dir.join(uuid);
+        let dmg_name = self.dmg.file_name().unwrap();
+        PendingSubmission {
+            dmg: dir.join(dmg_name),
+            state: dir.join("pending-notarization.toml"),
+            dir,
         }
     }
 }
