@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::process::Command;
 
 use color_print::{cformat, cprintln};
+use secrecy::SecretString;
 
 use crate::shell::Shell;
 
@@ -31,15 +33,20 @@ impl ShellCommand {
         self
     }
 
-    pub fn arg(mut self, arg: &str) -> Self {
+    pub fn arg<A>(mut self, arg: A) -> Self
+    where
+        A: Into<ShellArg>,
+    {
         self.args.push(arg.into());
         self
     }
 
-    pub fn args(mut self, args: &[&str]) -> Self {
-        for arg in args {
-            self.args.push((*arg).into());
-        }
+    pub fn args<I>(mut self, args: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<ShellArg>,
+    {
+        self.args.extend(args.into_iter().map(Into::into));
         self
     }
 
@@ -101,6 +108,7 @@ impl Display for ShellCommand {
             .iter()
             .map(|arg| match arg {
                 ShellArg::Literal(s) => s.clone(),
+                ShellArg::Secret(_) => "<redacted>".into(),
                 ShellArg::Group(group) => cformat!("<underline>{}</underline>", group.join(" ")),
             })
             .collect::<Vec<_>>()
@@ -125,6 +133,7 @@ impl<const N: usize> From<&[&str; N]> for ShellCommand {
 #[derive(Clone)]
 pub enum ShellArg {
     Literal(String),
+    Secret(SecretString),
     Group(Vec<String>),
 }
 
@@ -134,10 +143,29 @@ impl From<&str> for ShellArg {
     }
 }
 
+impl From<String> for ShellArg {
+    fn from(val: String) -> Self {
+        ShellArg::Literal(val)
+    }
+}
+
+impl From<PathBuf> for ShellArg {
+    fn from(val: PathBuf) -> Self {
+        ShellArg::Literal(val.to_string_lossy().into_owned())
+    }
+}
+
+impl From<&&str> for ShellArg {
+    fn from(val: &&str) -> Self {
+        ShellArg::Literal(val.to_string())
+    }
+}
+
 impl From<ShellArg> for Vec<String> {
     fn from(val: ShellArg) -> Self {
         match val {
             ShellArg::Literal(s) => vec![s],
+            ShellArg::Secret(_) => vec!["<redacted>".into()],
             ShellArg::Group(group) => group,
         }
     }

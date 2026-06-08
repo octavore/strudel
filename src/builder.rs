@@ -8,6 +8,7 @@
 
 mod fs;
 mod keychain;
+mod notarize;
 mod steps;
 mod validators;
 

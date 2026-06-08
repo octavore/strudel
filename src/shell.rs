@@ -5,7 +5,7 @@ use std::process::{Command, ExitStatus, Output, Stdio};
 use anyhow::{Result, bail};
 use color_print::cprintln;
 
-pub use crate::shell::command::ShellCommand;
+pub use crate::shell::command::{ShellArg, ShellCommand};
 
 /// Build a detailed failure message including exit code, stderr, and stdout.
 /// Many tools (notably `swift build`) write diagnostics to stdout, so reporting
@@ -65,6 +65,8 @@ impl Shell {
             .trim_end()
             .to_string())
     }
+
+    /*
     /// Run a command whose arguments contain a secret (e.g. `security import
     /// -P`). Logs and reports `display` instead of the real args, so
     /// passwords never reach the terminal or an error message. Callers pass
@@ -125,6 +127,8 @@ impl Shell {
             .trim_end()
             .to_string())
     }
+
+     */
 
     /// Run a command with data piped to stdin. Fails on non-zero exit.
     pub fn run_stdin<C: Into<ShellCommand>>(

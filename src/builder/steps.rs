@@ -3,45 +3,20 @@
 //! notarizing, and packaging the DMG.
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::thread::sleep;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{cmp, fs};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use indoc::formatdoc;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{Builder, step};
-use crate::config::{ExtensionKind, NotaryAuth, ResolvedExtension};
-use crate::paths::{ExtensionPaths, PendingSubmission};
+use crate::builder::notarize::NotarizationState;
+use crate::config::{ExtensionKind, ResolvedExtension};
+use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;
-
-#[derive(Serialize, Deserialize)]
-struct NotarizationState {
-    submitted_at: u64,
-    dmg_dest: String,
-}
-
-fn format_elapsed(submitted_at: u64) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let secs = now.saturating_sub(submitted_at);
-    if secs < 60 {
-        format!("{secs}s ago")
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86400 {
-        format!("{}h ago", secs / 3600)
-    } else {
-        format!("{}d ago", secs / 86400)
-    }
-}
 
 impl Builder {
     pub fn clean(&self) -> Result<()> {
@@ -600,8 +575,11 @@ impl Builder {
 
     pub fn package_dmg(&self) -> Result<()> {
         let app_bundle = self.paths.app_bundle.to_str().unwrap();
+
+        // we store the dmg in a temp location to await notarization.
         let temp_dmg = &self.paths.strudel_temp_dmg;
         let temp_dmg_str = temp_dmg.to_str().unwrap();
+
         let vol_name = format!("{} {}", self.cfg.app_name, self.cfg.version);
 
         if !self.dry_run {
@@ -621,6 +599,8 @@ impl Builder {
             "UDZO",
             temp_dmg_str,
         ])?;
+
+        // codesign the dmg
         self.sh.run(&[
             "codesign",
             "--force",
@@ -636,18 +616,11 @@ impl Builder {
              Press Ctrl-C to stop — run `strudel release --resume` to continue later.</dim>"
         );
 
-        let (auth_real, auth_display) = self.notary_auth_args()?;
+        let notarize_cmd = ShellCommand::new("xcrun")
+            .args(&["notarytool", "submit", temp_dmg_str])
+            .args(self.notary_auth_args()?)
+            .args(&["--output-format", "json"]);
 
-        let mut submit_args: Vec<String> = ["xcrun", "notarytool", "submit", temp_dmg_str]
-            .map(String::from)
-            .to_vec();
-        let mut submit_display = submit_args.clone();
-        submit_args.extend(auth_real.clone());
-        submit_display.extend(auth_display);
-        submit_args.extend(["--output-format".into(), "json".into()]);
-        submit_display.extend(["--output-format".into(), "json".into()]);
-
-        let arg_refs: Vec<&str> = submit_args.iter().map(String::as_str).collect();
         let submit_out = self
             .sh
             .run_redacted_capture(&arg_refs, &submit_display.join(" "))?;
@@ -692,222 +665,6 @@ impl Builder {
         }
 
         self.poll_notarization(&uuid, &pending, &PathBuf::from(&state.dmg_dest), &auth_real)
-    }
-
-    fn notary_auth_args(&self) -> Result<(Vec<String>, Vec<String>)> {
-        match self.cfg.notary_auth() {
-            Some(NotaryAuth::ApiKey {
-                key_path,
-                key_id,
-                issuer,
-            }) => {
-                let args = vec![
-                    "--key".into(),
-                    key_path.to_string_lossy().into_owned(),
-                    "--key-id".into(),
-                    key_id,
-                    "--issuer".into(),
-                    issuer,
-                ];
-                Ok((args.clone(), args))
-            },
-            Some(NotaryAuth::AppleId {
-                apple_id,
-                password,
-                team_id,
-            }) => {
-                let real = vec![
-                    "--apple-id".into(),
-                    apple_id.clone(),
-                    "--team-id".into(),
-                    team_id.clone(),
-                    "--password".into(),
-                    password,
-                ];
-                let display = vec![
-                    "--apple-id".into(),
-                    apple_id,
-                    "--team-id".into(),
-                    team_id,
-                    "--password".into(),
-                    "<redacted>".into(),
-                ];
-                Ok((real, display))
-            },
-            None => {
-                if self.dry_run {
-                    cprintln!("<red>Error: No notarization credentials configured.</red>");
-                    let args = vec![
-                        "--key".into(),
-                        "MISSING!".into(),
-                        "--key-id".into(),
-                        "MISSING!".into(),
-                        "--issuer".into(),
-                        "MISSING!".into(),
-                    ];
-                    Ok((args.clone(), args))
-                } else {
-                    bail!("No notarization credentials configured")
-                }
-            },
-        }
-    }
-
-    pub fn poll_notarization(
-        &self,
-        uuid: &str,
-        pending: &PendingSubmission,
-        dmg_dest: &Path,
-        auth_args: &[String],
-    ) -> Result<()> {
-        step("Waiting for notarization...");
-
-        if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> Would poll notarytool info {uuid} until accepted");
-            return self.finalize_notarization(pending, dmg_dest);
-        }
-
-        let started = Instant::now();
-        let timeout = Duration::from_secs(self.cfg.notarize_timeout);
-
-        loop {
-            sleep(Duration::from_secs(30));
-            if started.elapsed() >= timeout {
-                bail!(
-                    "Notarization timed out after {}s.\n\
-                     Submission ID: {uuid}\n\
-                     Run `strudel release --resume` to continue when Apple finishes processing.",
-                    self.cfg.notarize_timeout
-                );
-            }
-
-            let v = self.notarytool_info(uuid, auth_args)?;
-            let status = v["status"].as_str().unwrap_or("unknown");
-            let message = v["message"].as_str().unwrap_or("");
-
-            match status {
-                "Accepted" => {
-                    cprintln!("  <green>Accepted!</green>");
-                    return self.finalize_notarization(pending, dmg_dest);
-                },
-                "In Progress" => {
-                    cprintln!("  <dim>In Progress — {message}</dim>");
-                },
-                "Invalid" | "Rejected" => {
-                    bail!(
-                        "Notarization {status}: {message}\n\
-                         Submission ID: {uuid}\n\
-                         Run `xcrun notarytool log {uuid}` for details."
-                    );
-                },
-                other => {
-                    cprintln!("  <dim>Status: {other} — {message}</dim>");
-                },
-            }
-        }
-    }
-
-    fn finalize_notarization(&self, pending: &PendingSubmission, dmg_dest: &Path) -> Result<()> {
-        let pending_dmg_str = pending.dmg.to_str().unwrap();
-
-        step("Stapling DMG...");
-        self.sh
-            .run(&["xcrun", "stapler", "staple", pending_dmg_str])?;
-
-        step("Moving DMG to output...");
-        if !self.dry_run {
-            if let Some(parent) = dmg_dest.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::rename(&pending.dmg, dmg_dest)?;
-            fs::remove_dir_all(&pending.dir)?;
-        } else {
-            cprintln!(
-                "<dim>[dry-run]</dim> mv {} {}",
-                pending.dmg.display(),
-                dmg_dest.display()
-            );
-            cprintln!("<dim>[dry-run]</dim> rm -rf {}", pending.dir.display());
-        }
-
-        Ok(())
-    }
-
-    fn notarytool_info(&self, uuid: &str, auth_args: &[String]) -> Result<serde_json::Value> {
-        let output = Command::new("xcrun")
-            .args(["notarytool", "info", uuid])
-            .args(auth_args)
-            .args(["--output-format", "json"])
-            .output()?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("notarytool info failed: {}", stderr.trim());
-        }
-        serde_json::from_str(&String::from_utf8_lossy(&output.stdout))
-            .context("Failed to parse notarytool info output")
-    }
-
-    fn find_pending_submissions(&self) -> Result<Vec<(String, NotarizationState)>> {
-        let strudel_dir = &self.paths.strudel_dir;
-        if !strudel_dir.exists() {
-            return Ok(vec![]);
-        }
-        let mut results = vec![];
-        for entry in fs::read_dir(strudel_dir)? {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
-                continue;
-            }
-            let state_path = entry.path().join("pending-notarization.toml");
-            if !state_path.exists() {
-                continue;
-            }
-            let uuid = entry.file_name().to_string_lossy().into_owned();
-            let contents = fs::read_to_string(&state_path)
-                .with_context(|| format!("Failed to read {}", state_path.display()))?;
-            let state: NotarizationState = toml::from_str(&contents)
-                .with_context(|| format!("Failed to parse {}", state_path.display()))?;
-            results.push((uuid, state));
-        }
-        results.sort_by_key(|b| cmp::Reverse(b.1.submitted_at));
-        Ok(results)
-    }
-
-    pub fn resume_notarization(&self, uuid_hint: &str) -> Result<()> {
-        let pending = self.find_pending_submissions()?;
-
-        let (uuid, state) = if uuid_hint.is_empty() {
-            match pending.len() {
-                0 => bail!("No pending notarization found in .strudel/"),
-                1 => pending.into_iter().next().unwrap(),
-                _ => {
-                    cprintln!(
-                        "<red>Multiple pending notarizations found. Specify which to resume:</red>"
-                    );
-                    for (uuid, state) in &pending {
-                        cprintln!(
-                            "  <cyan>{uuid}</cyan> (submitted {})",
-                            format_elapsed(state.submitted_at)
-                        );
-                    }
-                    bail!("Run: strudel release --resume <UUID>");
-                },
-            }
-        } else {
-            pending
-                .into_iter()
-                .find(|(u, _)| u == uuid_hint)
-                .with_context(|| format!("No pending notarization found for UUID: {uuid_hint}"))?
-        };
-
-        let pending = self.paths.pending_submission(&uuid);
-        let dmg_dest = PathBuf::from(&state.dmg_dest);
-        let (auth_real, _) = self.notary_auth_args()?;
-
-        step("Resuming notarization...");
-        cprintln!("  <dim>Submission ID: {uuid}</dim>");
-
-        self.poll_notarization(&uuid, &pending, &dmg_dest, &auth_real)
     }
 
     fn build_info_json(

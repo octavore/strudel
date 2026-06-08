@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use base64::Engine;
 use color_print::cprintln;
 use indoc::indoc;
+use secrecy::SecretString;
 
 use super::{Builder, step};
 use crate::shell::{Shell, ShellCommand};
@@ -78,7 +79,7 @@ impl Builder {
     fn set_user_keychains(&self, keychains: &[String]) -> Result<()> {
         let mut cmd = ShellCommand::new("security").args(&["list-keychains", "-d", "user", "-s"]);
         for keychain in keychains {
-            cmd = cmd.arg(keychain);
+            cmd = cmd.arg(keychain.as_str());
         }
         match self.sh.run(cmd) {
             Ok(_) => Ok(()),
@@ -108,7 +109,7 @@ impl Builder {
             .into_owned();
         // Locks the throwaway keychain; never leaves this process, and the
         // keychain is deleted on drop.
-        let kc_pw = format!("strudel-{pid}");
+        let kc_pw: SecretString = format!("strudel-{pid}").into();
 
         if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> security create-keychain -p <<redacted>> {keychain}");
@@ -145,10 +146,8 @@ impl Builder {
         // Snapshot the search list first so the guard can restore it.
         let original_list = self.user_keychains()?;
 
-        self.sh.run_redacted(
-            &["security", "create-keychain", "-p", &kc_pw, &keychain],
-            &format!("security create-keychain -p <redacted> {keychain}"),
-        )?;
+        self.sh
+            .run(&["security", "create-keychain", "-p", kc_pw, &keychain])?;
         self.sh.run(&[
             "security",
             "set-keychain-settings",
@@ -156,10 +155,8 @@ impl Builder {
             "21600",
             &keychain,
         ])?;
-        self.sh.run_redacted(
-            &["security", "unlock-keychain", "-p", &kc_pw, &keychain],
-            &format!("security unlock-keychain -p <redacted> {keychain}"),
-        )?;
+        self.sh
+            .run(&["security", "unlock-keychain", "-p", &kc_pw, &keychain])?;
         self.sh.run_redacted(
             &[
                 "security",

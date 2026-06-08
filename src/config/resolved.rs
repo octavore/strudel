@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use secrecy::SecretString;
+
 use crate::config::extension::ExtensionKind;
 use crate::config::user::NotaryAuth;
 
@@ -73,11 +75,14 @@ impl ResolvedConfig {
     /// The signing certificate to import, if supplied via the environment, as
     /// `(base64 PKCS#12 data, export password)`. When `None`, the identity is
     /// assumed to be present in an existing keychain (the common local case).
-    pub fn signing_cert(&self) -> Option<(&str, &str)> {
+    pub fn signing_cert(&self) -> Option<(&str, SecretString)> {
         if self.apple_certificate.is_empty() {
             None
         } else {
-            Some((&self.apple_certificate, &self.apple_certificate_password))
+            Some((
+                &self.apple_certificate,
+                self.apple_certificate_password.clone().into(),
+            ))
         }
     }
 }
