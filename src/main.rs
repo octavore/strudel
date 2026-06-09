@@ -47,7 +47,7 @@ impl Cli {
                 debug,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, debug).build()?;
+                Builder::new(cfg, dry_run, open, debug, None).build()?;
             },
             Cmd::Build {
                 dry_run,
@@ -55,11 +55,15 @@ impl Cli {
                 debug,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, debug).sign_app()?;
+                Builder::new(cfg, dry_run, open, debug, None).sign_app()?;
             },
-            Cmd::Release { dry_run, open } => {
+            Cmd::Release {
+                dry_run,
+                open,
+                resume,
+            } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, false).release()?;
+                Builder::new(cfg, dry_run, open, false, resume).release()?;
             },
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
@@ -104,6 +108,10 @@ enum Cmd {
         /// Open the app bundle after a successful build
         #[arg(long)]
         open: bool,
+        /// Resume a pending notarization. Pass a UUID to resume a specific
+        /// submission, or omit to auto-detect the most recent one.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        resume: Option<String>,
     },
     /// Scaffold a strudel.toml in the given directory
     Init {

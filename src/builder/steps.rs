@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
@@ -12,7 +13,8 @@ use indoc::formatdoc;
 use serde_json::{Value, json};
 
 use super::{Builder, step};
-use crate::config::{ExtensionKind, NotaryAuth, ResolvedExtension};
+use crate::builder::notarize::NotarizationState;
+use crate::config::{ExtensionKind, ResolvedExtension};
 use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;
 
@@ -59,7 +61,7 @@ impl Builder {
 
         // embed the Frameworks rpath at link time if we're embedding libraries
         if !self.cfg.embed_libs.is_empty() {
-            build_cmd = build_cmd.arg_group(&[
+            build_cmd = build_cmd.arg_group([
                 "-Xlinker",
                 "-rpath",
                 "-Xlinker",
@@ -468,7 +470,7 @@ impl Builder {
             self.validate_entitlements_for_adhoc(&ent_value);
         }
 
-        codesign_cmd = codesign_cmd.arg_group(&["--entitlements", ent_plist_path]);
+        codesign_cmd = codesign_cmd.arg_group(["--entitlements", ent_plist_path]);
         self.sh.run(codesign_cmd.arg(app_bundle))?;
 
         step("Verifying signature...");
@@ -545,7 +547,7 @@ impl Builder {
         }
         let appex_cmd = base_cmd
             .clone()
-            .arg_group(&["--entitlements", ent_plist_str])
+            .arg_group(["--entitlements", ent_plist_str])
             .arg(appex_str);
         appex_cmd.run(&self.sh)?;
         Ok(())
@@ -573,9 +575,16 @@ impl Builder {
 
     pub fn package_dmg(&self) -> Result<()> {
         let app_bundle = self.paths.app_bundle.to_str().unwrap();
-        let dmg = self.paths.dmg.to_str().unwrap();
+
+        // we store the dmg in a temp location to await notarization.
+        let temp_dmg = &self.paths.strudel_temp_dmg;
+        let temp_dmg_str = temp_dmg.to_str().unwrap();
+
         let vol_name = format!("{} {}", self.cfg.app_name, self.cfg.version);
-        let timeout_str = self.cfg.notarize_timeout.to_string();
+
+        if !self.dry_run {
+            fs::create_dir_all(&self.paths.strudel_dir)?;
+        }
 
         step("Creating DMG...");
         self.sh.run(&[
@@ -588,73 +597,77 @@ impl Builder {
             "-ov",
             "-format",
             "UDZO",
-            dmg,
+            temp_dmg_str,
         ])?;
 
+        // codesign the dmg
         self.sh.run(&[
             "codesign",
             "--force",
             "--sign",
             &self.cfg.sign_identity,
             "--timestamp",
-            dmg,
+            temp_dmg_str,
         ])?;
 
         step("Submitting DMG for notarization...");
-        // Build the real args alongside a redacted display: the API key path,
-        // key id, and issuer are identifiers, but the app-specific password is a
-        // secret and must not reach the terminal or an error message.
-        let mut notary_cmd = ShellCommand::new("xcrun").args(["notarytool", "submit", dmg]);
-        match self.cfg.notary_auth() {
-            Some(NotaryAuth::ApiKey {
-                key_path,
-                key_id,
-                issuer,
-            }) => {
-                notary_cmd = notary_cmd.args([
-                    "--key",
-                    key_path.to_str().unwrap(),
-                    "--key-id",
-                    &key_id,
-                    "--issuer",
-                    &issuer,
-                ]);
-            },
-            Some(NotaryAuth::AppleId {
-                apple_id,
-                password,
-                team_id,
-            }) => {
-                notary_cmd = notary_cmd.args(["--apple-id", &apple_id, "--team-id", &team_id]);
-                notary_cmd = notary_cmd.arg_with_secret("--password", password);
-            },
-            None => {
-                if self.dry_run {
-                    cprintln!("<red>Error: No notarization credentials configured.</red>");
-                    notary_cmd = notary_cmd.args([
-                        "--key", "MISSING!", "--key-id", "MISSING!", "--issuer", "MISSING!",
-                    ]);
-                } else {
-                    // preflight_credentials should guarantee a complete set before `run`.
-                    bail!("No notarization credentials configured");
-                }
-            },
+        cprintln!(
+            "<dim>Note: first-time notarization can take several hours. \
+             Press Ctrl-C to stop — run `strudel release --resume` to continue later.</dim>"
+        );
+
+        let auth_args = self.notary_auth_args()?;
+        let notarize_cmd = ShellCommand::new("xcrun")
+            .args(["notarytool", "submit", temp_dmg_str])
+            .args(auth_args.iter().cloned())
+            .args(["--output-format", "json"]);
+
+        let submit_out = self.sh.run(notarize_cmd)?;
+
+        let uuid = if self.dry_run {
+            "dry-run-uuid-0000".to_string()
+        } else {
+            let v: serde_json::Value = serde_json::from_str(&submit_out)
+                .context("Failed to parse notarytool submit output as JSON")?;
+            v["id"]
+                .as_str()
+                .context("notarytool submit output missing 'id' field")?
+                .to_string()
+        };
+
+        cprintln!("  <dim>Submission ID: {uuid}</dim>");
+
+        let pending = self.paths.pending_submission(&uuid);
+        if !self.dry_run {
+            fs::create_dir_all(&pending.dir)?;
+            fs::rename(temp_dmg, &pending.dmg)?;
+        } else {
+            cprintln!("<dim>[dry-run]</dim> mkdir -p {}", pending.dir.display());
+            cprintln!(
+                "<dim>[dry-run]</dim> mv {} {}",
+                temp_dmg.display(),
+                pending.dmg.display()
+            );
         }
 
-        // note: for initial runs, the wait is going to be several hours probably. we
-        // should handle this correctly.
+        let state = NotarizationState {
+            submitted_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            dmg_dest: self.paths.dmg.display().to_string(),
+        };
+        if !self.dry_run {
+            fs::write(&pending.state, toml::to_string(&state)?)?;
+        } else {
+            cprintln!("<dim>[dry-run]</dim> write {}", pending.state.display());
+        }
 
-        notary_cmd = notary_cmd.args(["--wait", "--timeout", &timeout_str]);
-        self.sh.run(notary_cmd)?;
-
-        step("Stapling DMG...");
-        self.sh.run(&["xcrun", "stapler", "staple", dmg])?;
-
-        Ok(())
+        self.poll_notarization(&uuid, &pending, &PathBuf::from(&state.dmg_dest), &auth_args)
     }
 
     fn build_info_json(
-        self: &Self,
+        &self,
         path: Option<PathBuf>,
         additional_data: HashMap<String, String>,
     ) -> Result<serde_json::Map<String, Value>> {

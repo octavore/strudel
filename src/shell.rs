@@ -5,7 +5,7 @@ use std::process::{ExitStatus, Output, Stdio};
 use anyhow::{Result, bail};
 use color_print::cprintln;
 
-pub use crate::shell::command::ShellCommand;
+pub use crate::shell::command::{ShellArg, ShellCommand};
 
 /// Build a detailed failure message including exit code, stderr, and stdout.
 /// Many tools (notably `swift build`) write diagnostics to stdout, so reporting

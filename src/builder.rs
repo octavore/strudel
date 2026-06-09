@@ -8,6 +8,7 @@
 
 mod fs;
 mod keychain;
+mod notarize;
 mod steps;
 mod validators;
 
@@ -28,6 +29,7 @@ pub struct Builder {
     dry_run: bool,
     open: bool,
     debug: bool,
+    resume: Option<String>,
 }
 
 /// Print a green progress header for a build step.
@@ -36,7 +38,13 @@ fn step(msg: &str) {
 }
 
 impl Builder {
-    pub fn new(cfg: ResolvedConfig, dry_run: bool, open: bool, debug: bool) -> Self {
+    pub fn new(
+        cfg: ResolvedConfig,
+        dry_run: bool,
+        open: bool,
+        debug: bool,
+        resume: Option<String>,
+    ) -> Self {
         Builder {
             paths: Paths::new(&cfg),
             sh: Shell::new(dry_run),
@@ -44,6 +52,7 @@ impl Builder {
             cfg,
             open,
             debug,
+            resume,
         }
     }
 
@@ -83,10 +92,9 @@ impl Builder {
     }
 
     /// Local/dev pipeline: clean → build → assemble → sign, stopping at a
-    /// signed `.app`. No notarization or DMG, and no notary credentials
-    /// required. Uses the configured signing identity if set, otherwise
-    /// signs ad-hoc — enough to test entitlements and the hardened runtime
-    /// without a Developer ID certificate or an Apple account.
+    /// signed `.app`. Uses the configured signing identity if set, otherwise
+    /// signs ad-hoc (can test entitlements and the hardened runtime
+    /// without a Apple Developer account, but can't be notarized).
     pub fn sign_app(&self) -> Result<()> {
         // No-op unless APPLE_CERTIFICATE is set; supports signing with an
         // imported Developer ID identity here too, but ad-hoc needs nothing.
@@ -111,8 +119,13 @@ impl Builder {
     }
 
     /// Full release pipeline: clean → binary → assemble → sign → notarize →
-    /// DMG.
+    /// DMG. With `--resume`, skips the build and resumes a pending
+    /// notarization instead.
     pub fn release(&self) -> Result<()> {
+        if let Some(ref uuid_hint) = self.resume {
+            return self.resume_notarization(uuid_hint);
+        }
+
         self.preflight_credentials()?;
         // Held for the whole build: the imported identity must remain available
         // to both `sign` and the DMG signing in `package_dmg`. Dropped at the
