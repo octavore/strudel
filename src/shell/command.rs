@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::process::Command;
 
 use color_print::{cformat, cprintln};
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::shell::Shell;
 
@@ -31,20 +33,37 @@ impl ShellCommand {
         self
     }
 
-    pub fn arg(mut self, arg: &str) -> Self {
+    pub fn arg<A>(mut self, arg: A) -> Self
+    where
+        A: Into<ShellArg>,
+    {
         self.args.push(arg.into());
         self
     }
 
-    pub fn args(mut self, args: &[&str]) -> Self {
-        for arg in args {
-            self.args.push((*arg).into());
-        }
+    pub fn args<I>(mut self, args: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<ShellArg>,
+    {
+        self.args.extend(args.into_iter().map(Into::into));
         self
     }
 
-    pub fn arg_group(mut self, args: &[&str]) -> Self {
-        let group = args.iter().map(|s| s.to_string()).collect();
+    pub fn arg_with_secret<K>(mut self, key: K, value: SecretString) -> Self
+    where
+        K: ToString,
+    {
+        self.args.push(ShellArg::SecretPair(key.to_string(), value));
+        self
+    }
+
+    pub fn arg_group<A>(mut self, args: A) -> Self
+    where
+        A: IntoIterator,
+        A::Item: ToString,
+    {
+        let group = args.into_iter().map(|s| s.to_string()).collect();
         self.args.push(ShellArg::Group(group));
         self
     }
@@ -101,6 +120,8 @@ impl Display for ShellCommand {
             .iter()
             .map(|arg| match arg {
                 ShellArg::Literal(s) => s.clone(),
+                ShellArg::Secret(_) => "<redacted>".into(),
+                ShellArg::SecretPair(s, _) => cformat!("<underline>{s} <<redacted>></underline>"),
                 ShellArg::Group(group) => cformat!("<underline>{}</underline>", group.join(" ")),
             })
             .collect::<Vec<_>>()
@@ -112,7 +133,7 @@ impl Display for ShellCommand {
 impl From<&[&str]> for ShellCommand {
     fn from(args: &[&str]) -> ShellCommand {
         let cmd = ShellCommand::new(args[0]);
-        cmd.args(&args[1..])
+        cmd.args(args[1..].iter().copied())
     }
 }
 
@@ -125,6 +146,8 @@ impl<const N: usize> From<&[&str; N]> for ShellCommand {
 #[derive(Clone)]
 pub enum ShellArg {
     Literal(String),
+    Secret(SecretString),
+    SecretPair(String, SecretString),
     Group(Vec<String>),
 }
 
@@ -134,10 +157,38 @@ impl From<&str> for ShellArg {
     }
 }
 
+impl From<String> for ShellArg {
+    fn from(val: String) -> Self {
+        ShellArg::Literal(val)
+    }
+}
+
+impl From<&String> for ShellArg {
+    fn from(val: &String) -> Self {
+        ShellArg::Literal(val.clone())
+    }
+}
+
+impl From<PathBuf> for ShellArg {
+    fn from(val: PathBuf) -> Self {
+        ShellArg::Literal(val.to_string_lossy().into_owned())
+    }
+}
+
+impl From<SecretString> for ShellArg {
+    fn from(val: SecretString) -> Self {
+        ShellArg::Secret(val)
+    }
+}
+
 impl From<ShellArg> for Vec<String> {
     fn from(val: ShellArg) -> Self {
         match val {
             ShellArg::Literal(s) => vec![s],
+            ShellArg::Secret(s) => vec![s.expose_secret().to_owned()],
+            ShellArg::SecretPair(s, secret) => {
+                vec![s, secret.expose_secret().to_owned()]
+            },
             ShellArg::Group(group) => group,
         }
     }
@@ -145,40 +196,14 @@ impl From<ShellArg> for Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use anstream::adapter::strip_str;
+
     use super::*;
-
-    /// `Display` is used as the user-facing log line for every command, so a
-    /// regression in its output is a UX regression. Strip ANSI so tests don't
-    /// depend on terminal detection.
-    fn rendered(cmd: &ShellCommand) -> String {
-        let s = format!("{cmd}");
-        strip_ansi(&s)
-    }
-
-    fn strip_ansi(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                // Skip CSI sequence: ESC [ ... letter
-                if chars.next() == Some('[') {
-                    for c in chars.by_ref() {
-                        if c.is_ascii_alphabetic() {
-                            break;
-                        }
-                    }
-                }
-            } else {
-                out.push(c);
-            }
-        }
-        out
-    }
 
     #[test]
     fn display_renders_program_and_args() {
-        let cmd = ShellCommand::new("codesign").args(&["--force", "--sign", "-"]);
-        assert_eq!(rendered(&cmd), "codesign --force --sign -");
+        let cmd = ShellCommand::new("codesign").args(["--force", "--sign", "-"]);
+        assert_eq!(format!("{cmd}"), "codesign --force --sign -");
     }
 
     #[test]
@@ -188,26 +213,21 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        let s = rendered(&cmd);
-        assert!(
-            s.starts_with("PKG_CONFIG_PATH=/opt/lib swift build"),
-            "got: {s}",
-        );
+        assert_eq!(format!("{cmd}"), "PKG_CONFIG_PATH=/opt/lib swift build");
     }
 
     #[test]
     fn display_renders_arg_group_inline() {
         // Argument groups render as a single space-joined unit (visually
         // underlined in a real terminal; structurally still all of them).
-        let cmd = ShellCommand::new("swift").args(&["build"]).arg_group(&[
+        let cmd = ShellCommand::new("swift").arg("build").arg_group(&[
             "-Xlinker",
             "-rpath",
             "-Xlinker",
             "@executable_path/../Frameworks",
         ]);
-        let s = rendered(&cmd);
         assert_eq!(
-            s,
+            strip_str(&format!("{cmd}")).to_string(),
             "swift build -Xlinker -rpath -Xlinker @executable_path/../Frameworks"
         );
     }
@@ -218,7 +238,7 @@ mod tests {
         // arguments — argv must still be split per element.
         let cmd = ShellCommand::new("echo")
             .arg("a")
-            .arg_group(&["b", "c"])
+            .arg_group(["b", "c"])
             .arg("d");
         let process_cmd = cmd.command();
         let args: Vec<&std::ffi::OsStr> = process_cmd.get_args().collect();
@@ -230,6 +250,30 @@ mod tests {
     fn from_slice_uses_first_element_as_program() {
         let cmd: ShellCommand = (&["plutil", "-convert", "xml1"][..]).into();
         assert_eq!(cmd.program, "plutil");
-        assert_eq!(rendered(&cmd), "plutil -convert xml1");
+        assert_eq!(format!("{cmd}"), "plutil -convert xml1");
+    }
+
+    #[test]
+    fn display_redacts_secret_arg() {
+        let secret: SecretString = "supersecretpassword".into();
+        let cmd = ShellCommand::new("security")
+            .args(["import", "-P"])
+            .arg(secret);
+        let s = format!("{cmd}");
+        assert_eq!(s, "security import -P <redacted>");
+    }
+
+    #[test]
+    fn command_exposes_secret_value_to_process() {
+        let secret: SecretString = "supersecretpassword".into();
+        let cmd = ShellCommand::new("security")
+            .args(["import", "-P"])
+            .arg(secret);
+        let process_cmd = cmd.command();
+        let args: Vec<&str> = process_cmd
+            .get_args()
+            .map(|a| a.to_str().unwrap())
+            .collect();
+        assert_eq!(args, vec!["import", "-P", "supersecretpassword"]);
     }
 }

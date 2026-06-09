@@ -6,8 +6,10 @@ use std::fs;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as b64;
 use color_print::cprintln;
 use indoc::indoc;
+use secrecy::{ExposeSecret, SecretString};
 
 use super::{Builder, step};
 use crate::shell::{Shell, ShellCommand};
@@ -76,9 +78,9 @@ impl Builder {
 
     /// Replace the user keychain search list.
     fn set_user_keychains(&self, keychains: &[String]) -> Result<()> {
-        let mut cmd = ShellCommand::new("security").args(&["list-keychains", "-d", "user", "-s"]);
+        let mut cmd = ShellCommand::new("security").args(["list-keychains", "-d", "user", "-s"]);
         for keychain in keychains {
-            cmd = cmd.arg(keychain);
+            cmd = cmd.arg(keychain.as_str());
         }
         match self.sh.run(cmd) {
             Ok(_) => Ok(()),
@@ -108,13 +110,13 @@ impl Builder {
             .into_owned();
         // Locks the throwaway keychain; never leaves this process, and the
         // keychain is deleted on drop.
-        let kc_pw = format!("strudel-{pid}");
+        let kc_pw: SecretString = format!("strudel-{pid}").into();
 
         if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> security create-keychain -p <<redacted>> {keychain}");
             cprintln!(
                 "<dim>[dry-run]</dim> decode $APPLE_CERTIFICATE ({} b64 chars) -> <<temp>>.p12",
-                cert_b64.len()
+                cert_b64.expose_secret().len()
             );
             cprintln!(
                 "<dim>[dry-run]</dim> security import <<temp>>.p12 -P <<redacted>> -k {keychain}"
@@ -134,9 +136,10 @@ impl Builder {
         }
 
         // Decode the PKCS#12 bundle to a temp file for `security import`.
-        let p12 = base64::engine::general_purpose::STANDARD
-            .decode(cert_b64.trim())
+        let p12 = b64
+            .decode(cert_b64.expose_secret().trim())
             .context("APPLE_CERTIFICATE is not valid base64")?;
+
         let p12_path = std::env::temp_dir().join(format!("strudel-{pid}.p12"));
         fs::write(&p12_path, &p12)
             .with_context(|| format!("Failed to write {}", p12_path.display()))?;
@@ -145,10 +148,13 @@ impl Builder {
         // Snapshot the search list first so the guard can restore it.
         let original_list = self.user_keychains()?;
 
-        self.sh.run_redacted(
-            &["security", "create-keychain", "-p", &kc_pw, &keychain],
-            &format!("security create-keychain -p <redacted> {keychain}"),
+        self.sh.run(
+            ShellCommand::new("security")
+                .arg("create-keychain")
+                .arg_with_secret("-p", kc_pw.clone())
+                .arg(&keychain),
         )?;
+
         self.sh.run(&[
             "security",
             "set-keychain-settings",
@@ -156,42 +162,27 @@ impl Builder {
             "21600",
             &keychain,
         ])?;
-        self.sh.run_redacted(
-            &["security", "unlock-keychain", "-p", &kc_pw, &keychain],
-            &format!("security unlock-keychain -p <redacted> {keychain}"),
+
+        self.sh.run(
+            ShellCommand::new("security")
+                .arg("unlock-keychain")
+                .arg_with_secret("-p", kc_pw.clone())
+                .arg(&keychain),
         )?;
-        self.sh.run_redacted(
-            &[
-                "security",
-                "import",
-                &p12_str,
-                "-P",
-                cert_password,
-                "-A",
-                "-t",
-                "cert",
-                "-f",
-                "pkcs12",
-                "-k",
-                &keychain,
-            ],
-            &format!("security import {p12_str} -P <redacted> -A -t cert -f pkcs12 -k {keychain}"),
+
+        self.sh.run(
+            ShellCommand::new("security")
+                .args(["import", &p12_str])
+                .arg_with_secret("-P", cert_password)
+                .args(["-A", "-t", "cert", "-f", "pkcs12", "-k", &keychain]),
         )?;
+
         // Let codesign use the imported key without an interactive prompt.
-        self.sh.run_redacted(
-            &[
-                "security",
-                "set-key-partition-list",
-                "-S",
-                "apple-tool:,apple:",
-                "-s",
-                "-k",
-                &kc_pw,
-                &keychain,
-            ],
-            &format!(
-                "security set-key-partition-list -S apple-tool:,apple: -s -k <redacted> {keychain}"
-            ),
+        self.sh.run(
+            ShellCommand::new("security")
+                .args(["set-key-partition-list", "-S", "apple-tool:,apple:", "-s"])
+                .arg_with_secret("-k", kc_pw.clone())
+                .arg(&keychain),
         )?;
 
         // Put the new keychain at the front of the search list.
@@ -272,9 +263,9 @@ mod tests {
             apple_api_issuer: String::new(),
             apple_api_key: String::new(),
             apple_api_key_path: None,
-            apple_password: String::new(),
-            apple_certificate: String::new(),
-            apple_certificate_password: String::new(),
+            apple_password: String::new().into(),
+            apple_certificate: String::new().into(),
+            apple_certificate_password: String::new().into(),
             resources_dir: None,
             resources: Vec::new(),
         }

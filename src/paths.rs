@@ -101,9 +101,9 @@ mod tests {
             apple_api_issuer: String::new(),
             apple_api_key: String::new(),
             apple_api_key_path: None,
-            apple_password: String::new(),
-            apple_certificate: String::new(),
-            apple_certificate_password: String::new(),
+            apple_password: String::new().into(),
+            apple_certificate: String::new().into(),
+            apple_certificate_password: String::new().into(),
             resources_dir: None,
             resources: Vec::new(),
         }

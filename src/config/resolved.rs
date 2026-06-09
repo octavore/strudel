@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use secrecy::{ExposeSecret, SecretString};
+
 use crate::config::extension::ExtensionKind;
 use crate::config::user::NotaryAuth;
 
@@ -40,9 +42,9 @@ pub struct ResolvedConfig {
     pub apple_api_key_path: Option<PathBuf>,
 
     // Secrets — read from the environment only, never from strudel.toml.
-    pub apple_password: String,
-    pub apple_certificate: String,
-    pub apple_certificate_password: String,
+    pub apple_password: SecretString,
+    pub apple_certificate: SecretString,
+    pub apple_certificate_password: SecretString,
 }
 
 impl ResolvedConfig {
@@ -59,7 +61,9 @@ impl ResolvedConfig {
                 issuer: self.apple_api_issuer.clone(),
             });
         }
-        if !self.apple_id.is_empty() && !self.apple_password.is_empty() && !self.team_id.is_empty()
+        if !self.apple_id.is_empty()
+            && !self.apple_password.expose_secret().is_empty()
+            && !self.team_id.is_empty()
         {
             return Some(NotaryAuth::AppleId {
                 apple_id: self.apple_id.clone(),
@@ -73,11 +77,14 @@ impl ResolvedConfig {
     /// The signing certificate to import, if supplied via the environment, as
     /// `(base64 PKCS#12 data, export password)`. When `None`, the identity is
     /// assumed to be present in an existing keychain (the common local case).
-    pub fn signing_cert(&self) -> Option<(&str, &str)> {
-        if self.apple_certificate.is_empty() {
+    pub fn signing_cert(&self) -> Option<(SecretString, SecretString)> {
+        if self.apple_certificate.expose_secret().is_empty() {
             None
         } else {
-            Some((&self.apple_certificate, &self.apple_certificate_password))
+            Some((
+                self.apple_certificate.clone(),
+                self.apple_certificate_password.clone(),
+            ))
         }
     }
 }
@@ -109,6 +116,8 @@ pub struct ResolvedExtension {
 #[cfg(test)]
 pub mod fixtures {
     use std::path::PathBuf;
+
+    use secrecy::ExposeSecret;
 
     use crate::config::NotaryAuth;
     use crate::config::fixtures::RESOLVED;
@@ -169,6 +178,8 @@ pub mod fixtures {
         let mut r = RESOLVED.clone();
         r.apple_certificate = "BASE64".into();
         r.apple_certificate_password = "pw".into();
-        assert_eq!(r.signing_cert(), Some(("BASE64", "pw")));
+        let (cert, pw) = r.signing_cert().unwrap();
+        assert_eq!(cert.expose_secret(), "BASE64");
+        assert_eq!(pw.expose_secret(), "pw");
     }
 }

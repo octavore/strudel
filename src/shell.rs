@@ -1,6 +1,6 @@
 mod command;
 use std::io::Write;
-use std::process::{Command, ExitStatus, Output, Stdio};
+use std::process::{ExitStatus, Output, Stdio};
 
 use anyhow::{Result, bail};
 use color_print::cprintln;
@@ -64,33 +64,6 @@ impl Shell {
         Ok(String::from_utf8_lossy(&output.stdout)
             .trim_end()
             .to_string())
-    }
-    /// Run a command whose arguments contain a secret (e.g. `security import
-    /// -P`). Logs and reports `display` instead of the real args, so
-    /// passwords never reach the terminal or an error message. Callers pass
-    /// a redacted form.
-    pub fn run_redacted(&self, args: &[&str], display: &str) -> Result<()> {
-        if args.is_empty() {
-            bail!("Empty command");
-        }
-        let prefix = if self.dry_run { "[dry-run] " } else { "" };
-        cprintln!("<dim>{prefix}{display}</dim>");
-        if self.dry_run {
-            return Ok(());
-        }
-        let output = Command::new(args[0]).args(&args[1..]).output()?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let code = exit_code_str(&output.status);
-            let mut msg = format!("{} failed (exit {code}):", args[0]);
-            msg.push_str(&format!("\n  command: {display}"));
-            let stderr = stderr.trim();
-            if !stderr.is_empty() {
-                msg.push_str(&format!("\n--- stderr ---\n{stderr}"));
-            }
-            bail!(msg);
-        }
-        Ok(())
     }
 
     /// Run a command with data piped to stdin. Fails on non-zero exit.

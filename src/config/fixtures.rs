@@ -56,9 +56,9 @@ pub const RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
     apple_api_issuer: String::new(),
     apple_api_key: String::new(),
     apple_api_key_path: None,
-    apple_password: String::new(),
-    apple_certificate: String::new(),
-    apple_certificate_password: String::new(),
+    apple_password: String::new().into(),
+    apple_certificate: String::new().into(),
+    apple_certificate_password: String::new().into(),
 });
 
 pub fn parse_build_config(s: &str) -> Result<BuildConfig, toml::de::Error> {

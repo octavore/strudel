@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use secrecy::SecretString;
 use serde::Deserialize;
 
 use crate::config::ResolvedConfig;
@@ -98,10 +99,13 @@ impl BuildConfig {
                     }
                 }),
             // Secrets: environment only — these are never deserialized from the file.
-            apple_password: std::env::var("APPLE_PASSWORD").unwrap_or_default(),
-            apple_certificate: std::env::var("APPLE_CERTIFICATE").unwrap_or_default(),
+            apple_password: std::env::var("APPLE_PASSWORD").unwrap_or_default().into(),
+            apple_certificate: std::env::var("APPLE_CERTIFICATE")
+                .unwrap_or_default()
+                .into(),
             apple_certificate_password: std::env::var("APPLE_CERTIFICATE_PASSWORD")
-                .unwrap_or_default(),
+                .unwrap_or_default()
+                .into(),
             notarize_timeout: notarize.timeout.unwrap_or(600),
             build_env: build.build_env.unwrap_or_default(),
             embed_libs: build
@@ -223,7 +227,7 @@ pub enum NotaryAuth {
     },
     AppleId {
         apple_id: String,
-        password: String,
+        password: SecretString,
         team_id: String,
     },
 }

@@ -49,12 +49,12 @@ impl Builder {
         // Build base args shared between both swift invocations
         let source = self.cfg.source_dir.to_str().unwrap();
         let mut build_cmd = ShellCommand::new("swift")
-            .args(&["build", "-c", config_flag, "--package-path", source])
+            .args(["build", "-c", config_flag, "--package-path", source])
             .envs(&self.cfg.build_env);
 
         // add archs from cfg
         for arch in &self.cfg.archs {
-            build_cmd = build_cmd.args(&["--arch", arch]);
+            build_cmd = build_cmd.args(["--arch", arch]);
         }
 
         // embed the Frameworks rpath at link time if we're embedding libraries
@@ -425,9 +425,9 @@ impl Builder {
             self.validate_entitlements_for_adhoc(&ent_value);
         }
 
-        let mut codesign_cmd = ShellCommand::new("codesign").args(&["--force", "--sign", identity]);
+        let mut codesign_cmd = ShellCommand::new("codesign").args(["--force", "--sign", identity]);
         if !adhoc {
-            codesign_cmd = codesign_cmd.args(&["--options", "runtime", "--timestamp"]);
+            codesign_cmd = codesign_cmd.args(["--options", "runtime", "--timestamp"]);
         }
 
         // Sign each embedded dylib individually before signing the bundle.
@@ -561,7 +561,7 @@ impl Builder {
             // -k: use zip format
             // --keepParent: include the parent directory in the archive, so the .app bundle
             // structure is preserved.
-            .args(&["-c", "-k", "--keepParent", app_bundle, zip])
+            .args(["-c", "-k", "--keepParent", app_bundle, zip])
             .run(&self.sh)?;
 
         step("Stapling notarization ticket...");
@@ -604,75 +604,48 @@ impl Builder {
         // Build the real args alongside a redacted display: the API key path,
         // key id, and issuer are identifiers, but the app-specific password is a
         // secret and must not reach the terminal or an error message.
-        let mut args: Vec<String> = ["xcrun", "notarytool", "submit", dmg]
-            .map(String::from)
-            .to_vec();
-        let mut display = args.clone();
+        let mut notary_cmd = ShellCommand::new("xcrun").args(["notarytool", "submit", dmg]);
         match self.cfg.notary_auth() {
             Some(NotaryAuth::ApiKey {
                 key_path,
                 key_id,
                 issuer,
             }) => {
-                let auth = [
-                    "--key".into(),
-                    key_path.to_string_lossy().into_owned(),
-                    "--key-id".into(),
-                    key_id,
-                    "--issuer".into(),
-                    issuer,
-                ];
-                display.extend(auth.clone());
-                args.extend(auth);
+                notary_cmd = notary_cmd.args([
+                    "--key",
+                    key_path.to_str().unwrap(),
+                    "--key-id",
+                    &key_id,
+                    "--issuer",
+                    &issuer,
+                ]);
             },
             Some(NotaryAuth::AppleId {
                 apple_id,
                 password,
                 team_id,
             }) => {
-                args.extend([
-                    "--apple-id".into(),
-                    apple_id.clone(),
-                    "--team-id".into(),
-                    team_id.clone(),
-                    "--password".into(),
-                    password,
-                ]);
-                display.extend([
-                    "--apple-id".into(),
-                    apple_id,
-                    "--team-id".into(),
-                    team_id,
-                    "--password".into(),
-                    "<redacted>".into(),
-                ]);
+                notary_cmd = notary_cmd.args(["--apple-id", &apple_id, "--team-id", &team_id]);
+                notary_cmd = notary_cmd.arg_with_secret("--password", password);
             },
             None => {
                 if self.dry_run {
                     cprintln!("<red>Error: No notarization credentials configured.</red>");
-                    let auth = [
-                        "--key".into(),
-                        "MISSING!".into(),
-                        "--key-id".into(),
-                        "MISSING!".into(),
-                        "--issuer".into(),
-                        "MISSING!".into(),
-                    ];
-                    display.extend(auth.clone());
-                    args.extend(auth);
+                    notary_cmd = notary_cmd.args([
+                        "--key", "MISSING!", "--key-id", "MISSING!", "--issuer", "MISSING!",
+                    ]);
                 } else {
                     // preflight_credentials should guarantee a complete set before `run`.
                     bail!("No notarization credentials configured");
                 }
             },
         }
+
         // note: for initial runs, the wait is going to be several hours probably. we
         // should handle this correctly.
-        let tail = ["--wait".into(), "--timeout".into(), timeout_str];
-        display.extend(tail.clone());
-        args.extend(tail);
-        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        self.sh.run_redacted(&arg_refs, &display.join(" "))?;
+
+        notary_cmd = notary_cmd.args(["--wait", "--timeout", &timeout_str]);
+        self.sh.run(notary_cmd)?;
 
         step("Stapling DMG...");
         self.sh.run(&["xcrun", "stapler", "staple", dmg])?;
