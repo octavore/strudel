@@ -118,8 +118,8 @@ impl Builder {
         Ok(())
     }
 
-    /// Full release pipeline: clean → binary → assemble → sign → notarize →
-    /// DMG. With `--resume`, skips the build and resumes a pending
+    /// Full release pipeline: clean → binary → assemble → sign → package DMG →
+    /// notarize. With `--resume`, skips the build and resumes a pending
     /// notarization instead.
     pub fn release(&self) -> Result<()> {
         if let Some(ref uuid_hint) = self.resume {
@@ -138,8 +138,8 @@ impl Builder {
         self.embed_libraries(&app_bundle)?;
         self.assemble_extensions(&bin_dir)?;
         self.sign(true)?;
-        self.notarize()?;
         self.package_dmg()?;
+        self.notarize()?;
 
         println!();
         let app_bundle_path = cformat!("<cyan>{}</cyan>", app_bundle.display());

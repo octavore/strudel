@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread::sleep;
@@ -5,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp, fs};
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use color_print::{cprint, cprintln};
 use serde::{Deserialize, Serialize};
 
 use super::{Builder, step};
@@ -76,12 +77,30 @@ impl Builder {
             return self.finalize_notarization(pending, dmg_dest);
         }
 
+        const POLL_SECS: u64 = 30;
         let started = Instant::now();
         let timeout = Duration::from_secs(self.cfg.notarize_timeout);
+        let mut apple_status = String::from("Waiting");
 
         loop {
-            sleep(Duration::from_secs(30));
-            if started.elapsed() >= timeout {
+            // Tick every second so the elapsed time and countdown stay live.
+            for remaining in (1..=POLL_SECS).rev() {
+                let elapsed_s = started.elapsed().as_secs();
+                let waited = if elapsed_s < 60 {
+                    format!("{elapsed_s}s")
+                } else {
+                    format!("{}m{}s", elapsed_s / 60, elapsed_s % 60)
+                };
+                cprint!(
+                    "\x1b[2K\r  <dim>{apple_status} — {waited} elapsed, next poll in {remaining}s</dim>"
+                );
+                std::io::stdout().flush().ok();
+                sleep(Duration::from_secs(1));
+            }
+
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                println!();
                 bail!(
                     "Notarization timed out after {}s.\n\
                      Submission ID: {uuid}\n\
@@ -92,25 +111,28 @@ impl Builder {
 
             let v = self.notarytool_info(uuid, auth_args)?;
             let status = v["status"].as_str().unwrap_or("unknown");
-            let message = v["message"].as_str().unwrap_or("");
 
             match status {
                 "Accepted" => {
+                    println!();
                     cprintln!("  <green>Accepted!</green>");
                     return self.finalize_notarization(pending, dmg_dest);
                 },
-                "In Progress" => {
-                    cprintln!("  <dim>In Progress — {message}</dim>");
-                },
                 "Invalid" | "Rejected" => {
+                    println!();
+                    let log = self.notarytool_log(uuid, auth_args);
                     bail!(
-                        "Notarization {status}: {message}\n\
+                        "Notarization {status}.\n\
                          Submission ID: {uuid}\n\
-                         Run `xcrun notarytool log {uuid}` for details."
+                         {}",
+                        match &log {
+                            Ok(s) => s.as_str(),
+                            Err(_) => "Run `xcrun notarytool log` above for details.",
+                        }
                     );
                 },
                 other => {
-                    cprintln!("  <dim>Status: {other} — {message}</dim>");
+                    apple_status = other.to_string();
                 },
             }
         }
@@ -118,6 +140,35 @@ impl Builder {
 
     fn finalize_notarization(&self, pending: &PendingSubmission, dmg_dest: &Path) -> Result<()> {
         let pending_dmg_str = pending.dmg.to_str().unwrap();
+        let app_bundle_str = self.paths.app_bundle.to_str().unwrap();
+        let zip_str = self.paths.zip.to_str().unwrap();
+
+        step("Stapling app bundle...");
+        self.sh
+            .run(&["xcrun", "stapler", "staple", app_bundle_str])?;
+
+        step("Creating zip...");
+        self.sh
+            .run(&["ditto", "-c", "-k", "--keepParent", app_bundle_str, zip_str])?;
+
+        // Rebuild the DMG from the now-stapled .app. The original DMG was
+        // created before notarization, so the .app inside it has no ticket.
+        // Without this, users see "cannot be checked for malicious software"
+        // when Gatekeeper's online fallback fails on the extracted .app.
+        step("Rebuilding DMG with stapled app bundle...");
+        let vol_name = format!("{} {}", self.cfg.app_name, self.cfg.version);
+        self.sh.run(&[
+            "hdiutil",
+            "create",
+            "-volname",
+            &vol_name,
+            "-srcfolder",
+            app_bundle_str,
+            "-ov",
+            "-format",
+            "UDZO",
+            pending_dmg_str,
+        ])?;
 
         step("Stapling DMG...");
         self.sh
@@ -140,6 +191,22 @@ impl Builder {
         }
 
         Ok(())
+    }
+
+    fn notarytool_log(&self, uuid: &str, auth_args: &[ShellArg]) -> Result<String> {
+        let output = Command::new("xcrun")
+            .args(["notarytool", "log", uuid])
+            .args(
+                auth_args
+                    .iter()
+                    .flat_map(|arg| Into::<Vec<String>>::into(arg.clone())),
+            )
+            .output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("notarytool log failed: {}", stderr.trim());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
     fn notarytool_info(&self, uuid: &str, auth_args: &[ShellArg]) -> Result<serde_json::Value> {

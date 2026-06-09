@@ -6,7 +6,5 @@ pub fn resolve_path(base: &Path, p: Option<PathBuf>, default: impl AsRef<Path>) 
 }
 
 pub fn env_or(cfg_val: Option<String>, env_key: &str) -> String {
-    std::env::var(env_key).ok()
-        .or(cfg_val)
-        .unwrap_or_default()
+    std::env::var(env_key).ok().or(cfg_val).unwrap_or_default()
 }

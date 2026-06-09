@@ -490,7 +490,16 @@ impl Builder {
         if spctl {
             let _ = self
                 .sh
-                .run(&["spctl", "--assess", "-vv", "--type", "exec", app_bundle])
+                .run(&[
+                    "spctl",
+                    "-a",
+                    "-t",
+                    "open",
+                    "--context",
+                    "context:primary-signature",
+                    "-v",
+                    app_bundle,
+                ])
                 .inspect_err(|e| {
                     cprintln!("<yellow>warning:</yellow> spctl assessment failed: {e}")
                 });
@@ -553,26 +562,6 @@ impl Builder {
         Ok(())
     }
 
-    pub fn notarize(&self) -> Result<()> {
-        step("Creating zip for notarization...");
-        let app_bundle = self.paths.app_bundle.to_str().unwrap();
-        let zip = self.paths.zip.to_str().unwrap();
-
-        ShellCommand::new("ditto")
-            // -c: create an archive
-            // -k: use zip format
-            // --keepParent: include the parent directory in the archive, so the .app bundle
-            // structure is preserved.
-            .args(["-c", "-k", "--keepParent", app_bundle, zip])
-            .run(&self.sh)?;
-
-        step("Stapling notarization ticket...");
-        self.sh.run(&["xcrun", "stapler", "staple", app_bundle])?;
-        self.sh.run(&["xcrun", "stapler", "validate", app_bundle])?;
-
-        Ok(())
-    }
-
     pub fn package_dmg(&self) -> Result<()> {
         let app_bundle = self.paths.app_bundle.to_str().unwrap();
 
@@ -600,20 +589,17 @@ impl Builder {
             temp_dmg_str,
         ])?;
 
-        // codesign the dmg
-        self.sh.run(&[
-            "codesign",
-            "--force",
-            "--sign",
-            &self.cfg.sign_identity,
-            "--timestamp",
-            temp_dmg_str,
-        ])?;
+        Ok(())
+    }
+
+    pub fn notarize(&self) -> Result<()> {
+        let temp_dmg = &self.paths.strudel_temp_dmg;
+        let temp_dmg_str = temp_dmg.to_str().unwrap();
 
         step("Submitting DMG for notarization...");
         cprintln!(
             "<dim>Note: first-time notarization can take several hours. \
-             Press Ctrl-C to stop — run `strudel release --resume` to continue later.</dim>"
+             Press Ctrl-C to stop: run `strudel release --resume` to continue later.</dim>"
         );
 
         let auth_args = self.notary_auth_args()?;
