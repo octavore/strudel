@@ -9,7 +9,7 @@ mod shell;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use color_print::ceprintln;
 
 use crate::builder::Builder;
@@ -35,7 +35,7 @@ impl Cli {
         let cli = Self::parse();
         match cli.command {
             Cmd::Help { topic } => {
-                help::run(topic.as_deref());
+                help::run(topic.as_deref(), Cli::command());
             },
             Cmd::Init { output_dir } => {
                 let dir = output_dir.unwrap_or_else(|| PathBuf::from("."));

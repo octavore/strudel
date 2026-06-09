@@ -1,5 +1,12 @@
-use color_print::cprintln;
-use indoc::indoc;
+use anstream::println;
+use clap::Command;
+use color_print::cformat;
+use indoc::formatdoc;
+
+const ANSI_GREEN: &str = "\x1b[32m"; // env vars
+const ANSI_BLUE: &str = "\x1b[34m"; // code
+const ANSI_PURPLE: &str = "\x1b[35m"; // toml
+const ANSI_RESET: &str = "\x1b[0m";
 
 const TOPICS: &[(&str, &str)] = &[
     ("config", "Full strudel.toml reference"),
@@ -15,9 +22,9 @@ const TOPICS: &[(&str, &str)] = &[
     ("ci", "CI/CD setup: GitHub Actions, secrets, keychain"),
 ];
 
-pub fn run(topic: Option<&str>) {
+pub fn run(topic: Option<&str>, mut app: Command) {
     match topic {
-        None => print_index(),
+        None => print_index(&app),
         Some(t) => {
             let key = t.to_lowercase();
             match key.as_str() {
@@ -30,32 +37,54 @@ pub fn run(topic: Option<&str>) {
                 "universal" => print_universal(),
                 "ci" => print_ci(),
                 _ => {
-                    cprintln!("<red>Unknown topic: {t}</red>");
-                    eprintln!();
-                    print_index();
-                    std::process::exit(1);
+                    if let Some(sub) = app.find_subcommand_mut(&key) {
+                        sub.print_long_help().unwrap();
+                        println!();
+                    } else {
+                        println!("{}", cformat!("<red>Unknown topic: {t}</red>"));
+                        eprintln!();
+                        print_index(&app);
+                        std::process::exit(1);
+                    }
                 },
             }
         },
     }
 }
 
-fn print_index() {
+fn print_index(app: &Command) {
+    println!("Available commands:");
+    println!();
+    for sub in app.get_subcommands() {
+        let name = sub.get_name();
+        if name == "help" {
+            continue;
+        }
+        let about = sub.get_about().map(|s| s.to_string()).unwrap_or_default();
+        println!(
+            "{}",
+            cformat!("  <bold,green>{name:<14}</bold,green> {about}")
+        );
+    }
+    println!();
     println!("Available topics:");
     println!();
     for (name, desc) in TOPICS {
-        cprintln!("  <bold>{name:<14}</bold> {desc}");
+        println!(
+            "{}",
+            cformat!("  <bold,green>{name:<14}</bold,green> {desc}")
+        );
     }
     println!();
-    println!("Usage: strudel help <topic>");
+    println!("Usage: strudel help <topic/command>");
 }
 
 fn print_help(text: &str) {
     for line in text.lines() {
         if line.starts_with("# ") {
-            cprintln!("<bold,cyan>{}</bold,cyan>", line);
+            println!("{}", cformat!("<bold,cyan>{}</bold,cyan>", line));
         } else if line.starts_with("## ") {
-            cprintln!("<bold,yellow>{}</bold,yellow>", line);
+            println!("{}", cformat!("<bold,yellow>{}</bold,yellow>", line));
         } else {
             println!("{}", line);
         }
@@ -63,91 +92,95 @@ fn print_help(text: &str) {
 }
 
 fn print_config() {
-    print_help(indoc! {r#"
+    print_help(&formatdoc! {r#"
         # strudel.toml reference
 
         Relative paths are resolved relative to the config file's directory.
-        Override the config path with: strudel --config path/to/strudel.toml <cmd>
+        Override the config path with: {ANSI_BLUE}strudel --config path/to/strudel.toml <cmd>{ANSI_RESET}
 
         ## [app] — required
-
+        {ANSI_PURPLE}
         [app]
         name         = "MyApp"              # display name, .app bundle name, binary name
         bundle_id    = "com.example.myapp"  # CFBundleIdentifier
-        version      = "1.0.0"             # CFBundleShortVersionString
-        build_number = "1"                 # CFBundleVersion
-
-        ## [build] — all optional
-
+        version      = "1.0.0"              # CFBundleShortVersionString
+        build_number = "1"                  # CFBundleVersion
+        {ANSI_RESET}
+        ## [build] — optional
+        {ANSI_PURPLE}
         [build]
-        source_dir             = "."                     # Swift package root; default: config file dir
-        build_dir              = ".build/dist"           # output dir; relative to source_dir
-        info_json_path         = "info.json"             # JSON merged into Info.plist
-        entitlements_json_path = "entitlements.json"     # JSON entitlements
-        icon_path              = "AppIcon.icns"          # .icns app icon
-        archs                  = ["arm64", "x86_64"]     # default: host arch only
-        target_name            = "MyApp"                 # Swift executableTarget; default: app.name
-        embed_libs             = ["path/to/libFoo.dylib"] # dylibs → Contents/Frameworks
-        provisioning_profile   = "MyApp.provisionprofile" # required for some entitlements
-        resources_dir          = "Resources"               # dir contents → Contents/Resources/
-        resources              = ["Assets/logo.png"]       # individual files → Contents/Resources/
+        source_dir             = "."                       # Swift package root; default: config file dir
+        build_dir              = ".build/dist"             # output dir; relative to source_dir
 
+        info_json_path         = "info.json"               # JSON merged into Info.plist
+        entitlements_json_path = "entitlements.json"       # JSON entitlements
+        icon_path              = "AppIcon.icns"            # path to .icns or .png app icon
+        archs                  = ["arm64", "x86_64"]       # default: host arch only
+        target_name            = "MyApp"                   # Swift executableTarget; default: app.name
+        embed_libs             = ["path/to/libFoo.dylib"]  # dylibs copied into Contents/Frameworks
+        provisioning_profile   = "MyApp.provisionprofile"  # required for some entitlements
+
+        resources_dir          = "Resources"               # all files here copied into Contents/Resources/
+        resources              = ["Assets/logo.png"]       # individual files to copy into Contents/Resources/
+        {ANSI_RESET}
         ## [build_env] — optional
 
-        Extra env vars forwarded to `swift build` (e.g. for pkg-config):
-
+        Extra env vars forwarded to {ANSI_BLUE}swift build{ANSI_RESET} (e.g. for pkg-config):
+        {ANSI_PURPLE}
         [build_env]
         PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
-
+        {ANSI_RESET}
         ## [signing] — optional (required for `release`)
-
+        {ANSI_PURPLE}
         [signing]
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
-
-        Both can also be set via env: APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID.
-        Config value wins if both are set.
+        {ANSI_RESET}
+        Both can also be set via env: {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}, {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}.
+        Env var takes precedence if both are set.
 
         ## [notarize] — optional (required for `release`)
-
+        {ANSI_PURPLE}
         [notarize]
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         api_key      = "2X9R4HXF34"
         api_key_path = "AuthKey_2X9R4HXF34.p8"
 
         timeout = 600   # seconds to wait for notarytool; default: 600
-
+        {ANSI_RESET}
         ## [[extensions]] — optional, repeatable
 
-        See: strudel help extensions
+        See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
 
         ## Environment secrets (never in strudel.toml)
 
-        APPLE_CERTIFICATE           base64-encoded Developer ID .p12 (CI use)
-        APPLE_CERTIFICATE_PASSWORD  export password for the .p12
+        {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}           base64-encoded Developer ID .p12 (CI use)
+        {ANSI_GREEN}APPLE_CERTIFICATE_PASSWORD{ANSI_RESET}  export password for the .p12
     "#});
 }
 
 fn print_signing() {
-    print_help(indoc! {r#"
+    print_help(&formatdoc! {r#"
         # Code signing
 
         ## Configuring the signing identity
 
-        Set in strudel.toml or via environment (env wins):
-
+        Set in strudel.toml or via environment (env vars take precedence):
+        {ANSI_PURPLE}
         [signing]
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
+        {ANSI_RESET}
+        - or -
 
-        Env vars: APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID
+        Env vars: {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}, {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}
 
-        The identity string must match exactly what `security find-identity -v -p codesigning`
+        The identity string must match exactly what {ANSI_BLUE}security find-identity -v -p codesigning{ANSI_RESET}
         shows. Copy it from there to avoid typos.
 
         ## Ad-hoc signing (local dev)
 
-        When no identity is configured, `strudel build` uses ad-hoc signing (--sign -).
+        When no identity is configured, {ANSI_BLUE}strudel build{ANSI_RESET} uses ad-hoc signing (--sign -).
         Ad-hoc signatures let you run the app locally but the app cannot be distributed
         or notarized.
 
@@ -158,10 +191,10 @@ fn print_signing() {
         1. Export your Developer ID certificate as a .p12 from Keychain Access
            (right-click → Export, set an export password)
         2. Base64-encode it:
-               base64 -i DeveloperID.p12 | pbcopy
+               {ANSI_BLUE}base64 -i DeveloperID.p12 | pbcopy{ANSI_RESET}
         3. Set CI secrets:
-               APPLE_CERTIFICATE           ← the base64 string
-               APPLE_CERTIFICATE_PASSWORD  ← the export password you set
+               {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}          (the base64 string)
+               {ANSI_GREEN}APPLE_CERTIFICATE_PASSWORD{ANSI_RESET} (the export password you set)
 
         strudel will import the certificate into a temporary keychain automatically.
 
@@ -177,39 +210,42 @@ fn print_signing() {
 
         ## See also
 
-        strudel help notarize
-        strudel help entitlements
-        strudel help ci
+        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
+        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
+        {ANSI_BLUE}strudel help ci{ANSI_RESET}
     "#});
 }
 
 fn print_notarize() {
-    print_help(indoc! {r#"
+    print_help(&formatdoc! {r#"
         # Notarization
 
         Notarization is required for distributing a signed app outside the Mac App Store.
-        strudel runs `xcrun notarytool submit` and then `xcrun stapler staple` automatically
-        as part of `strudel release`.
+        strudel runs {ANSI_BLUE}xcrun notarytool submit{ANSI_RESET} and then {ANSI_BLUE}xcrun stapler staple{ANSI_RESET} automatically
+        as part of {ANSI_BLUE}strudel release{ANSI_RESET}.
 
         ## Auth
 
         strudel uses the App Store Connect API key for notarization.
 
         Obtain a key at: App Store Connect → Users & Access → Integrations → App Store Connect API
-
+        {ANSI_PURPLE}
         [notarize]
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"  # Issuer ID
         api_key      = "2X9R4HXF34"                             # Key ID
         api_key_path = "AuthKey_2X9R4HXF34.p8"                  # path to .p8 file
+        {ANSI_RESET}
+        - or -
 
-        Env equivalents: APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_PATH
-        Config value wins if both are set.
+        Env: {ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}
+
+        Env var takes precedence if both are set.
 
         ## Timeout
-
+        {ANSI_PURPLE}
         [notarize]
         timeout = 600   # seconds; default: 600
-
+        {ANSI_RESET}
         Notarization typically completes in under a minute, but Apple's servers can
         occasionally be slow.
 
@@ -220,13 +256,13 @@ fn print_notarize() {
 
         ## See also
 
-        strudel help signing
-        strudel help ci
+        {ANSI_BLUE}strudel help signing{ANSI_RESET}
+        {ANSI_BLUE}strudel help ci{ANSI_RESET}
     "#});
 }
 
 fn print_entitlements() {
-    print_help(indoc! {r#"
+    print_help(&formatdoc! {r#"
         # Entitlements and provisioning profiles
 
         ## Entitlements file
@@ -236,16 +272,16 @@ fn print_entitlements() {
         Override: build.entitlements_json_path = "path/to/entitlements.json"
 
         Minimal sandbox-only example:
-          {
+          {{
             "com.apple.security.app-sandbox": true
-          }
+          }}
 
         Example with network access:
-          {
+          {{
             "com.apple.security.app-sandbox": true,
             "com.apple.security.network.client": true,
             "com.apple.security.network.server": true
-          }
+          }}
 
         The entitlements file is optional. If the default path (entitlements.json) does
         not exist and no path is configured, strudel signs without entitlements.
@@ -276,12 +312,12 @@ fn print_entitlements() {
           [[extensions]]
           entitlements_json_path = "extension/entitlements.json"
 
-        See: strudel help extensions
+        See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
     "#});
 }
 
 fn print_extensions() {
-    print_help(indoc! {r#"
+    print_help(&formatdoc! {r#"
         # App extensions
 
         App extensions are embedded as .appex bundles under Contents/PlugIns/ in the host
@@ -289,7 +325,7 @@ fn print_extensions() {
         covers all nested .appex bundles.
 
         ## Common fields (all kinds)
-
+        {ANSI_PURPLE}
         [[extensions]]
         kind                   = "safari_web_extension"        # or "app_extension"
         target_name            = "MyExtension"                 # SPM executableTarget
@@ -297,21 +333,21 @@ fn print_extensions() {
         # name                 = "MyExtension"                 # defaults to target_name
         entitlements_json_path = "ext/entitlements.json"       # required
         # info_json_path       = "ext/info.json"               # optional extra Info.plist keys
-
+        {ANSI_RESET}
         The SPM target must be an executableTarget in Package.swift.
 
         ## kind = "safari_web_extension"
 
         Embeds a Safari Web Extension. The resources_dir is copied wholesale into
         Contents/Resources/ (manifest.json, JS, HTML, icons, etc.).
-
+        {ANSI_PURPLE}
         [[extensions]]
         kind          = "safari_web_extension"
         target_name   = "MyAppExtension"
         bundle_id     = "com.example.myapp.Extension"
         resources_dir = "extension/dist"                  # required; webpack output dir
         # principal_class = "MyAppExtension.SafariWebExtensionHandler"  # default shown
-
+        {ANSI_RESET}
         strudel auto-injects NSExtension with:
           NSExtensionPointIdentifier = "com.apple.Safari.web-extension"
           NSExtensionPrincipalClass  = <principal_class>
@@ -320,7 +356,7 @@ fn print_extensions() {
         ## kind = "app_extension"
 
         Generic macOS app extension (Share, Finder Sync, Notification Service, Quick Look, etc.)
-
+        {ANSI_PURPLE}
         [[extensions]]
         kind                       = "app_extension"
         target_name                = "MyShareExtension"
@@ -328,12 +364,14 @@ fn print_extensions() {
         entitlements_json_path     = "share/entitlements.json"
         extension_point_identifier = "com.apple.share-services"   # required
         # principal_class          = "MyShareExtension.ShareViewController"  # optional
-
+        {ANSI_RESET}
         Common extension_point_identifier values:
           "com.apple.share-services"              Share Extension
           "com.apple.FinderSync"                  Finder Sync Extension
           "com.apple.usernotifications.service"   Notification Service Extension
           "com.apple.quicklook.preview"           Quick Look Preview Extension
+
+        See https://developer.apple.com/documentation/bundleresources/information-property-list/nsextension/nsextensionpointidentifier
 
         ## Auto-injected Info.plist keys
 
@@ -352,14 +390,14 @@ fn print_extensions() {
 }
 
 fn print_dylibs() {
-    print_help(indoc! {r#"
+    print_help(&formatdoc! {r#"
         # Embedding dynamic libraries
 
         For C FFI dylibs that must ship inside the bundle:
-
-          [build]
-          embed_libs = ["path/to/libFoo.dylib", "path/to/libBar.dylib"]
-
+        {ANSI_PURPLE}
+        [build]
+        embed_libs = ["path/to/libFoo.dylib", "path/to/libBar.dylib"]
+        {ANSI_RESET}
         Paths are relative to the config file's directory unless absolute.
 
         ## What strudel does
@@ -371,13 +409,13 @@ fn print_dylibs() {
           4. Signs the dylib (before signing the outer bundle)
 
         strudel also injects -rpath @executable_path/../Frameworks at link time via
-        `-Xlinker -rpath -Xlinker @executable_path/../Frameworks` in swift build.
+        {ANSI_BLUE}-Xlinker -rpath -Xlinker @executable_path/../Frameworks{ANSI_RESET} in {ANSI_BLUE}swift build{ANSI_RESET}.
 
         ## Build-time flags
 
         Compile-time flags (-I, -L, -l, module maps) and linker flags still belong in
         Package.swift (cSettings / linkerSettings). strudel's embed_libs only handles
-        the bundle assembly and signing step; it does not affect how swift build finds
+        the bundle assembly and signing step; it does not affect how {ANSI_BLUE}swift build{ANSI_RESET} finds
         or links the library.
 
         ## Static libraries
@@ -388,16 +426,16 @@ fn print_dylibs() {
 }
 
 fn print_universal() {
-    print_help(indoc! {r#"
+    print_help(&formatdoc! {r#"
         # Universal binaries
 
         To produce a universal (fat) binary that runs natively on both Apple Silicon
         and Intel Macs:
-
-          [build]
-          archs = ["arm64", "x86_64"]
-
-        strudel passes --arch arm64 --arch x86_64 to `swift build`, which invokes the
+        {ANSI_PURPLE}
+        [build]
+        archs = ["arm64", "x86_64"]
+        {ANSI_RESET}
+        strudel passes --arch arm64 --arch x86_64 to {ANSI_BLUE}swift build{ANSI_RESET}, which invokes the
         compiler twice and uses lipo to merge the outputs.
 
         ## Default behavior
@@ -418,23 +456,23 @@ fn print_universal() {
 }
 
 fn print_ci() {
-    print_help(indoc! {r#"
+    print_help(&formatdoc! {r#"
         # CI/CD setup
 
         ## Required secrets
 
         Set these as CI environment secrets (never commit them):
 
-          APPLE_SIGNING_IDENTITY      "Developer ID Application: Your Name (XXXXXXXXXX)"
-          APPLE_TEAM_ID               10-character team ID
-          APPLE_CERTIFICATE           base64-encoded Developer ID .p12
-          APPLE_CERTIFICATE_PASSWORD  export password for the .p12
+          {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}      "Developer ID Application: Your Name (XXXXXXXXXX)"
+          {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}               10-character team ID
+          {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}           base64-encoded Developer ID .p12
+          {ANSI_GREEN}APPLE_CERTIFICATE_PASSWORD{ANSI_RESET}  export password for the .p12
 
         For notarization (App Store Connect API key):
 
-          APPLE_API_ISSUER    issuer UUID from App Store Connect
-          APPLE_API_KEY       key ID (e.g. "2X9R4HXF34")
-          APPLE_API_KEY_PATH  path to the .p8 file (or set inline — see below)
+          {ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}    issuer UUID from App Store Connect
+          {ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}       key ID (e.g. "2X9R4HXF34")
+          {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}  path to the .p8 file (or set inline — see below)
 
         ## GitHub Actions example
 
@@ -464,7 +502,7 @@ fn print_ci() {
 
         1. Open Keychain Access → find your Developer ID Application certificate
         2. Right-click → Export → save as DeveloperID.p12, set an export password
-        3. Encode: base64 -i DeveloperID.p12 | pbcopy
+        3. Encode: {ANSI_BLUE}base64 -i DeveloperID.p12 | pbcopy{ANSI_RESET}
         4. Paste the result as the APPLE_CERTIFICATE secret
 
         strudel imports the certificate into a temporary keychain automatically when
@@ -481,7 +519,7 @@ fn print_ci() {
 
         ## See also
 
-        strudel help signing
-        strudel help notarize
+        {ANSI_BLUE}strudel help signing{ANSI_RESET}
+        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
     "#});
 }
