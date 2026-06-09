@@ -9,7 +9,6 @@ use color_print::cprintln;
 use serde::{Deserialize, Serialize};
 
 use super::{Builder, step};
-use crate::config::NotaryAuth;
 use crate::paths::PendingSubmission;
 use crate::shell::ShellArg;
 
@@ -38,46 +37,28 @@ fn format_elapsed(submitted_at: u64) -> String {
 
 impl Builder {
     pub fn notary_auth_args(&self) -> Result<Vec<ShellArg>> {
-        match self.cfg.notary_auth() {
-            Some(NotaryAuth::ApiKey {
-                key_path,
-                key_id,
-                issuer,
-            }) => Ok(vec![
+        if let Some(auth) = self.cfg.notary_auth() {
+            return Ok(vec![
                 "--key".into(),
-                key_path.into(),
+                auth.key_path.into(),
                 "--key-id".into(),
-                key_id.into(),
+                auth.key_id.into(),
                 "--issuer".into(),
-                issuer.into(),
-            ]),
-            Some(NotaryAuth::AppleId {
-                apple_id,
-                password,
-                team_id,
-            }) => Ok(vec![
-                "--apple-id".into(),
-                apple_id.clone().into(),
-                "--team-id".into(),
-                team_id.clone().into(),
-                "--password".into(),
-                ShellArg::Secret(password.into()),
-            ]),
-            None => {
-                if self.dry_run {
-                    cprintln!("<red>Error: No notarization credentials configured.</red>");
-                    Ok(vec![
-                        "--key".into(),
-                        "MISSING!".into(),
-                        "--key-id".into(),
-                        "MISSING!".into(),
-                        "--issuer".into(),
-                        "MISSING!".into(),
-                    ])
-                } else {
-                    bail!("No notarization credentials configured")
-                }
-            },
+                auth.issuer.into(),
+            ]);
+        }
+        if self.dry_run {
+            cprintln!("<red>Error: No notarization credentials configured.</red>");
+            Ok(vec![
+                "--key".into(),
+                "MISSING!".into(),
+                "--key-id".into(),
+                "MISSING!".into(),
+                "--issuer".into(),
+                "MISSING!".into(),
+            ])
+        } else {
+            bail!("No notarization credentials configured")
         }
     }
 

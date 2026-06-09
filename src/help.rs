@@ -111,13 +111,9 @@ fn print_config() {
         ## [notarize] — optional (required for `release`)
 
         [notarize]
-        # API key auth (preferred)
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         api_key      = "2X9R4HXF34"
         api_key_path = "AuthKey_2X9R4HXF34.p8"
-
-        # Apple ID auth (fallback; also needs APPLE_PASSWORD env var)
-        apple_id = "you@example.com"
 
         timeout = 600   # seconds to wait for notarytool; default: 600
 
@@ -127,7 +123,6 @@ fn print_config() {
 
         ## Environment secrets (never in strudel.toml)
 
-        APPLE_PASSWORD              app-specific password (Apple ID auth)
         APPLE_CERTIFICATE           base64-encoded Developer ID .p12 (CI use)
         APPLE_CERTIFICATE_PASSWORD  export password for the .p12
     "#});
@@ -196,12 +191,9 @@ fn print_notarize() {
         strudel runs `xcrun notarytool submit` and then `xcrun stapler staple` automatically
         as part of `strudel release`.
 
-        ## Auth methods
+        ## Auth
 
-        strudel uses App Store Connect API key auth when fully configured; falls back to
-        Apple ID auth otherwise.
-
-        ### API key auth (preferred — works in CI without 2FA headaches)
+        strudel uses the App Store Connect API key for notarization.
 
         Obtain a key at: App Store Connect → Users & Access → Integrations → App Store Connect API
 
@@ -213,17 +205,6 @@ fn print_notarize() {
         Env equivalents: APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_PATH
         Config value wins if both are set.
 
-        ### Apple ID auth (fallback)
-
-        [notarize]
-        apple_id = "you@example.com"  # also set via APPLE_ID
-
-        Required env secret (no config key):
-          APPLE_PASSWORD  ← app-specific password from appleid.apple.com
-                            (Account → Sign-In and Security → App-Specific Passwords)
-
-        Also requires signing.team_id (or APPLE_TEAM_ID) to be set.
-
         ## Timeout
 
         [notarize]
@@ -234,9 +215,6 @@ fn print_notarize() {
 
         ## Troubleshooting
 
-        - "Unable to find app-specific password": the APPLE_PASSWORD value is wrong or
-          the app-specific password was revoked. Generate a new one.
-        - "Team ID not found": ensure signing.team_id / APPLE_TEAM_ID is set.
         - "Invalid API key": confirm api_key_path points to the correct .p8 file and
           api_key matches the Key ID shown in App Store Connect.
 
@@ -452,16 +430,11 @@ fn print_ci() {
           APPLE_CERTIFICATE           base64-encoded Developer ID .p12
           APPLE_CERTIFICATE_PASSWORD  export password for the .p12
 
-        For notarization, either:
+        For notarization (App Store Connect API key):
 
-          API key auth (preferred):
-            APPLE_API_ISSUER    issuer UUID from App Store Connect
-            APPLE_API_KEY       key ID (e.g. "2X9R4HXF34")
-            APPLE_API_KEY_PATH  path to the .p8 file (or set inline — see below)
-
-          Apple ID auth (fallback):
-            APPLE_ID            Apple ID email
-            APPLE_PASSWORD      app-specific password
+          APPLE_API_ISSUER    issuer UUID from App Store Connect
+          APPLE_API_KEY       key ID (e.g. "2X9R4HXF34")
+          APPLE_API_KEY_PATH  path to the .p8 file (or set inline — see below)
 
         ## GitHub Actions example
 

@@ -24,7 +24,6 @@ pub const FULL: &str = indoc::indoc! {r#"
   team_id = "TEAM123456"
 
   [notarize]
-  apple_id = "me@example.com"
   api_issuer = "issuer-uuid"
   api_key = "KEYID123"
   api_key_path = "AuthKey.p8"
@@ -52,11 +51,9 @@ pub const RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
     resources_dir: None,
     resources: Vec::new(),
     team_id: String::new(),
-    apple_id: String::new(),
     apple_api_issuer: String::new(),
     apple_api_key: String::new(),
     apple_api_key_path: None,
-    apple_password: String::new().into(),
     apple_certificate: String::new().into(),
     apple_certificate_password: String::new().into(),
 });

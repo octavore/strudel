@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 pub use crate::config::extension::ExtensionKind;
 pub use crate::config::resolved::{ResolvedConfig, ResolvedExtension};
 use crate::config::user::BuildConfig;
-pub use crate::config::user::{NotaryAuth, generate_initial_toml};
+pub use crate::config::user::generate_initial_toml;
 
 pub fn load_config(config_path: &Path) -> Result<ResolvedConfig> {
     let content = std::fs::read_to_string(config_path)

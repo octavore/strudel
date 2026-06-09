@@ -36,39 +36,27 @@ pub struct ResolvedConfig {
 
     // Notarization identifiers (from strudel.toml or the environment).
     pub team_id: String,
-    pub apple_id: String,
     pub apple_api_issuer: String,
     pub apple_api_key: String,
     pub apple_api_key_path: Option<PathBuf>,
 
     // Secrets — read from the environment only, never from strudel.toml.
-    pub apple_password: SecretString,
     pub apple_certificate: SecretString,
     pub apple_certificate_password: SecretString,
 }
 
 impl ResolvedConfig {
-    /// The notarization credentials, if a complete set is available. Prefers
-    /// the API key; returns `None` when neither set is fully specified.
+    /// The notarization credentials, if a complete set is available. Returns
+    /// `None` when the API key set is not fully specified.
     pub fn notary_auth(&self) -> Option<NotaryAuth> {
         if let Some(key_path) = &self.apple_api_key_path
             && !self.apple_api_key.is_empty()
             && !self.apple_api_issuer.is_empty()
         {
-            return Some(NotaryAuth::ApiKey {
+            return Some(NotaryAuth {
                 key_path: key_path.clone(),
                 key_id: self.apple_api_key.clone(),
                 issuer: self.apple_api_issuer.clone(),
-            });
-        }
-        if !self.apple_id.is_empty()
-            && !self.apple_password.expose_secret().is_empty()
-            && !self.team_id.is_empty()
-        {
-            return Some(NotaryAuth::AppleId {
-                apple_id: self.apple_id.clone(),
-                password: self.apple_password.clone(),
-                team_id: self.team_id.clone(),
             });
         }
         None
@@ -119,43 +107,19 @@ pub mod fixtures {
 
     use secrecy::ExposeSecret;
 
-    use crate::config::NotaryAuth;
     use crate::config::fixtures::RESOLVED;
 
     #[test]
-    fn notary_auth_prefers_complete_api_key() {
+    fn notary_auth_returns_api_key_when_complete() {
         let mut r = RESOLVED.clone();
         r.apple_api_key_path = Some(PathBuf::from("/k.p8"));
         r.apple_api_key = "KID".into();
         r.apple_api_issuer = "ISS".into();
 
-        // Apple ID is also fully present; the API key must still win.
-        r.apple_id = "me@example.com".into();
-        r.apple_password = "pw".into();
-        r.team_id = "TID".into();
-        match r.notary_auth() {
-            Some(NotaryAuth::ApiKey {
-                key_id,
-                issuer,
-                key_path,
-            }) => {
-                assert_eq!(key_id, "KID");
-                assert_eq!(issuer, "ISS");
-                assert_eq!(key_path, PathBuf::from("/k.p8"));
-            },
-            other => panic!("expected ApiKey, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn notary_auth_falls_back_to_apple_id_when_api_incomplete() {
-        let mut r = RESOLVED.clone();
-        // Key path present but key id missing → incomplete API set.
-        r.apple_api_key_path = Some(PathBuf::from("/k.p8"));
-        r.apple_id = "me@example.com".into();
-        r.apple_password = "pw".into();
-        r.team_id = "TID".into();
-        assert!(matches!(r.notary_auth(), Some(NotaryAuth::AppleId { .. })));
+        let auth = r.notary_auth().expect("expected Some(NotaryAuth)");
+        assert_eq!(auth.key_id, "KID");
+        assert_eq!(auth.issuer, "ISS");
+        assert_eq!(auth.key_path, PathBuf::from("/k.p8"));
     }
 
     #[test]
@@ -164,11 +128,10 @@ pub mod fixtures {
     }
 
     #[test]
-    fn notary_auth_none_when_apple_id_missing_password() {
+    fn notary_auth_none_when_api_key_incomplete() {
         let mut r = RESOLVED.clone();
-        r.apple_id = "me@example.com".into();
-        r.team_id = "TID".into();
-        // apple_password is empty (env-only secret, unset) → not a complete set.
+        // Key path present but key id missing → incomplete API set.
+        r.apple_api_key_path = Some(PathBuf::from("/k.p8"));
         assert!(r.notary_auth().is_none());
     }
 

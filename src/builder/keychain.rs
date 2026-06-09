@@ -8,7 +8,6 @@ use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as b64;
 use color_print::cprintln;
-use indoc::indoc;
 use secrecy::{ExposeSecret, SecretString};
 
 use super::{Builder, step};
@@ -24,13 +23,9 @@ impl Builder {
         }
         if self.cfg.notary_auth().is_none() {
             problems.push(
-                indoc! {r#"
-                    no complete notarization credentials. One of the following must be provided:
-                        1. App Store Connect API key (APPLE_API_KEY_PATH, APPLE_API_KEY, APPLE_API_ISSUER)
-                        2. Apple ID (APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID)
-                    "#
-                }
-                .to_string(),
+                "no complete notarization credentials. Provide the App Store Connect API key \
+                    (APPLE_API_KEY_PATH, APPLE_API_KEY, APPLE_API_ISSUER)."
+                    .to_string(),
             );
         }
         problems
@@ -259,11 +254,9 @@ mod tests {
             provisioning_profile: None,
             extensions: Vec::new(),
             team_id: String::new(),
-            apple_id: String::new(),
             apple_api_issuer: String::new(),
             apple_api_key: String::new(),
             apple_api_key_path: None,
-            apple_password: String::new().into(),
             apple_certificate: String::new().into(),
             apple_certificate_password: String::new().into(),
             resources_dir: None,
@@ -299,16 +292,6 @@ mod tests {
         cfg.apple_api_key_path = Some(PathBuf::from("/k.p8"));
         cfg.apple_api_key = "KID".into();
         cfg.apple_api_issuer = "ISS".into();
-        assert!(builder(cfg).credential_problems().is_empty());
-    }
-
-    #[test]
-    fn problems_empty_when_apple_id_complete() {
-        let mut cfg = empty_cfg();
-        cfg.sign_identity = "Developer ID Application: X (TEAM)".into();
-        cfg.apple_id = "me@example.com".into();
-        cfg.apple_password = "pw".into();
-        cfg.team_id = "TEAM".into();
         assert!(builder(cfg).credential_problems().is_empty());
     }
 

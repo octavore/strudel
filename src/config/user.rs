@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use secrecy::SecretString;
 use serde::Deserialize;
 
 use crate::config::ResolvedConfig;
@@ -84,7 +83,6 @@ impl BuildConfig {
             // Identifiers: strudel.toml value wins, else the matching env var.
             sign_identity: env_or(signing.identity, "APPLE_SIGNING_IDENTITY"),
             team_id: env_or(signing.team_id, "APPLE_TEAM_ID"),
-            apple_id: env_or(notarize.apple_id, "APPLE_ID"),
             apple_api_issuer: env_or(notarize.api_issuer, "APPLE_API_ISSUER"),
             apple_api_key: env_or(notarize.api_key, "APPLE_API_KEY"),
             // Like other input paths, resolved relative to the config file directory.
@@ -99,7 +97,6 @@ impl BuildConfig {
                     }
                 }),
             // Secrets: environment only — these are never deserialized from the file.
-            apple_password: std::env::var("APPLE_PASSWORD").unwrap_or_default().into(),
             apple_certificate: std::env::var("APPLE_CERTIFICATE")
                 .unwrap_or_default()
                 .into(),
@@ -202,34 +199,24 @@ pub struct SigningSection {
     pub team_id: Option<String>,
 }
 
-/// `[notarize]` — non-secret notarization identifiers (env vars `APPLE_ID`,
+/// `[notarize]` — non-secret notarization identifiers (env vars
 /// `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`). Secrets
-/// (`APPLE_PASSWORD`, `APPLE_CERTIFICATE*`) are read from the environment only.
+/// (`APPLE_CERTIFICATE*`) are read from the environment only.
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct NotarizeSection {
-    pub apple_id: Option<String>,
     pub api_issuer: Option<String>,
     pub api_key: Option<String>,
     pub api_key_path: Option<PathBuf>,
     pub timeout: Option<u64>,
 }
 
-/// How `notarytool` authenticates with Apple's notary service. The App Store
-/// Connect API key is preferred when fully configured; otherwise we fall back
-/// to Apple ID + app-specific password.
+/// App Store Connect API key credentials for `notarytool`.
 #[derive(Debug, Clone)]
-pub enum NotaryAuth {
-    ApiKey {
-        key_path: PathBuf,
-        key_id: String,
-        issuer: String,
-    },
-    AppleId {
-        apple_id: String,
-        password: SecretString,
-        team_id: String,
-    },
+pub struct NotaryAuth {
+    pub key_path: PathBuf,
+    pub key_id: String,
+    pub issuer: String,
 }
 
 pub fn generate_initial_toml(
@@ -249,12 +236,9 @@ pub fn generate_initial_toml(
         # Signing & notarization (required for `release`). Identifiers may go here or in the
         # environment; secrets are read from the environment ONLY.
         #
-        # Identifiers (here or env): APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID, APPLE_ID,
+        # Identifiers (here or env): APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID,
         #   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_PATH
-        # Secrets (env only): APPLE_PASSWORD, APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD
-        #
-        # Notarization uses the App Store Connect API key ([notarize] api_*) when fully
-        # set, otherwise falls back to Apple ID (apple_id + APPLE_PASSWORD + team_id).
+        # Secrets (env only): APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD
 
         [app]
         name         = "{app_name}"
@@ -297,9 +281,8 @@ pub fn generate_initial_toml(
         # identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         # team_id  = "XXXXXXXXXX"
 
-        # Notarization identifiers — or set via APPLE_ID / APPLE_API_*.
+        # Notarization identifiers — or set via APPLE_API_*.
         [notarize]
-        # apple_id     = "you@example.com"
         # api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         # api_key      = "2X9R4HXF34"
         # api_key_path = "AuthKey_2X9R4HXF34.p8"
