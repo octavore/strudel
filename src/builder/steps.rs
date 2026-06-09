@@ -51,17 +51,17 @@ impl Builder {
         // Build base args shared between both swift invocations
         let source = self.cfg.source_dir.to_str().unwrap();
         let mut build_cmd = ShellCommand::new("swift")
-            .args(&["build", "-c", config_flag, "--package-path", source])
+            .args(["build", "-c", config_flag, "--package-path", source])
             .envs(&self.cfg.build_env);
 
         // add archs from cfg
         for arch in &self.cfg.archs {
-            build_cmd = build_cmd.args(&["--arch", arch]);
+            build_cmd = build_cmd.args(["--arch", arch]);
         }
 
         // embed the Frameworks rpath at link time if we're embedding libraries
         if !self.cfg.embed_libs.is_empty() {
-            build_cmd = build_cmd.arg_group(&[
+            build_cmd = build_cmd.arg_group([
                 "-Xlinker",
                 "-rpath",
                 "-Xlinker",
@@ -427,9 +427,9 @@ impl Builder {
             self.validate_entitlements_for_adhoc(&ent_value);
         }
 
-        let mut codesign_cmd = ShellCommand::new("codesign").args(&["--force", "--sign", identity]);
+        let mut codesign_cmd = ShellCommand::new("codesign").args(["--force", "--sign", identity]);
         if !adhoc {
-            codesign_cmd = codesign_cmd.args(&["--options", "runtime", "--timestamp"]);
+            codesign_cmd = codesign_cmd.args(["--options", "runtime", "--timestamp"]);
         }
 
         // Sign each embedded dylib individually before signing the bundle.
@@ -470,7 +470,7 @@ impl Builder {
             self.validate_entitlements_for_adhoc(&ent_value);
         }
 
-        codesign_cmd = codesign_cmd.arg_group(&["--entitlements", ent_plist_path]);
+        codesign_cmd = codesign_cmd.arg_group(["--entitlements", ent_plist_path]);
         self.sh.run(codesign_cmd.arg(app_bundle))?;
 
         step("Verifying signature...");
@@ -547,7 +547,7 @@ impl Builder {
         }
         let appex_cmd = base_cmd
             .clone()
-            .arg_group(&["--entitlements", ent_plist_str])
+            .arg_group(["--entitlements", ent_plist_str])
             .arg(appex_str);
         appex_cmd.run(&self.sh)?;
         Ok(())
@@ -563,7 +563,7 @@ impl Builder {
             // -k: use zip format
             // --keepParent: include the parent directory in the archive, so the .app bundle
             // structure is preserved.
-            .args(&["-c", "-k", "--keepParent", app_bundle, zip])
+            .args(["-c", "-k", "--keepParent", app_bundle, zip])
             .run(&self.sh)?;
 
         step("Stapling notarization ticket...");
@@ -616,14 +616,13 @@ impl Builder {
              Press Ctrl-C to stop — run `strudel release --resume` to continue later.</dim>"
         );
 
+        let auth_args = self.notary_auth_args()?;
         let notarize_cmd = ShellCommand::new("xcrun")
-            .args(&["notarytool", "submit", temp_dmg_str])
-            .args(self.notary_auth_args()?)
-            .args(&["--output-format", "json"]);
+            .args(["notarytool", "submit", temp_dmg_str])
+            .args(auth_args.iter().cloned())
+            .args(["--output-format", "json"]);
 
-        let submit_out = self
-            .sh
-            .run_redacted_capture(&arg_refs, &submit_display.join(" "))?;
+        let submit_out = self.sh.run(notarize_cmd)?;
 
         let uuid = if self.dry_run {
             "dry-run-uuid-0000".to_string()
@@ -664,7 +663,7 @@ impl Builder {
             cprintln!("<dim>[dry-run]</dim> write {}", pending.state.display());
         }
 
-        self.poll_notarization(&uuid, &pending, &PathBuf::from(&state.dmg_dest), &auth_real)
+        self.poll_notarization(&uuid, &pending, &PathBuf::from(&state.dmg_dest), &auth_args)
     }
 
     fn build_info_json(

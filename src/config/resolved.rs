@@ -115,6 +115,8 @@ pub struct ResolvedExtension {
 pub mod fixtures {
     use std::path::PathBuf;
 
+    use secrecy::ExposeSecret;
+
     use crate::config::NotaryAuth;
     use crate::config::fixtures::RESOLVED;
 
@@ -174,6 +176,8 @@ pub mod fixtures {
         let mut r = RESOLVED.clone();
         r.apple_certificate = "BASE64".into();
         r.apple_certificate_password = "pw".into();
-        assert_eq!(r.signing_cert(), Some(("BASE64", "pw")));
+        let (cert, pw) = r.signing_cert().unwrap();
+        assert_eq!(cert, "BASE64");
+        assert_eq!(pw.expose_secret(), "pw");
     }
 }

@@ -8,6 +8,7 @@ name = "strudel"
 path = "src/main.rs"
 
 [dependencies]
+anstream = "1.0.0"
 anyhow = "1"
 base64 = "0.22"
 clap = {version = "4", features = ["derive"]}
