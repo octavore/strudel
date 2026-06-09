@@ -86,9 +86,10 @@ impl BuildConfig {
             apple_api_issuer: env_or(notarize.api_issuer, "APPLE_API_ISSUER"),
             apple_api_key: env_or(notarize.api_key, "APPLE_API_KEY"),
             // Like other input paths, resolved relative to the config file directory.
-            apple_api_key_path: notarize
-                .api_key_path
-                .or_else(|| std::env::var("APPLE_API_KEY_PATH").ok().map(PathBuf::from))
+            apple_api_key_path: std::env::var("APPLE_API_KEY_PATH")
+                .ok()
+                .map(PathBuf::from)
+                .or(notarize.api_key_path)
                 .map(|p| {
                     if p.is_absolute() {
                         p
