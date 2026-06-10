@@ -78,7 +78,7 @@ impl Builder {
     }
 
     /// Build bundle only (clean → binary → assemble).
-    pub fn build(&self) -> Result<()> {
+    pub fn bundle(&self) -> Result<()> {
         self.clean()?;
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
@@ -95,8 +95,8 @@ impl Builder {
     /// Local/dev pipeline: clean → build → assemble → sign, stopping at a
     /// signed `.app`. Uses the configured signing identity if set, otherwise
     /// signs ad-hoc (can test entitlements and the hardened runtime
-    /// without a Apple Developer account, but can't be notarized).
-    pub fn sign_app(&self) -> Result<()> {
+    /// without an Apple Developer account, but can't be notarized).
+    pub fn build(&self) -> Result<()> {
         // No-op unless APPLE_CERTIFICATE is set; supports signing with an
         // imported Developer ID identity here too, but ad-hoc needs nothing.
         // let _keychain = self.import_certificate()?;

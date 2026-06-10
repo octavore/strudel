@@ -47,7 +47,7 @@ impl Cli {
                 debug,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, debug, None).build()?;
+                Builder::new(cfg, dry_run, open, debug, None).bundle()?;
             },
             Cmd::Build {
                 dry_run,
@@ -55,7 +55,7 @@ impl Cli {
                 debug,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, debug, None).sign_app()?;
+                Builder::new(cfg, dry_run, open, debug, None).build()?;
             },
             Cmd::Release {
                 dry_run,
