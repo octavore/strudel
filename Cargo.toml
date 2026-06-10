@@ -2,6 +2,13 @@
 name = "strudel"
 version = "0.1.0"
 edition = "2024"
+description = "Build and ship macOS/iOS apps without touching Xcode"
+readme = "README.md"
+homepage = "https://github.com/octavore/strudel"
+repository = "https://github.com/octavore/strudel"
+license = "Apache-2.0"
+keywords = ["codesign", "dmg", "macos", "notarize", "swift"]
+categories = ["command-line-utilities", "development-tools::build-utils"]
 
 [[bin]]
 name = "strudel"
