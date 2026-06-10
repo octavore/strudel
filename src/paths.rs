@@ -12,7 +12,6 @@ pub struct Paths {
     pub build_dir: PathBuf,
     pub app_bundle: PathBuf,
     pub dmg: PathBuf,
-    pub zip: PathBuf,
     pub info_plist: PathBuf,
     pub entitlements_plist: PathBuf,
     pub strudel_dir: PathBuf,
@@ -73,7 +72,6 @@ impl Paths {
         Paths {
             strudel_temp_dmg: strudel_dir.join(&dmg_name),
             dmg: build_dir.join(dmg_name),
-            zip: build_dir.join(format!("{app_name}-{version}.zip")),
             info_plist: app_bundle.join("Contents/Info.plist"),
             entitlements_plist: build_dir.join("Entitlements.plist"),
             build_dir: build_dir.clone(),
@@ -140,7 +138,6 @@ mod tests {
         let p = Paths::new(&cfg("/out", "MyApp", "1.2.3"));
         assert_eq!(p.app_bundle, PathBuf::from("/out/MyApp.app"));
         assert_eq!(p.dmg, PathBuf::from("/out/MyApp-1.2.3.dmg"));
-        assert_eq!(p.zip, PathBuf::from("/out/MyApp-1.2.3.zip"));
         assert_eq!(
             p.info_plist,
             PathBuf::from("/out/MyApp.app/Contents/Info.plist")
@@ -154,7 +151,7 @@ mod tests {
 
     #[test]
     fn app_name_with_spaces_is_preserved_literally() {
-        // The .app bundle, DMG, and zip names embed the app name verbatim —
+        // The .app bundle and DMG names embed the app name verbatim —
         // spaces and case are kept (matches Finder's display name).
         let p = Paths::new(&cfg("/out", "My App", "1.0"));
         assert_eq!(p.app_bundle, PathBuf::from("/out/My App.app"));

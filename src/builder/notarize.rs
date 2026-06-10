@@ -141,15 +141,10 @@ impl Builder {
     fn finalize_notarization(&self, pending: &PendingSubmission, dmg_dest: &Path) -> Result<()> {
         let pending_dmg_str = pending.dmg.to_str().unwrap();
         let app_bundle_str = self.paths.app_bundle.to_str().unwrap();
-        let zip_str = self.paths.zip.to_str().unwrap();
 
         step("Stapling app bundle...");
         self.sh
             .run(&["xcrun", "stapler", "staple", app_bundle_str])?;
-
-        step("Creating zip...");
-        self.sh
-            .run(&["ditto", "-c", "-k", "--keepParent", app_bundle_str, zip_str])?;
 
         step("Stapling DMG...");
         self.sh

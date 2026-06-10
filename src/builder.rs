@@ -145,11 +145,9 @@ impl Builder {
         println!();
         let app_bundle_path = cformat!("<cyan>{}</cyan>", app_bundle.display());
         let dmg_path = cformat!("<cyan>{}</cyan>", self.paths.dmg.display());
-        let zip_path = cformat!("<cyan>{}</cyan>", self.paths.zip.display());
         let msg = formatdoc! {r#"
             App bundle: {app_bundle_path}
             DMG:        {dmg_path}
-            Zip:        {zip_path}
         "#};
         if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> Dry run complete. Artifacts would be at:");
