@@ -11,7 +11,7 @@ const ANSI_RESET: &str = "\x1b[0m";
 const TOPICS: &[(&str, &str)] = &[
     ("config", "Full strudel.toml reference"),
     ("signing", "Code signing: Developer ID, keychain, ad-hoc"),
-    ("notarize", "Notarization: Apple ID vs API key auth"),
+    ("notarize", "Notarization: App Store Connect API key auth"),
     ("entitlements", "Entitlements and provisioning profiles"),
     (
         "extensions",
@@ -195,8 +195,6 @@ fn print_signing() {
         3. Set CI secrets:
                {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}          (the base64 string)
                {ANSI_GREEN}APPLE_CERTIFICATE_PASSWORD{ANSI_RESET} (the export password you set)
-
-        strudel will import the certificate into a temporary keychain automatically.
 
         ## Sign order for bundles with extensions
 
@@ -504,9 +502,6 @@ fn print_ci() {
         2. Right-click → Export → save as DeveloperID.p12, set an export password
         3. Encode: {ANSI_BLUE}base64 -i DeveloperID.p12 | pbcopy{ANSI_RESET}
         4. Paste the result as the APPLE_CERTIFICATE secret
-
-        strudel imports the certificate into a temporary keychain automatically when
-        APPLE_CERTIFICATE is set.
 
         ## Storing the .p8 API key in CI
 

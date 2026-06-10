@@ -210,8 +210,8 @@ pub struct BuildSection {
 }
 
 /// `[signing]` — non-secret signing identifiers. Each may also come from the
-/// matching env var (`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`); the config
-/// value wins.
+/// matching env var (`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`); the env var
+/// takes precedence when both are set.
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct SigningSection {
@@ -219,9 +219,10 @@ pub struct SigningSection {
     pub team_id: Option<String>,
 }
 
-/// `[notarize]` — non-secret notarization identifiers (env vars
-/// `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`). Secrets
-/// (`APPLE_CERTIFICATE*`) are read from the environment only.
+/// `[notarize]` — non-secret notarization identifiers. Each may also come from
+/// the matching env var (`APPLE_API_ISSUER`, `APPLE_API_KEY`,
+/// `APPLE_API_KEY_PATH`); the env var takes precedence when both are set.
+/// Secrets (`APPLE_CERTIFICATE*`) are read from the environment only.
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct NotarizeSection {
@@ -528,12 +529,37 @@ mod tests {
     }
 
     #[test]
-    fn config_value_wins_over_environment() {
-        // A value present in the file is used verbatim, independent of any
-        // ambient APPLE_SIGNING_IDENTITY in the environment (config takes precedence).
-        let cfg = parse_build_config(FULL).unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
-        assert_eq!(r.sign_identity, "Developer ID Application: Me (TEAM123456)");
-        assert_eq!(r.team_id, "TEAM123456");
+    fn environment_wins_over_config_value() {
+        // When both an env var and a config value are present, the env var takes
+        // precedence. Use temp_env to avoid polluting other tests.
+        temp_env::with_vars(
+            [
+                ("APPLE_SIGNING_IDENTITY", Some("env-identity")),
+                ("APPLE_TEAM_ID", Some("env-team")),
+            ],
+            || {
+                let cfg = parse_build_config(FULL).unwrap();
+                let r = cfg.resolve(Path::new("/cfg")).unwrap();
+                assert_eq!(r.sign_identity, "env-identity");
+                assert_eq!(r.team_id, "env-team");
+            },
+        );
+    }
+
+    #[test]
+    fn config_value_used_when_no_env_var() {
+        // When the env var is absent, the config file value is used.
+        temp_env::with_vars(
+            [
+                ("APPLE_SIGNING_IDENTITY", None::<&str>),
+                ("APPLE_TEAM_ID", None::<&str>),
+            ],
+            || {
+                let cfg = parse_build_config(FULL).unwrap();
+                let r = cfg.resolve(Path::new("/cfg")).unwrap();
+                assert_eq!(r.sign_identity, "Developer ID Application: Me (TEAM123456)");
+                assert_eq!(r.team_id, "TEAM123456");
+            },
+        );
     }
 }
