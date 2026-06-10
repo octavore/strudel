@@ -6,12 +6,85 @@ on:
     tags:
       - 'v*'
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
 jobs:
   release:
+    name: release
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
       - name: Install Rust (stable)
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
+
+      - name: Cache cargo registry & target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build (aarch64-apple-darwin)
+        run: cargo build --release --target aarch64-apple-darwin --locked
+
+      - name: Package
+        id: package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE="strudel-${GITHUB_REF_NAME}-aarch64-apple-darwin.tar.gz"
+
+          tar -czf "$ARCHIVE" -C target/aarch64-apple-darwin/release strudel
+
+          SHA256=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: ${{ steps.package.outputs.archive }}
+          generate_release_notes: true
+          draft: true
+          fail_on_unmatched_files: true
+
+      - name: Update Homebrew formula
+        env:
+          HOMEBREW_PAT: ${{ secrets.HOMEBREW_PAT }}
+        run: |
+          VERSION="${{ steps.package.outputs.version }}"
+          SHA256="${{ steps.package.outputs.sha256 }}"
+          ARCHIVE="${{ steps.package.outputs.archive }}"
+
+          FORMULA=$(sed \
+            -e "s/__VERSION__/${VERSION}/g" \
+            -e "s/__SHA256__/${SHA256}/g" \
+            -e "s/__ARCHIVE__/${ARCHIVE}/g" \
+            .github/formula/strudel.rb)
+
+          CURRENT_SHA=$(curl -sL \
+            -H "Authorization: Bearer ${HOMEBREW_PAT}" \
+            "https://api.github.com/repos/octavore/homebrew-tools/contents/Formula/strudel.rb" \
+            | jq -r '.sha // empty')
+
+          CONTENT_B64=$(printf '%s\n' "$FORMULA" | base64)
+
+          jq -n \
+            --arg message "strudel: update to v${VERSION}" \
+            --arg content "$CONTENT_B64" \
+            --arg sha "$CURRENT_SHA" \
+            '{message: $message, content: $content, committer: {name: "github-actions[bot]", email: "github-actions[bot]@users.noreply.github.com"}} + (if $sha != "" then {sha: $sha} else {} end)' \
+          | curl -sL --fail-with-body -X PUT \
+            -H "Authorization: Bearer ${HOMEBREW_PAT}" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/octavore/homebrew-tools/contents/Formula/strudel.rb" \
+            --data-binary @-
