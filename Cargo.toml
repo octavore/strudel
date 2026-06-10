@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/dmg"]
+resolver = "2"
+
 [package]
 name = "strudel"
 version = "0.1.0"
@@ -15,6 +19,7 @@ name = "strudel"
 path = "src/main.rs"
 
 [dependencies]
+dmg = { path = "crates/dmg" }
 anstream = "1.0.0"
 anyhow = "1"
 base64 = "0.22"

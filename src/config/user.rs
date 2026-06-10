@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use crate::config::ResolvedConfig;
 use crate::config::extension::ExtensionSection;
+use crate::config::resolved::ResolvedDmg;
 use crate::config::utils::{env_or, resolve_path};
 
 /// The on-disk `strudel.toml`. Organized into sections; `deny_unknown_fields`
@@ -26,6 +27,8 @@ pub struct BuildConfig {
     pub extensions: Vec<ExtensionSection>,
     #[serde(default)]
     pub ios: IosSection,
+    #[serde(default)]
+    pub dmg: Option<DmgSection>,
 }
 
 impl BuildConfig {
@@ -37,6 +40,7 @@ impl BuildConfig {
             notarize,
             extensions,
             ios,
+            dmg,
         } = self;
 
         let source_dir = resolve_path(config_dir, build.source_dir, ".");
@@ -58,6 +62,11 @@ impl BuildConfig {
             .into_iter()
             .map(|ext| ext.resolve(config_dir))
             .collect::<Result<Vec<_>>>()?;
+
+        let dmg = match dmg {
+            None => Some(ResolvedDmg::default()),
+            Some(d) => d.resolve(config_dir),
+        };
 
         Ok(ResolvedConfig {
             // User-supplied input paths are resolved relative to the config file's
@@ -171,6 +180,7 @@ impl BuildConfig {
             ios_deployment_target,
             ios_assets_dir,
             ios_app_icon_name,
+            dmg,
         })
     }
 }
@@ -230,6 +240,62 @@ pub struct NotarizeSection {
     pub api_key: Option<String>,
     pub api_key_path: Option<PathBuf>,
     pub timeout: Option<u64>,
+}
+
+/// `[dmg]` — DMG window customization for `strudel release`.
+///
+/// The styled Finder window (a generated `.DS_Store`, applied headlessly by the
+/// `dmg` crate) is the default even when this section is absent. Add the
+/// section to override individual fields or opt out with `plain = true`.
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct DmgSection {
+    /// Set to `true` to skip the styled window and produce a plain compressed
+    /// DMG directly (no Finder window configuration). Default: `false`.
+    #[serde(default)]
+    pub plain: bool,
+    /// Path to a PNG or JPEG background image for the DMG Finder window.
+    pub background: Option<PathBuf>,
+    /// Finder window width in pixels. Default: 660.
+    pub window_width: Option<u32>,
+    /// Finder window height in pixels. Default: 400.
+    pub window_height: Option<u32>,
+    /// Icon size in pixels. Default: 128.
+    pub icon_size: Option<u32>,
+    /// Horizontal position of the .app icon. Default: 192.
+    pub app_x: Option<u32>,
+    /// Vertical position of the .app icon. Default: 192.
+    pub app_y: Option<u32>,
+    /// Horizontal position of the Applications symlink. Default: 468.
+    pub applications_x: Option<u32>,
+    /// Vertical position of the Applications symlink. Default: 192.
+    pub applications_y: Option<u32>,
+}
+
+impl DmgSection {
+    /// Returns `None` when `plain = true` (simple UDZO path); otherwise
+    /// returns the resolved config with defaults filled in.
+    fn resolve(self, config_dir: &Path) -> Option<ResolvedDmg> {
+        if self.plain {
+            return None;
+        }
+        Some(ResolvedDmg {
+            background: self.background.map(|p| {
+                if p.is_absolute() {
+                    p
+                } else {
+                    config_dir.join(p)
+                }
+            }),
+            window_width: self.window_width.unwrap_or(660),
+            window_height: self.window_height.unwrap_or(400),
+            icon_size: self.icon_size.unwrap_or(128),
+            app_x: self.app_x.unwrap_or(192),
+            app_y: self.app_y.unwrap_or(192),
+            applications_x: self.applications_x.unwrap_or(468),
+            applications_y: self.applications_y.unwrap_or(192),
+        })
+    }
 }
 
 /// `[ios]` — optional settings for iOS simulator and device workflows.
@@ -334,6 +400,21 @@ pub fn generate_initial_toml(
         # deployment_target = "18.0"               # iOS deployment target; default shown
         # assets_dir        = "Sources/{app_name}/Assets.xcassets"  # xcassets for actool
         # app_icon_name     = "AppIcon"            # icon set name inside assets_dir
+
+        # DMG window configuration for `strudel release`.
+        # A styled Finder window (via a generated .DS_Store) is applied by default.
+        # Uncomment [dmg] to override specific fields, or set plain = true for a
+        # plain compressed DMG.
+        # [dmg]
+        # plain             = true                          # skip the styled window
+        # background        = "assets/dmg-background.png"  # PNG/JPEG background image
+        # window_width      = 660                           # default shown
+        # window_height     = 400                           # default shown
+        # icon_size         = 128                           # default shown
+        # app_x             = 192                           # .app icon X position
+        # app_y             = 192                           # .app icon Y position
+        # applications_x    = 468                           # Applications symlink X position
+        # applications_y    = 192                           # Applications symlink Y position
     "#}
 }
 
@@ -387,6 +468,9 @@ mod tests {
         );
         assert_eq!(cfg.notarize.api_key.as_deref(), Some("KEYID123"));
         assert_eq!(cfg.notarize.timeout, Some(1200));
+        let dmg = cfg.dmg.as_ref().expect("FULL fixture includes [dmg]");
+        assert_eq!(dmg.window_width, Some(800));
+        assert_eq!(dmg.icon_size, Some(100));
     }
 
     #[test]
@@ -444,6 +528,8 @@ mod tests {
             Some(PathBuf::from("/cfg/ent.json"))
         );
         assert_eq!(r.apple_api_key_path, Some(PathBuf::from("/cfg/AuthKey.p8")));
+        let dmg = r.dmg.expect("FULL fixture has [dmg]");
+        assert_eq!(dmg.background, Some(PathBuf::from("/cfg/dmg-bg.png")));
     }
 
     #[test]
@@ -526,6 +612,114 @@ mod tests {
             r.ios_assets_dir,
             Some(PathBuf::from("/cfg/Sources/Assets.xcassets"))
         );
+    }
+
+    #[test]
+    fn dmg_absent_uses_defaults() {
+        let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0", "1");
+        let cfg: BuildConfig = toml::from_str(&t).unwrap();
+        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let dmg = r
+            .dmg
+            .expect("absent [dmg] section should use defaults, not None");
+        assert_eq!(dmg.window_width, 660);
+        assert_eq!(dmg.window_height, 400);
+        assert_eq!(dmg.icon_size, 128);
+        assert!(dmg.background.is_none());
+    }
+
+    #[test]
+    fn dmg_plain_true_gives_none() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [dmg]
+            plain = true
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        assert!(
+            r.dmg.is_none(),
+            "plain = true should skip the styled window path"
+        );
+    }
+
+    #[test]
+    fn dmg_section_parses_and_resolves() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+
+            [dmg]
+            background = "assets/bg.png"
+            window_width = 800
+            window_height = 500
+            icon_size = 100
+            app_x = 200
+            app_y = 200
+            applications_x = 600
+            applications_y = 200
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let dmg = r.dmg.expect("dmg should be Some");
+        assert_eq!(dmg.background, Some(PathBuf::from("/cfg/assets/bg.png")));
+        assert_eq!(dmg.window_width, 800);
+        assert_eq!(dmg.window_height, 500);
+        assert_eq!(dmg.icon_size, 100);
+        assert_eq!(dmg.app_x, 200);
+        assert_eq!(dmg.app_y, 200);
+        assert_eq!(dmg.applications_x, 600);
+        assert_eq!(dmg.applications_y, 200);
+    }
+
+    #[test]
+    fn dmg_empty_section_uses_defaults() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+
+            [dmg]
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let dmg = r.dmg.expect("empty [dmg] section should use defaults");
+        assert!(dmg.background.is_none());
+        assert_eq!(dmg.window_width, 660);
+        assert_eq!(dmg.window_height, 400);
+        assert_eq!(dmg.icon_size, 128);
+        assert_eq!(dmg.app_x, 192);
+        assert_eq!(dmg.app_y, 192);
+        assert_eq!(dmg.applications_x, 468);
+        assert_eq!(dmg.applications_y, 192);
+    }
+
+    #[test]
+    fn dmg_background_absolute_path_untouched() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [dmg]
+            background = "/abs/bg.png"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let dmg = r.dmg.unwrap();
+        assert_eq!(dmg.background, Some(PathBuf::from("/abs/bg.png")));
     }
 
     #[test]

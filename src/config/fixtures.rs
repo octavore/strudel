@@ -28,9 +28,19 @@ pub const FULL: &str = indoc::indoc! {r#"
   api_key = "KEYID123"
   api_key_path = "AuthKey.p8"
   timeout = 1200
+
+  [dmg]
+  background = "dmg-bg.png"
+  window_width = 800
+  window_height = 500
+  icon_size = 100
+  app_x = 200
+  app_y = 200
+  applications_x = 600
+  applications_y = 200
 "#};
 
-pub const RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
+pub static RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
     app_name: "A".into(),
     bundle_id: "b".into(),
     version: "1".into(),
@@ -50,6 +60,7 @@ pub const RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
     extensions: Vec::new(),
     resources_dir: None,
     resources: Vec::new(),
+    dmg: None,
     ios_simulator: "iPhone 16".into(),
     ios_device: None,
     ios_deployment_target: "18.0".into(),

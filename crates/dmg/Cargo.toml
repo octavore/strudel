@@ -1,0 +1,10 @@
+[package]
+name = "dmg"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+binrw = "0.15.1"
+plist = "1"
+tempfile = "3"

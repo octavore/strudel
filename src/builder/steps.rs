@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
+use dmg::DmgSpec;
 use indoc::formatdoc;
 use serde_json::{Value, json};
 
@@ -563,31 +564,87 @@ impl Builder {
     }
 
     pub fn package_dmg(&self) -> Result<()> {
-        let app_bundle = self.paths.app_bundle.to_str().unwrap();
-
-        // we store the dmg in a temp location to await notarization.
+        let app_name = &self.cfg.app_name;
+        let vol_name = format!("{app_name} {}", self.cfg.version);
         let temp_dmg = &self.paths.strudel_temp_dmg;
         let temp_dmg_str = temp_dmg.to_str().unwrap();
 
-        let vol_name = format!("{} {}", self.cfg.app_name, self.cfg.version);
-
-        if !self.dry_run {
-            fs::create_dir_all(&self.paths.strudel_dir)?;
-        }
-
         step("Creating DMG...");
-        self.sh.run(&[
-            "hdiutil",
-            "create",
-            "-volname",
-            &vol_name,
-            "-srcfolder",
-            app_bundle,
-            "-ov",
-            "-format",
-            "UDZO",
-            temp_dmg_str,
-        ])?;
+
+        if let Some(dmg_cfg) = &self.cfg.dmg {
+            if self.dry_run {
+                cprintln!(
+                    "<dim>[dry-run]</dim> dmg::create {:?} → {}",
+                    vol_name,
+                    temp_dmg.display()
+                );
+                return Ok(());
+            }
+            fs::create_dir_all(&self.paths.strudel_dir)?;
+            step("Configuring DMG window...");
+            dmg::create(
+                &DmgSpec {
+                    vol_name,
+                    app_name: app_name.clone(),
+                    source_app: self.paths.app_bundle.clone(),
+                    background: dmg_cfg.background.clone(),
+                    window_width: dmg_cfg.window_width,
+                    window_height: dmg_cfg.window_height,
+                    icon_size: dmg_cfg.icon_size,
+                    app_x: dmg_cfg.app_x,
+                    app_y: dmg_cfg.app_y,
+                    applications_x: dmg_cfg.applications_x,
+                    applications_y: dmg_cfg.applications_y,
+                },
+                temp_dmg,
+            )?;
+        } else {
+            // Plain UDZO: no custom window layout — use staging folder approach.
+            let staging = &self.paths.dmg_staging;
+            let staging_str = staging.to_str().unwrap();
+            let staging_app = staging.join(format!("{app_name}.app"));
+            let staging_applications = staging.join("Applications");
+
+            if self.dry_run {
+                cprintln!("<dim>[dry-run]</dim> rm -rf {staging_str}");
+                cprintln!("<dim>[dry-run]</dim> mkdir -p {staging_str}");
+                cprintln!(
+                    "<dim>[dry-run]</dim> ln -s /Applications {}",
+                    staging_applications.display()
+                );
+            } else {
+                fs::create_dir_all(&self.paths.strudel_dir)?;
+                if staging.exists() {
+                    fs::remove_dir_all(staging)?;
+                }
+                fs::create_dir_all(staging)?;
+                std::os::unix::fs::symlink("/Applications", &staging_applications)?;
+            }
+
+            self.sh.run(&[
+                "cp",
+                "-rp",
+                self.paths.app_bundle.to_str().unwrap(),
+                staging_app.to_str().unwrap(),
+            ])?;
+
+            self.sh.run(&[
+                "hdiutil",
+                "create",
+                "-volname",
+                &vol_name,
+                "-srcfolder",
+                staging_str,
+                "-ov",
+                "-format",
+                "UDZO",
+                temp_dmg_str,
+            ])?;
+
+            if !self.dry_run {
+                fs::remove_dir_all(staging)?;
+            }
+        }
 
         Ok(())
     }

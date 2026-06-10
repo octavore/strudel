@@ -152,6 +152,32 @@ fn print_config() {
 
         See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
 
+        ## [dmg] — optional overrides (styled Finder window is the default)
+        {ANSI_PURPLE}
+        [dmg]
+        plain          = false                         # set true for a plain UDZO DMG
+        background     = "assets/dmg-background.png"  # PNG/JPEG background image; optional
+        window_width   = 660                           # Finder window width (default shown)
+        window_height  = 400                           # Finder window height (default shown)
+        icon_size      = 128                           # icon size in pixels (default shown)
+        app_x          = 192                           # .app icon X position (default shown)
+        app_y          = 192                           # .app icon Y position (default shown)
+        applications_x = 468                           # Applications symlink X (default shown)
+        applications_y = 192                           # Applications symlink Y (default shown)
+        {ANSI_RESET}
+        By default (even with no `[dmg]` section), strudel stages the app, an
+        Applications symlink, and a generated `.DS_Store` that lays out the Finder
+        window (icon positions, size, background), then builds the compressed DMG
+        directly from that folder. This is fully headless — no mounting, Finder,
+        or AppleScript required.
+
+        To skip window configuration and produce a plain compressed DMG directly:
+        {ANSI_PURPLE}
+        [dmg]
+        plain = true
+        {ANSI_RESET}
+        All other fields are optional overrides; omit `[dmg]` entirely to use defaults.
+
         ## Environment secrets (never in strudel.toml)
 
         {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}           base64-encoded Developer ID .p12 (CI use)

@@ -47,7 +47,7 @@ impl Cli {
                 debug,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, debug, None).bundle()?;
+                Builder::new(cfg, dry_run, open, debug, None, false).bundle()?;
             },
             Cmd::Build {
                 dry_run,
@@ -55,15 +55,16 @@ impl Cli {
                 debug,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, debug, None).build()?;
+                Builder::new(cfg, dry_run, open, debug, None, false).build()?;
             },
             Cmd::Release {
                 dry_run,
                 open,
                 resume,
+                skip_notarization,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, false, resume).release()?;
+                Builder::new(cfg, dry_run, open, false, resume, skip_notarization).release()?;
             },
             Cmd::Sim {
                 dry_run,
@@ -71,7 +72,7 @@ impl Cli {
                 simulator,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, false, debug, None).sim(simulator.as_deref())?;
+                Builder::new(cfg, dry_run, false, debug, None, false).sim(simulator.as_deref())?;
             },
             Cmd::Device {
                 dry_run,
@@ -79,7 +80,7 @@ impl Cli {
                 device,
             } => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, false, debug, None).device(device.as_deref())?;
+                Builder::new(cfg, dry_run, false, debug, None, false).device(device.as_deref())?;
             },
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
@@ -128,6 +129,9 @@ enum Cmd {
         /// submission, or omit to auto-detect the most recent one.
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         resume: Option<String>,
+        /// Build and package the DMG without submitting for notarization
+        #[arg(long)]
+        skip_notarization: bool,
     },
     /// Scaffold a strudel.toml in the given directory
     Init {

@@ -31,6 +31,7 @@ pub struct Builder {
     open: bool,
     debug: bool,
     resume: Option<String>,
+    skip_notarization: bool,
 }
 
 /// Print a green progress header for a build step.
@@ -45,6 +46,7 @@ impl Builder {
         open: bool,
         debug: bool,
         resume: Option<String>,
+        skip_notarization: bool,
     ) -> Self {
         Builder {
             paths: Paths::new(&cfg),
@@ -54,6 +56,7 @@ impl Builder {
             open,
             debug,
             resume,
+            skip_notarization,
         }
     }
 
@@ -121,13 +124,16 @@ impl Builder {
 
     /// Full release pipeline: clean → binary → assemble → sign → package DMG →
     /// notarize. With `--resume`, skips the build and resumes a pending
-    /// notarization instead.
+    /// notarization instead. With `--skip-notarization`, stops after packaging
+    /// the DMG.
     pub fn release(&self) -> Result<()> {
         if let Some(ref uuid_hint) = self.resume {
             return self.resume_notarization(uuid_hint);
         }
 
-        self.preflight_credentials()?;
+        if !self.skip_notarization {
+            self.preflight_credentials()?;
+        }
         // Held for the whole build: the imported identity must remain available
         // to both `sign` and the DMG signing in `package_dmg`. Dropped at the
         // end of this function, which tears the temporary keychain back down.
@@ -140,11 +146,14 @@ impl Builder {
         self.assemble_extensions(&bin_dir)?;
         self.sign(true)?;
         self.package_dmg()?;
-        self.notarize()?;
+
+        if !self.skip_notarization {
+            self.notarize()?;
+        }
 
         println!();
         let app_bundle_path = cformat!("<cyan>{}</cyan>", app_bundle.display());
-        let dmg_path = cformat!("<cyan>{}</cyan>", self.paths.dmg.display());
+        let dmg_path = cformat!("<cyan>{}</cyan>", self.paths.strudel_temp_dmg.display());
         let msg = formatdoc! {r#"
             App bundle: {app_bundle_path}
             DMG:        {dmg_path}
@@ -152,14 +161,19 @@ impl Builder {
         if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> Dry run complete. Artifacts would be at:");
             println!("{msg}");
-            let problems = self.credential_problems();
-            if !problems.is_empty() {
-                println!();
-                cprintln!("<red>WARNING:</red> Credential problems:");
-                for p in &problems {
-                    cprintln!("- {p}");
+            if !self.skip_notarization {
+                let problems = self.credential_problems();
+                if !problems.is_empty() {
+                    println!();
+                    cprintln!("<red>WARNING:</red> Credential problems:");
+                    for p in &problems {
+                        cprintln!("- {p}");
+                    }
                 }
             }
+        } else if self.skip_notarization {
+            cprintln!("<green>Done!</green> DMG built (notarization skipped):");
+            println!("{msg}");
         } else {
             cprintln!("<green>Done!</green> Distribution artifacts:");
             println!("{msg}");

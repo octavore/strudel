@@ -266,11 +266,12 @@ mod tests {
             apple_certificate_password: String::new().into(),
             resources_dir: None,
             resources: Vec::new(),
+            dmg: None,
         }
     }
 
     fn builder(cfg: ResolvedConfig) -> Builder {
-        Builder::new(cfg, true, false, false, None)
+        Builder::new(cfg, true, false, false, None, false)
     }
 
     #[test]

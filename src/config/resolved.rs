@@ -6,6 +6,37 @@ use secrecy::{ExposeSecret, SecretString};
 use crate::config::extension::ExtensionKind;
 use crate::config::user::NotaryAuth;
 
+/// Resolved `[dmg]` customization. `None` in `ResolvedConfig` only when the
+/// user explicitly sets `plain = true` in their `[dmg]` section; the plain UDZO
+/// path is used in that case. When absent entirely from the config, defaults
+/// are applied and the styled window (a generated `.DS_Store`) is produced.
+#[derive(Debug, Clone)]
+pub struct ResolvedDmg {
+    pub background: Option<PathBuf>,
+    pub window_width: u32,
+    pub window_height: u32,
+    pub icon_size: u32,
+    pub app_x: u32,
+    pub app_y: u32,
+    pub applications_x: u32,
+    pub applications_y: u32,
+}
+
+impl Default for ResolvedDmg {
+    fn default() -> Self {
+        ResolvedDmg {
+            background: None,
+            window_width: 660,
+            window_height: 400,
+            icon_size: 128,
+            app_x: 192,
+            app_y: 162,
+            applications_x: 468,
+            applications_y: 162,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub app_name: String,
@@ -33,6 +64,10 @@ pub struct ResolvedConfig {
     pub resources_dir: Option<PathBuf>,
     /// Individual files to copy into `Contents/Resources/`.
     pub resources: Vec<PathBuf>,
+
+    /// DMG customization. `Some` with defaults when `[dmg]` is absent; `None`
+    /// only when the user opts out with `plain = true`.
+    pub dmg: Option<ResolvedDmg>,
 
     // iOS simulator and device settings.
     pub ios_simulator: String,

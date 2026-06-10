@@ -16,6 +16,7 @@ pub struct Paths {
     pub entitlements_plist: PathBuf,
     pub strudel_dir: PathBuf,
     pub strudel_temp_dmg: PathBuf,
+    pub dmg_staging: PathBuf,
     /// One entry per [`ResolvedExtension`], in the same order. Empty when no
     /// extensions are configured.
     pub extensions: Vec<ExtensionPaths>,
@@ -71,6 +72,7 @@ impl Paths {
             .collect();
         Paths {
             strudel_temp_dmg: strudel_dir.join(&dmg_name),
+            dmg_staging: strudel_dir.join("dmg-staging"),
             dmg: build_dir.join(dmg_name),
             info_plist: app_bundle.join("Contents/Info.plist"),
             entitlements_plist: build_dir.join("Entitlements.plist"),
@@ -130,6 +132,7 @@ mod tests {
             apple_certificate_password: String::new().into(),
             resources_dir: None,
             resources: Vec::new(),
+            dmg: None,
         }
     }
 
