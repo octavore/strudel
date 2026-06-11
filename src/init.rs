@@ -26,6 +26,24 @@ fn prompt(question: &str, default: Option<&str>) -> Result<String> {
     })
 }
 
+fn generate_package_swift(app_name: &str) -> String {
+    indoc::formatdoc! {r#"
+        // swift-tools-version: 6.0
+        import PackageDescription
+
+        let package = Package(
+            name: "{app_name}",
+            platforms: [.macOS(.v14)],
+            targets: [
+                .executableTarget(
+                    name: "{app_name}",
+                    path: "Sources/{app_name}"
+                ),
+            ]
+        )
+    "#}
+}
+
 pub fn run_init(output_dir: &Path) -> Result<()> {
     let out_path = output_dir.join("strudel.toml");
     if out_path.exists() {
@@ -46,8 +64,17 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
     let content = generate_initial_toml(&app_name, &bundle_id, &version, &build_number);
     std::fs::create_dir_all(output_dir)?;
     std::fs::write(&out_path, &content)?;
-
     println!("\nCreated {}", out_path.display());
+
+    let pkg_path = output_dir.join("Package.swift");
+    if pkg_path.exists() {
+        println!("Skipped {} (already exists)", pkg_path.display());
+    } else {
+        let pkg_content = generate_package_swift(&app_name);
+        std::fs::write(&pkg_path, &pkg_content)?;
+        println!("Created {}", pkg_path.display());
+    }
+
     println!("\nNext steps:");
     println!("  strudel bundle   # build app bundle (unsigned)");
     println!("  strudel build    # build + sign for local dev (ad-hoc if no identity)");
@@ -59,6 +86,14 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_swift_contains_app_name() {
+        let pkg = generate_package_swift("Foo");
+        assert!(pkg.contains("swift-tools-version: 6.0"));
+        assert!(pkg.contains("name: \"Foo\""));
+        assert!(pkg.contains("name: \"Foo\",\n            path: \"Sources/Foo\""));
+    }
 
     #[test]
     fn run_init_refuses_to_overwrite() {
