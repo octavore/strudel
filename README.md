@@ -6,7 +6,7 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 a config-driven, easy-to-introspect pipeline. Point it at a Package.swift project to produce
 a signed `.app` bundle and a notarized DMG.
 
-- [Requirements](#requirements)
+- [Installation](#installation)
 - [Example strudel build](#example-strudel-build)
 - [Usage](#usage)
 - [Config file structure](#config-file-structure)
@@ -16,7 +16,15 @@ a signed `.app` bundle and a notarized DMG.
 - [Development](#development)
 - [Other tips](#other-tips)
 
-## Requirements
+## Installation
+
+Install strudel with homebrew:
+
+```sh
+brew install octavore/tools/strudel
+```
+
+### Requirements
 
 - macOS with the Xcode command line tools installed
 - Swift Package.swift based project
