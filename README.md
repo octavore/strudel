@@ -215,6 +215,44 @@ and sealed inside the notarized host app. Two kinds are supported:
 | `extension_point_identifier` | string | *(required)* | `NSExtensionPointIdentifier`, identifies the extension point (e.g. `"com.apple.share-services"`) |
 | `principal_class`            | string | *(none)*     | `NSExtensionPrincipalClass`, required by some extension points                                   |
 
+### `[dmg]` (optional)
+
+Controls the Finder window layout of the DMG produced by `strudel release`. By
+default (no `[dmg]` section), strudel generates a styled drag-to-install window
+with the app icon on the left and an Applications symlink on the right. Add the
+section to override individual fields or opt out entirely with `plain = true`.
+
+| Key               | Type    | Default | Description                                                              |
+| ----------------- | ------- | ------- | ------------------------------------------------------------------------ |
+| `plain`           | bool    | `false` | Skip the styled window; produce a plain compressed DMG instead           |
+| `background`      | string  | *(none)*| Path to a PNG or JPEG background image (relative to config file)         |
+| `window_width`    | integer | `660`   | Finder window width in pixels                                            |
+| `window_height`   | integer | `400`   | Finder window height in pixels                                           |
+| `icon_size`       | integer | `128`   | Icon size in pixels                                                      |
+| `app_x`           | integer | `192`   | Horizontal position of the `.app` icon                                   |
+| `app_y`           | integer | `192`   | Vertical position of the `.app` icon                                     |
+| `applications_x`  | integer | `468`   | Horizontal position of the Applications symlink                          |
+| `applications_y`  | integer | `192`   | Vertical position of the Applications symlink                            |
+
+Example (custom background and larger icons):
+
+```toml
+[dmg]
+background    = "assets/dmg-background.png"
+window_width  = 800
+window_height = 500
+icon_size     = 160
+app_x         = 200
+applications_x = 600
+```
+
+To produce a plain compressed DMG with no special styling.
+
+```toml
+[dmg]
+plain = true
+```
+
 ### `[signing]` and `[notarize]` (optional in the strudel.toml)
 
 Required for `release`; each key may instead come from its environment variable (env var
