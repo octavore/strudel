@@ -153,7 +153,7 @@ impl Builder {
 
         println!();
         let app_bundle_path = cformat!("<cyan>{}</cyan>", app_bundle.display());
-        let dmg_path = cformat!("<cyan>{}</cyan>", self.paths.strudel_temp_dmg.display());
+        let dmg_path = cformat!("<cyan>{}</cyan>", self.paths.dmg.display());
         let msg = formatdoc! {r#"
             App bundle: {app_bundle_path}
             DMG:        {dmg_path}
