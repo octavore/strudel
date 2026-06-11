@@ -321,7 +321,7 @@ pub struct IosSection {
 pub struct NotaryAuth {
     pub key_path: PathBuf,
     pub key_id: String,
-    pub issuer: String,
+    pub issuer: Option<String>,
 }
 
 pub fn generate_initial_toml(

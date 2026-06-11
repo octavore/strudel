@@ -93,12 +93,12 @@ impl ResolvedConfig {
     pub fn notary_auth(&self) -> Option<NotaryAuth> {
         if let Some(key_path) = &self.apple_api_key_path
             && !self.apple_api_key.is_empty()
-            && !self.apple_api_issuer.is_empty()
         {
             return Some(NotaryAuth {
                 key_path: key_path.clone(),
                 key_id: self.apple_api_key.clone(),
-                issuer: self.apple_api_issuer.clone(),
+                issuer: (!self.apple_api_issuer.is_empty())
+                    .then(|| self.apple_api_issuer.clone()),
             });
         }
         None
@@ -160,7 +160,7 @@ pub mod fixtures {
 
         let auth = r.notary_auth().expect("expected Some(NotaryAuth)");
         assert_eq!(auth.key_id, "KID");
-        assert_eq!(auth.issuer, "ISS");
+        assert_eq!(auth.issuer, Some("ISS".into()));
         assert_eq!(auth.key_path, PathBuf::from("/k.p8"));
     }
 

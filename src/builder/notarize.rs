@@ -39,14 +39,17 @@ fn format_elapsed(submitted_at: u64) -> String {
 impl Builder {
     pub fn notary_auth_args(&self) -> Result<Vec<ShellArg>> {
         if let Some(auth) = self.cfg.notary_auth() {
-            return Ok(vec![
+            let mut args = vec![
                 "--key".into(),
                 auth.key_path.into(),
                 "--key-id".into(),
                 auth.key_id.into(),
-                "--issuer".into(),
-                auth.issuer.into(),
-            ]);
+            ];
+            if let Some(issuer) = auth.issuer {
+                args.push("--issuer".into());
+                args.push(issuer.into());
+            }
+            return Ok(args);
         }
         if self.dry_run {
             cprintln!("<red>Error: No notarization credentials configured.</red>");
