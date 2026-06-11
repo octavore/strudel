@@ -97,8 +97,7 @@ impl ResolvedConfig {
             return Some(NotaryAuth {
                 key_path: key_path.clone(),
                 key_id: self.apple_api_key.clone(),
-                issuer: (!self.apple_api_issuer.is_empty())
-                    .then(|| self.apple_api_issuer.clone()),
+                issuer: (!self.apple_api_issuer.is_empty()).then(|| self.apple_api_issuer.clone()),
             });
         }
         None
