@@ -574,7 +574,7 @@ impl Builder {
         if let Some(dmg_cfg) = &self.cfg.dmg {
             if self.dry_run {
                 cprintln!(
-                    "<dim>[dry-run]</dim> dmg::create {:?} → {}",
+                    "<dim>[dry-run]</dim> hdiutil create -volname {:?} -format UDZO {}",
                     vol_name,
                     temp_dmg.display()
                 );
