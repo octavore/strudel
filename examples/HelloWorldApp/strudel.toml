@@ -1,0 +1,5 @@
+[app]
+name         = "HelloWorld"
+bundle_id    = "com.example.helloworld"
+version      = "0.1.0"
+build_number = "1"
