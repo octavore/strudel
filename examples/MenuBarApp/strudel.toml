@@ -1,0 +1,10 @@
+[app]
+name         = "Clipspect"
+bundle_id    = "com.example.clipspect"
+version      = "0.1.0"
+build_number = "1"
+
+[build]
+info_json_path         = "resources/info.json"
+entitlements_json_path = "resources/entitlements.json"
+resources              = ["resources/menu-icon.png"]
