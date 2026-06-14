@@ -1,0 +1,17 @@
+[app]
+name         = "Copy Tab App"
+bundle_id    = "com.example.copytab"
+version      = "0.1.0"
+build_number = "1"
+
+[build]
+target_name            = "CopyTabsApp"
+entitlements_json_path = "entitlements.json"
+
+[[extensions]]
+kind                   = "safari_web_extension"
+target_name            = "SafariExtensionHandler"
+bundle_id              = "com.example.copytab.Extension"
+resources_dir          = "extension"
+entitlements_json_path = "ext-entitlements.json"
+principal_class        = "SafariWebExtensionHandler"
