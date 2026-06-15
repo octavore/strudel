@@ -25,7 +25,7 @@ echo "Releasing v${VERSION}"
 
 set -x
 cargo set-version "$VERSION"
-git add Cargo.toml Cargo.lock
+git add Cargo.toml Cargo.lock crates/dmg/Cargo.toml
 git commit -m "chore: release v${VERSION}"
 git tag "v${VERSION}"
 set +x
