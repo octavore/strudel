@@ -10,6 +10,10 @@ const ANSI_RESET: &str = "\x1b[0m";
 
 const TOPICS: &[(&str, &str)] = &[
     ("config", "Full strudel.toml reference"),
+    (
+        "global-config",
+        "Machine-wide defaults in ~/.config/strudel/config.toml",
+    ),
     ("signing", "Code signing: Developer ID, keychain, ad-hoc"),
     ("notarize", "Notarization: App Store Connect API key auth"),
     ("entitlements", "Entitlements and provisioning profiles"),
@@ -29,6 +33,7 @@ pub fn run(topic: Option<&str>, mut app: Command) {
             let key = t.to_lowercase();
             match key.as_str() {
                 "config" => print_config(),
+                "global-config" | "global_config" => print_global_config(),
                 "signing" => print_signing(),
                 "notarize" | "notarization" => print_notarize(),
                 "entitlements" => print_entitlements(),
@@ -136,8 +141,8 @@ fn print_config() {
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
         {ANSI_RESET}
-        Both can also be set via env: {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}, {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}.
-        Env var takes precedence if both are set.
+        Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
+        See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
 
         ## [notarize] — optional (required for `release`)
         {ANSI_PURPLE}
@@ -148,6 +153,8 @@ fn print_config() {
 
         timeout = 600   # seconds to wait for notarytool; default: 600
         {ANSI_RESET}
+        Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
+        See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
         ## [[extensions]] — optional, repeatable
 
         See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
@@ -191,15 +198,23 @@ fn print_signing() {
 
         ## Configuring the signing identity
 
-        Set in strudel.toml or via environment (env vars take precedence):
+        Three ways to set the identity (highest to lowest priority):
+
+        1. Environment: {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}, {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}
+        2. Project config (strudel.toml):
         {ANSI_PURPLE}
         [signing]
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
         {ANSI_RESET}
-        - or -
-
-        Env vars: {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}, {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}
+        3. Global config (~/.config/strudel/config.toml) — shared across all projects:
+        {ANSI_PURPLE}
+        [signing]
+        identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
+        team_id  = "XXXXXXXXXX"
+        {ANSI_RESET}
+        Edit the global config: {ANSI_BLUE}strudel config edit{ANSI_RESET}
+        See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
 
         The identity string must match exactly what {ANSI_BLUE}security find-identity -v -p codesigning{ANSI_RESET}
         shows. Copy it from there to avoid typos.
@@ -253,17 +268,25 @@ fn print_notarize() {
         strudel uses the App Store Connect API key for notarization.
 
         Obtain a key at: App Store Connect → Users & Access → Integrations → App Store Connect API
+
+        Three ways to set credentials (highest to lowest priority):
+
+        1. Environment: {ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}
+        2. Project config (strudel.toml):
         {ANSI_PURPLE}
         [notarize]
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"  # Issuer ID
         api_key      = "2X9R4HXF34"                             # Key ID
         api_key_path = "AuthKey_2X9R4HXF34.p8"                  # path to .p8 file
         {ANSI_RESET}
-        - or -
-
-        Env: {ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}
-
-        Env var takes precedence if both are set.
+        3. Global config (~/.config/strudel/config.toml) — shared across all projects.
+           api_key_path here is typically an absolute path:
+        {ANSI_PURPLE}
+        [notarize]
+        api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
+        {ANSI_RESET}
+        Edit the global config: {ANSI_BLUE}strudel config edit{ANSI_RESET}
+        See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
 
         ## Timeout
         {ANSI_PURPLE}
@@ -476,6 +499,53 @@ fn print_universal() {
 
         When archs is set, all embedded extensions are also built as universal binaries
         using the same arch list.
+    "#});
+}
+
+fn print_global_config() {
+    print_help(&formatdoc! {r#"
+        # Global config
+
+        {ANSI_BLUE}~/.config/strudel/config.toml{ANSI_RESET} stores machine-wide defaults shared across all
+        projects on this machine. It is the lowest-priority source for each value:
+
+          env var  >  strudel.toml  >  ~/.config/strudel/config.toml
+
+        ## Editing
+        {ANSI_BLUE}
+        strudel config edit
+        {ANSI_RESET}
+        Opens the file in {ANSI_GREEN}$VISUAL{ANSI_RESET} / {ANSI_GREEN}$EDITOR{ANSI_RESET}, creating it with a template if it doesn't
+        exist yet. The XDG_CONFIG_HOME env var overrides the default location.
+
+        ## Supported keys
+        {ANSI_PURPLE}
+        [signing]
+        identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
+        team_id  = "XXXXXXXXXX"
+
+        [notarize]
+        api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        api_key      = "2X9R4HXF34"
+        api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
+        {ANSI_RESET}
+        Only {ANSI_PURPLE}[signing]{ANSI_RESET} and {ANSI_PURPLE}[notarize]{ANSI_RESET} are supported here. {ANSI_PURPLE}[app]{ANSI_RESET}, {ANSI_PURPLE}[build]{ANSI_RESET}, {ANSI_PURPLE}[ios]{ANSI_RESET}, {ANSI_PURPLE}[dmg]{ANSI_RESET}, and
+        {ANSI_PURPLE}[[extensions]]{ANSI_RESET} are project-specific and belong only in strudel.toml.
+
+        ## Typical use
+
+        Store your signing identity and notarize credentials once in the global
+        config, and leave each project's strudel.toml clean of machine-specific
+        paths. This keeps strudel.toml committable to version control without
+        embedding your developer identity or API key paths.
+
+        A project strudel.toml can still override any global value by setting
+        the same key; the env var overrides both.
+
+        ## See also
+
+        {ANSI_BLUE}strudel help signing{ANSI_RESET}
+        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
     "#});
 }
 

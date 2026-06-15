@@ -10,6 +10,7 @@ a signed `.app` bundle and a notarized DMG.
 - [Example strudel build](#example-strudel-build)
 - [Usage](#usage)
 - [Config file structure](#config-file-structure)
+- [Global config](#global-config)
 - [Signing \& notarization](#signing--notarization)
 - [Safari Web Extensions](#safari-web-extensions)
 - [App Extensions](#app-extensions)
@@ -68,6 +69,7 @@ Commands:
   sim        Build for the iOS Simulator and launch in Simulator.app
   device     Build for a connected iOS device, then install and launch
   init       Scaffold a config file in the given directory
+  config     Manage global strudel config (~/.config/strudel/config.toml)
   make-icns  Convert a PNG to .icns using sips + iconutil
   help       Print this message or the help of the given subcommand(s)
 
@@ -261,20 +263,21 @@ To produce a plain compressed DMG with no special styling.
 plain = true
 ```
 
-### `[signing]` and `[notarize]` (optional in the strudel.toml)
+### `[signing]` and `[notarize]` (optional in strudel.toml)
 
-Required for `release`; each key may instead come from its environment variable (env var
-takes precedence when both are set). See [Signing & notarization](#signing--notarization)
+Required for `release`. Each identifier is resolved in priority order:
+**env var > strudel.toml > [global config](#global-config)**. Secrets are
+environment-only and have no config key. See [Signing & notarization](#signing--notarization)
 for the full reference.
 
-| Key                       | Type    | Default                      | Description                                               |
-| ------------------------- | ------- | ---------------------------- | --------------------------------------------------------- |
-| `[signing] identity`      | string  | env `APPLE_SIGNING_IDENTITY` | Signing identity                                          |
-| `[signing] team_id`       | string  | env `APPLE_TEAM_ID`          | Apple Developer Team ID                                   |
-| `[notarize] api_issuer`   | string  | env `APPLE_API_ISSUER`       | App Store Connect issuer UUID                             |
-| `[notarize] api_key`      | string  | env `APPLE_API_KEY`          | App Store Connect key ID                                  |
-| `[notarize] api_key_path` | string  | env `APPLE_API_KEY_PATH`     | Path to the `.p8` key file                                |
-| `[notarize] timeout`      | integer | `600`                        | Seconds to wait for notarization (`notarytool --timeout`) |
+| Key                       | Type    | Env var                  | Description                                               |
+| ------------------------- | ------- | ------------------------ | --------------------------------------------------------- |
+| `[signing] identity`      | string  | `APPLE_SIGNING_IDENTITY` | Signing identity                                          |
+| `[signing] team_id`       | string  | `APPLE_TEAM_ID`          | Apple Developer Team ID                                   |
+| `[notarize] api_issuer`   | string  | `APPLE_API_ISSUER`       | App Store Connect issuer UUID                             |
+| `[notarize] api_key`      | string  | `APPLE_API_KEY`          | App Store Connect key ID                                  |
+| `[notarize] api_key_path` | string  | `APPLE_API_KEY_PATH`     | Path to the `.p8` key file                                |
+| `[notarize] timeout`      | integer | —                        | Seconds to wait for notarization (`notarytool --timeout`) |
 
 > Secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`)
 > are read from the environment only and have no config key.
@@ -288,6 +291,43 @@ for the full reference.
   from an empty object, so the generated `Info.plist` contains only those injected keys.
 - **`entitlements.json`**: A JSON object of entitlement keys/values, converted to a
   plist and passed to `codesign --entitlements` during signing.
+
+## Global config
+
+`~/.config/strudel/config.toml` stores machine-wide defaults shared across all
+projects. It is the lowest-priority source for each value:
+
+```
+env var  >  strudel.toml  >  ~/.config/strudel/config.toml
+```
+
+Open it in your editor (creating it with a template if it doesn't exist):
+
+```sh
+strudel config edit
+```
+
+Only `[signing]` and `[notarize]` are supported here — `[app]`, `[build]`,
+`[ios]`, `[dmg]`, and `[[extensions]]` are project-specific and belong only
+in `strudel.toml`.
+
+```toml
+# ~/.config/strudel/config.toml
+
+[signing]
+identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
+team_id  = "XXXXXXXXXX"
+
+[notarize]
+api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+api_key      = "2X9R4HXF34"
+api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
+```
+
+Store your credentials here once and each project's `strudel.toml` stays free
+of machine-specific paths, making it safe to commit. A project `strudel.toml`
+can still override any global value by setting the same key; the env var
+overrides both.
 
 ## Signing & notarization
 
@@ -333,10 +373,10 @@ and `APPLE_CERTIFICATE_PASSWORD` env vars instead. These cannot be stored in `st
 
 ### Notarization auth
 
-**Identifiers** are non-secret and may be set in the config file *or* via the
-matching environment variable (env var takes precedence). They're safe to commit:
+**Identifiers** are non-secret and resolved in this priority order:
+env var > `strudel.toml` > `~/.config/strudel/config.toml` (see [Global config](#global-config)).
 
-| Config key                | Environment variable     | Description                                             |
+| strudel.toml key          | Environment variable     | Description                                             |
 | ------------------------- | ------------------------ | ------------------------------------------------------- |
 | `[signing] identity`      | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (XXXXXXXXXX)` |
 | `[signing] team_id`       | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                    |

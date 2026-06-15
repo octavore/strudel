@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::config::ResolvedExtension;
+use crate::config::utils::resolve_to;
 
 /// The kind of app extension after resolution. A flat discriminator used by
 /// downstream build steps; the kind-specific data has already been unpacked.
@@ -66,13 +67,7 @@ impl ExtensionSection {
 
         let resolved_name = name.unwrap_or_else(|| target_name.clone());
 
-        let resolve = |p: PathBuf| {
-            if p.is_absolute() {
-                p
-            } else {
-                config_dir.join(p)
-            }
-        };
+        let resolve = |p: PathBuf| resolve_to(config_dir, p);
         let entitlements_json_path = entitlements_json_path.map(resolve).with_context(|| {
             format!(
                 "extension `{target_name}` is missing required field `entitlements_json_path` \
@@ -173,7 +168,7 @@ mod tests {
             entitlements_json_path = "ext/entitlements.json"
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(r.extensions.len(), 1);
         let ext = &r.extensions[0];
         assert_eq!(ext.kind, ExtensionKind::SafariWebExtension);
@@ -229,7 +224,7 @@ mod tests {
             resources_dir = "ext"
         "#})
         .unwrap();
-        let err = cfg.resolve(Path::new("/cfg")).unwrap_err();
+        let err = cfg.resolve(Path::new("/cfg"), None).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("entitlements_json_path"), "got: {msg}");
     }
@@ -289,7 +284,7 @@ mod tests {
             entitlements_json_path = "share/entitlements.json"
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(r.extensions.len(), 1);
         let ext = &r.extensions[0];
         assert_eq!(ext.kind, ExtensionKind::AppExtension);
@@ -326,7 +321,7 @@ mod tests {
             entitlements_json_path = "e.json"
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         let ext = &r.extensions[0];
         assert_eq!(
             ext.principal_class.as_deref(),

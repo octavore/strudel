@@ -6,8 +6,9 @@ use serde::Deserialize;
 
 use crate::config::ResolvedConfig;
 use crate::config::extension::ExtensionSection;
+use crate::config::global::GlobalConfig;
 use crate::config::resolved::ResolvedDmg;
-use crate::config::utils::{env_or, resolve_path};
+use crate::config::utils::{env_or_global, resolve_path, resolve_to};
 
 /// The on-disk `strudel.toml`. Organized into sections; `deny_unknown_fields`
 /// turns typos and stale flat keys into clear errors instead of silent no-ops.
@@ -32,7 +33,19 @@ pub struct BuildConfig {
 }
 
 impl BuildConfig {
-    pub fn resolve(self, config_dir: &Path) -> Result<ResolvedConfig> {
+    pub fn resolve(
+        self,
+        config_dir: &Path,
+        global: Option<&GlobalConfig>,
+    ) -> Result<ResolvedConfig> {
+        let global_default;
+        let global = match global {
+            Some(g) => g,
+            None => {
+                global_default = GlobalConfig::default();
+                &global_default
+            },
+        };
         let BuildConfig {
             app,
             build,
@@ -49,13 +62,7 @@ impl BuildConfig {
         let ios_simulator = ios.simulator.unwrap_or_else(|| "iPhone 16".to_string());
         let ios_device = ios.device;
         let ios_deployment_target = ios.deployment_target.unwrap_or_else(|| "18.0".to_string());
-        let ios_assets_dir = ios.assets_dir.map(|p| {
-            if p.is_absolute() {
-                p
-            } else {
-                config_dir.join(p)
-            }
-        });
+        let ios_assets_dir = ios.assets_dir.map(|p| resolve_to(config_dir, p));
         let ios_app_icon_name = ios.app_icon_name.unwrap_or_else(|| "AppIcon".to_string());
 
         let extensions = extensions
@@ -103,23 +110,35 @@ impl BuildConfig {
                 };
                 vec![arch.to_string()]
             }),
-            // Identifiers: strudel.toml value wins, else the matching env var.
-            sign_identity: env_or(signing.identity, "APPLE_SIGNING_IDENTITY"),
-            team_id: env_or(signing.team_id, "APPLE_TEAM_ID"),
-            apple_api_issuer: env_or(notarize.api_issuer, "APPLE_API_ISSUER"),
-            apple_api_key: env_or(notarize.api_key, "APPLE_API_KEY"),
+            // Identifiers: env var > strudel.toml > global config.
+            sign_identity: env_or_global(
+                signing.identity,
+                global.signing_identity.clone(),
+                "APPLE_SIGNING_IDENTITY",
+            ),
+            team_id: env_or_global(
+                signing.team_id,
+                global.signing_team_id.clone(),
+                "APPLE_TEAM_ID",
+            ),
+            apple_api_issuer: env_or_global(
+                notarize.api_issuer,
+                global.notarize_api_issuer.clone(),
+                "APPLE_API_ISSUER",
+            ),
+            apple_api_key: env_or_global(
+                notarize.api_key,
+                global.notarize_api_key.clone(),
+                "APPLE_API_KEY",
+            ),
             // Like other input paths, resolved relative to the config file directory.
+            // Global config path is already absolute (resolved at load time).
             apple_api_key_path: std::env::var("APPLE_API_KEY_PATH")
                 .ok()
                 .map(PathBuf::from)
                 .or(notarize.api_key_path)
-                .map(|p| {
-                    if p.is_absolute() {
-                        p
-                    } else {
-                        config_dir.join(&p)
-                    }
-                }),
+                .map(|p| resolve_to(config_dir, p))
+                .or_else(|| global.notarize_api_key_path.clone()),
             // Secrets: environment only — these are never deserialized from the file.
             apple_certificate: std::env::var("APPLE_CERTIFICATE")
                 .unwrap_or_default()
@@ -133,39 +152,17 @@ impl BuildConfig {
                 .embed_libs
                 .unwrap_or_default()
                 .into_iter()
-                .map(|p| {
-                    if p.is_absolute() {
-                        p
-                    } else {
-                        config_dir.join(&p)
-                    }
-                })
+                .map(|p| resolve_to(config_dir, p))
                 .collect(),
-            provisioning_profile: build.provisioning_profile.map(|p| {
-                if p.is_absolute() {
-                    p
-                } else {
-                    config_dir.join(&p)
-                }
-            }),
-            resources_dir: build.resources_dir.map(|p| {
-                if p.is_absolute() {
-                    p
-                } else {
-                    config_dir.join(&p)
-                }
-            }),
+            provisioning_profile: build
+                .provisioning_profile
+                .map(|p| resolve_to(config_dir, p)),
+            resources_dir: build.resources_dir.map(|p| resolve_to(config_dir, p)),
             resources: build
                 .resources
                 .unwrap_or_default()
                 .into_iter()
-                .map(|p| {
-                    if p.is_absolute() {
-                        p
-                    } else {
-                        config_dir.join(&p)
-                    }
-                })
+                .map(|p| resolve_to(config_dir, p))
                 .collect(),
             app_name: app.name,
             bundle_id: app.bundle_id,
@@ -280,13 +277,7 @@ impl DmgSection {
             return None;
         }
         Some(ResolvedDmg {
-            background: self.background.map(|p| {
-                if p.is_absolute() {
-                    p
-                } else {
-                    config_dir.join(p)
-                }
-            }),
+            background: self.background.map(|p| resolve_to(config_dir, p)),
             window_width: self.window_width.unwrap_or(660),
             window_height: self.window_height.unwrap_or(400),
             icon_size: self.icon_size.unwrap_or(128),
@@ -447,7 +438,7 @@ mod tests {
         // required derived fields, no path resolution panics).
         let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0", "1");
         let cfg: BuildConfig = toml::from_str(&t).unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(r.app_name, "MyApp");
         assert_eq!(r.target_name, "MyApp"); // default = app.name
         assert_eq!(r.notarize_timeout, 600); // default
@@ -517,7 +508,7 @@ mod tests {
     #[test]
     fn resolves_paths_relative_to_config_dir() {
         let cfg = parse_build_config(FULL).unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         // source_dir is relative to the config dir; build_dir is relative to
         // source_dir.
         assert_eq!(r.source_dir, PathBuf::from("/cfg/src"));
@@ -533,6 +524,32 @@ mod tests {
     }
 
     #[test]
+    fn tilde_paths_are_expanded() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+            [build]
+            entitlements_json_path = "~/my/ent.json"
+            [notarize]
+            api_key_path = "~/my/AuthKey.p8"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        let ent = r.entitlements_json_path.unwrap();
+        assert!(
+            ent.is_absolute(),
+            "~ in entitlements_json_path should expand"
+        );
+        assert!(ent.ends_with("my/ent.json"));
+        let key = r.apple_api_key_path.unwrap();
+        assert!(key.is_absolute(), "~ in api_key_path should expand");
+        assert!(key.ends_with("my/AuthKey.p8"));
+    }
+
+    #[test]
     fn absolute_paths_are_left_untouched() {
         let cfg = parse_build_config(indoc! { r#"
             [app]
@@ -544,7 +561,7 @@ mod tests {
             entitlements_json_path = "/abs/ent.json"
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(
             r.entitlements_json_path,
             Some(PathBuf::from("/abs/ent.json"))
@@ -561,7 +578,7 @@ mod tests {
             build_number = "1"
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(r.build_dir, PathBuf::from("/cfg/.build/dist"));
         assert_eq!(r.entitlements_json_path, None);
         assert_eq!(r.target_name, "Defaulted"); // defaults to app.name
@@ -575,7 +592,7 @@ mod tests {
     fn ios_defaults_when_absent() {
         let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0", "1");
         let cfg: BuildConfig = toml::from_str(&t).unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(r.ios_simulator, "iPhone 16");
         assert_eq!(r.ios_deployment_target, "18.0");
         assert_eq!(r.ios_app_icon_name, "AppIcon");
@@ -600,7 +617,7 @@ mod tests {
             app_icon_name = "MyIcon"
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(r.ios_simulator, "iPhone 15 Pro");
         assert_eq!(r.ios_deployment_target, "17.0");
         assert_eq!(r.ios_app_icon_name, "MyIcon");
@@ -618,7 +635,7 @@ mod tests {
     fn dmg_absent_uses_defaults() {
         let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0", "1");
         let cfg: BuildConfig = toml::from_str(&t).unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         let dmg = r
             .dmg
             .expect("absent [dmg] section should use defaults, not None");
@@ -641,7 +658,7 @@ mod tests {
             plain = true
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert!(
             r.dmg.is_none(),
             "plain = true should skip the styled window path"
@@ -668,7 +685,7 @@ mod tests {
             applications_y = 200
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         let dmg = r.dmg.expect("dmg should be Some");
         assert_eq!(dmg.background, Some(PathBuf::from("/cfg/assets/bg.png")));
         assert_eq!(dmg.window_width, 800);
@@ -692,7 +709,7 @@ mod tests {
             [dmg]
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         let dmg = r.dmg.expect("empty [dmg] section should use defaults");
         assert!(dmg.background.is_none());
         assert_eq!(dmg.window_width, 660);
@@ -717,7 +734,7 @@ mod tests {
             background = "/abs/bg.png"
         "#})
         .unwrap();
-        let r = cfg.resolve(Path::new("/cfg")).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         let dmg = r.dmg.unwrap();
         assert_eq!(dmg.background, Some(PathBuf::from("/abs/bg.png")));
     }
@@ -733,7 +750,7 @@ mod tests {
             ],
             || {
                 let cfg = parse_build_config(FULL).unwrap();
-                let r = cfg.resolve(Path::new("/cfg")).unwrap();
+                let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
                 assert_eq!(r.sign_identity, "env-identity");
                 assert_eq!(r.team_id, "env-team");
             },
@@ -750,7 +767,7 @@ mod tests {
             ],
             || {
                 let cfg = parse_build_config(FULL).unwrap();
-                let r = cfg.resolve(Path::new("/cfg")).unwrap();
+                let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
                 assert_eq!(r.sign_identity, "Developer ID Application: Me (TEAM123456)");
                 assert_eq!(r.team_id, "TEAM123456");
             },

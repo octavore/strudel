@@ -6,13 +6,15 @@ mod init;
 mod paths;
 mod shell;
 
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use color_print::ceprintln;
 
 use crate::builder::Builder;
+use crate::config::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
 
 #[derive(Parser)]
 #[command(
@@ -84,6 +86,19 @@ impl Cli {
             },
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
+            },
+            Cmd::Config { command } => match command {
+                ConfigCmd::Edit => {
+                    let path = GlobalConfig::xdg_path()?;
+                    if !path.exists() {
+                        std::fs::write(&path, GLOBAL_CONFIG_TEMPLATE)?;
+                    }
+                    let editor = std::env::var("VISUAL")
+                        .or_else(|_| std::env::var("EDITOR"))
+                        .unwrap_or_else(|_| "vi".to_string());
+                    let err = std::process::Command::new(&editor).arg(&path).exec();
+                    return Err(err).with_context(|| format!("Failed to exec editor '{editor}'"));
+                },
             },
         };
         Ok(())
@@ -170,12 +185,24 @@ enum Cmd {
         /// Destination .icns path
         icns: PathBuf,
     },
-    /// Show documentation for a topic (config, signing, notarize, entitlements,
-    /// extensions, dylibs, universal, ci). Run with no argument to list topics.
+    /// Show documentation for a topic (config, global-config, signing,
+    /// notarize, entitlements, extensions, dylibs, universal, ci). Run with
+    /// no argument to list topics.
     Help {
         /// Topic to show docs for
         topic: Option<String>,
     },
+    /// Manage global strudel config (~/.config/strudel/config.toml)
+    Config {
+        #[command(subcommand)]
+        command: ConfigCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCmd {
+    /// Open the global config in $VISUAL/$EDITOR, creating it if needed
+    Edit,
 }
 
 fn main() -> ! {
