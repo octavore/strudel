@@ -23,6 +23,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
+          rustup target add aarch64-apple-darwin
 
       - name: Cache cargo registry & target
         uses: actions/cache@v5

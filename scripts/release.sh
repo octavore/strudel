@@ -25,6 +25,7 @@ echo "Releasing v${VERSION}"
 
 set -x
 cargo set-version "$VERSION"
+cargo build --release --target aarch64-apple-darwin
 git add Cargo.toml Cargo.lock crates/dmg/Cargo.toml
 git commit -m "chore: release v${VERSION}"
 git tag "v${VERSION}"
