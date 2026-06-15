@@ -1,10 +1,6 @@
-[workspace]
-members = [".", "crates/dmg"]
-resolver = "2"
-
 [package]
 name = "strudel"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2024"
 description = "Build and ship macOS/iOS apps without touching Xcode"
 readme = "README.md"
@@ -14,17 +10,21 @@ license = "Apache-2.0"
 keywords = ["codesign", "dmg", "macos", "notarize", "swift"]
 categories = ["command-line-utilities", "development-tools::build-utils"]
 
+[workspace]
+resolver = "2"
+members = [".", "crates/dmg"]
+
 [[bin]]
 name = "strudel"
 path = "src/main.rs"
 
 [dependencies]
-dmg = { path = "crates/dmg" }
 anstream = "1.0.0"
 anyhow = "1"
 base64 = "0.22"
 clap = {version = "4", features = ["derive"]}
 color-print = "0.3.7"
+dmg = {path = "crates/dmg"}
 indoc = "2"
 plist = "1"
 secrecy = "0.10.3"
