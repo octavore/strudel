@@ -3,6 +3,9 @@ set -euo pipefail
 
 ARG="${1:?usage: axo release <major|minor|patch|x.y.z>}"
 
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+[[ "$BRANCH" == "main" ]] || { echo "error: must be on main branch (currently on ${BRANCH})"; exit 1; }
+
 CURRENT=$(cargo pkgid | grep -oE '[0-9]+\.[0-9]+\.[0-9]+$')
 
 if [[ "$ARG" =~ ^(major|minor|patch)$ ]]; then
@@ -34,4 +37,5 @@ set +x
 read -r -p "Push v${VERSION} to remote? [y/N] " CONFIRM
 [[ "$CONFIRM" =~ ^[Yy]$ ]] || exit 1
 
+git push origin main
 git push origin "v${VERSION}"
