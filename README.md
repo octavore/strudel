@@ -19,6 +19,7 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 - [App Extensions](#app-extensions)
 - [Development](#development)
 - [Other tips](#other-tips)
+- [Acknowledgements](#acknowledgements)
 
 ## Installation
 
@@ -666,3 +667,6 @@ cargo install --path .
 - Use `swift-format` for formatting Swift code
 - `// swift-tools-version: 6.0` in `Package.swift` to use `.v15`
 
+## Acknowledgements
+
+🍻 and 🐙 to my Spring 2 '26 batchmates and everyone else at the [Recurse Center](https://www.recurse.com), you're the best!
