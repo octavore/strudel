@@ -81,13 +81,17 @@ impl Builder {
         }
 
         const POLL_SECS: u64 = 30;
+        const FIRST_POLL_SECS: u64 = 10;
         let started = Instant::now();
         let timeout = Duration::from_secs(self.cfg.notarize_timeout);
         let mut apple_status = String::from("Waiting");
+        let mut first_poll = true;
 
         loop {
+            let poll_secs = if first_poll { FIRST_POLL_SECS } else { POLL_SECS };
+            first_poll = false;
             // Tick every second so the elapsed time and countdown stay live.
-            for remaining in (1..=POLL_SECS).rev() {
+            for remaining in (1..=poll_secs).rev() {
                 let elapsed_s = started.elapsed().as_secs();
                 let waited = if elapsed_s < 60 {
                     format!("{elapsed_s}s")
