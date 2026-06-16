@@ -75,6 +75,12 @@ impl Builder {
     /// `Wincompatible-sysroot` warning), assembles a flat `.app` bundle, ad-hoc
     /// signs it, and installs/launches via `xcrun simctl`.
     pub fn sim(&self, sim_override: Option<&str>) -> Result<()> {
+        if !self.cfg.extensions.is_empty() {
+            cprintln!(
+                "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
+                 [[extensions]] in this target will be ignored."
+            );
+        }
         let sim_name = sim_override.unwrap_or(&self.cfg.ios_simulator);
         let target = &self.cfg.target_name;
         let config_flag = if self.debug { "debug" } else { "release" };
@@ -163,6 +169,12 @@ impl Builder {
     /// `[build]`). Extracts entitlements directly from the profile so the
     /// signature matches exactly. Requires Xcode 15+ for `xcrun devicectl`.
     pub fn device(&self, device_override: Option<&str>) -> Result<()> {
+        if !self.cfg.extensions.is_empty() {
+            cprintln!(
+                "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
+                 [[extensions]] in this target will be ignored."
+            );
+        }
         let target = &self.cfg.target_name;
         let config_flag = if self.debug { "debug" } else { "release" };
         let deployment = &self.cfg.ios_deployment_target;
@@ -264,8 +276,6 @@ impl Builder {
         cprintln!("<green>Done!</green> App installed and launched on device.");
         Ok(())
     }
-
-    // ── Bundle assembly ────────────────────────────────────────────────────────
 
     /// Assemble a flat iOS `.app` bundle (no `Contents/` subdirectory).
     /// Generates `Info.plist` from `info_json_path` (if set) merged with
@@ -395,8 +405,6 @@ impl Builder {
         ]))?;
         Ok(())
     }
-
-    // ── Device signing ─────────────────────────────────────────────────────────
 
     /// Sign a device `.app` bundle with entitlements extracted directly from
     /// the provisioning profile. Using profile-derived entitlements (rather
@@ -575,7 +583,7 @@ impl Builder {
             [] => bail!(
                 "No connected iOS devices found.\n\
                  Plug in your iPhone, trust this Mac, and enable Developer Mode \
-                 (Settings → Privacy & Security → Developer Mode).\n\
+                 (Settings -> Privacy & Security -> Developer Mode).\n\
                  List devices with: xcrun devicectl list devices"
             ),
             [(id, name)] => {

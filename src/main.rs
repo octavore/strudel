@@ -11,15 +11,17 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
-use color_print::ceprintln;
+use color_print::{ceprintln, cprintln};
 
 use crate::builder::Builder;
-use crate::config::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
+use crate::config::{
+    GLOBAL_CONFIG_TEMPLATE, GlobalConfig, Platform, ResolvedConfig, ResolvedProject,
+};
 
 #[derive(Parser)]
 #[command(
     name = "strudel",
-    about = "Build, sign, notarize, and package macOS Swift apps",
+    about = "Build, sign, notarize, and package macOS/iOS Swift apps",
     version,
     disable_help_subcommand = true
 )]
@@ -27,6 +29,10 @@ struct Cli {
     /// Path to strudel.toml config file
     #[arg(long, default_value = "strudel.toml")]
     config: PathBuf,
+
+    /// Select a target by app name (multi-target configs only)
+    #[arg(long, global = true)]
+    target: Option<String>,
 
     #[command(subcommand)]
     command: Cmd,
@@ -48,16 +54,28 @@ impl Cli {
                 open,
                 debug,
             } => {
-                let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, debug, None, false).bundle()?;
+                let project = config::load_config(&cli.config)?;
+                for_each_selected(
+                    &project,
+                    cli.target.as_deref(),
+                    Platform::Macos,
+                    true,
+                    |cfg| Builder::new(cfg.clone(), dry_run, open, debug, None, false).bundle(),
+                )?;
             },
             Cmd::Build {
                 dry_run,
                 open,
                 debug,
             } => {
-                let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, debug, None, false).build()?;
+                let project = config::load_config(&cli.config)?;
+                for_each_selected(
+                    &project,
+                    cli.target.as_deref(),
+                    Platform::Macos,
+                    true,
+                    |cfg| Builder::new(cfg.clone(), dry_run, open, debug, None, false).build(),
+                )?;
             },
             Cmd::Release {
                 dry_run,
@@ -65,24 +83,59 @@ impl Cli {
                 resume,
                 skip_notarization,
             } => {
-                let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, open, false, resume, skip_notarization).release()?;
+                let project = config::load_config(&cli.config)?;
+                let allow_all = resume.is_none();
+                for_each_selected(
+                    &project,
+                    cli.target.as_deref(),
+                    Platform::Macos,
+                    allow_all,
+                    |cfg| {
+                        Builder::new(
+                            cfg.clone(),
+                            dry_run,
+                            open,
+                            false,
+                            resume.clone(),
+                            skip_notarization,
+                        )
+                        .release()
+                    },
+                )?;
             },
             Cmd::Sim {
                 dry_run,
                 debug,
                 simulator,
             } => {
-                let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, false, debug, None, false).sim(simulator.as_deref())?;
+                let project = config::load_config(&cli.config)?;
+                for_each_selected(
+                    &project,
+                    cli.target.as_deref(),
+                    Platform::Ios,
+                    false,
+                    |cfg| {
+                        Builder::new(cfg.clone(), dry_run, false, debug, None, false)
+                            .sim(simulator.as_deref())
+                    },
+                )?;
             },
             Cmd::Device {
                 dry_run,
                 debug,
                 device,
             } => {
-                let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, false, debug, None, false).device(device.as_deref())?;
+                let project = config::load_config(&cli.config)?;
+                for_each_selected(
+                    &project,
+                    cli.target.as_deref(),
+                    Platform::Ios,
+                    false,
+                    |cfg| {
+                        Builder::new(cfg.clone(), dry_run, false, debug, None, false)
+                            .device(device.as_deref())
+                    },
+                )?;
             },
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
@@ -203,6 +256,26 @@ enum Cmd {
 enum ConfigCmd {
     /// Open the global config in $VISUAL/$EDITOR, creating it if needed
     Edit,
+}
+
+// Run the given function for each config selected by the target/platform
+// criteria
+fn for_each_selected(
+    project: &ResolvedProject,
+    target: Option<&str>,
+    platform: Platform,
+    allow_all: bool,
+    mut f: impl FnMut(&ResolvedConfig) -> Result<()>,
+) -> Result<()> {
+    let targets = project.select(target, platform, allow_all)?;
+    let multi = targets.len() > 1;
+    for cfg in targets {
+        if multi {
+            cprintln!("\n<bold,cyan>-- {} --</bold,cyan>", cfg.app_name);
+        }
+        f(cfg)?;
+    }
+    Ok(())
 }
 
 fn main() -> ! {

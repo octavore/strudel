@@ -1,21 +1,60 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::config::ResolvedConfig;
 use crate::config::extension::ExtensionSection;
 use crate::config::global::GlobalConfig;
-use crate::config::resolved::ResolvedDmg;
+use crate::config::resolved::{ResolvedDmg, ResolvedProject};
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
+
+/// The target platform for a build target.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Platform {
+    Macos,
+    Ios,
+}
+
+impl Platform {
+    pub fn label(self) -> &'static str {
+        match self {
+            Platform::Macos => "macOS",
+            Platform::Ios => "iOS",
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Platform::Macos => "macos",
+            Platform::Ios => "ios",
+        }
+    }
+}
+
+/// One entry in a `[[target]]` array — a product × platform pair.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct TargetSection {
+    pub platform: Option<Platform>,
+    pub app: AppSection,
+    #[serde(default)]
+    pub build: BuildSection,
+    #[serde(default, rename = "extensions")]
+    pub extensions: Vec<ExtensionSection>,
+    pub dmg: Option<DmgSection>,
+    pub ios: Option<IosSection>,
+}
 
 /// The on-disk `strudel.toml`. Organized into sections; `deny_unknown_fields`
 /// turns typos and stale flat keys into clear errors instead of silent no-ops.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct BuildConfig {
-    pub app: AppSection,
+    #[serde(default)]
+    pub app: Option<AppSection>,
     #[serde(default)]
     pub build: BuildSection,
     #[serde(default)]
@@ -30,14 +69,17 @@ pub struct BuildConfig {
     pub ios: IosSection,
     #[serde(default)]
     pub dmg: Option<DmgSection>,
+    /// Multi-target declarations — one per `[[target]]` block.
+    #[serde(default)]
+    pub target: Vec<TargetSection>,
 }
 
 impl BuildConfig {
-    pub fn resolve(
+    pub fn resolve_project(
         self,
         config_dir: &Path,
         global: Option<&GlobalConfig>,
-    ) -> Result<ResolvedConfig> {
+    ) -> Result<ResolvedProject> {
         let global_default;
         let global = match global {
             Some(g) => g,
@@ -46,6 +88,7 @@ impl BuildConfig {
                 &global_default
             },
         };
+
         let BuildConfig {
             app,
             build,
@@ -54,132 +97,211 @@ impl BuildConfig {
             extensions,
             ios,
             dmg,
+            target,
         } = self;
 
-        let source_dir = resolve_path(config_dir, build.source_dir, ".");
-        let build_dir = resolve_path(&source_dir, build.build_dir, ".build/dist");
-        let target_name = build.target_name.unwrap_or_else(|| app.name.clone());
-        let ios_simulator = ios.simulator.unwrap_or_else(|| "iPhone 16".to_string());
-        let ios_device = ios.device;
-        let ios_deployment_target = ios.deployment_target.unwrap_or_else(|| "18.0".to_string());
-        let ios_assets_dir = ios.assets_dir.map(|p| resolve_to(config_dir, p));
-        let ios_app_icon_name = ios.app_icon_name.unwrap_or_else(|| "AppIcon".to_string());
-
-        let extensions = extensions
-            .into_iter()
-            .map(|ext| ext.resolve(config_dir))
-            .collect::<Result<Vec<_>>>()?;
-
-        let dmg = match dmg {
-            None => Some(ResolvedDmg::default()),
-            Some(d) => d.resolve(config_dir),
+        let targets = if !target.is_empty() {
+            if app.is_some() || !extensions.is_empty() || dmg.is_some() {
+                bail!(
+                    "strudel.toml cannot mix top-level [app] / [[extensions]] / [dmg] \
+                     with [[target]] sections"
+                );
+            }
+            for (i, t) in target.iter().enumerate() {
+                if t.platform.is_none() {
+                    bail!(
+                        "[[target]] #{} (app.name = {:?}) is missing `platform`. \
+                         Set `platform = \"macos\"` or `platform = \"ios\"`.",
+                        i + 1,
+                        t.app.name
+                    );
+                }
+            }
+            target
+        } else {
+            let app = app.context(
+                "strudel.toml must contain either [app] or one or more [[target]] sections",
+            )?;
+            vec![TargetSection {
+                platform: None,
+                app,
+                build,
+                extensions,
+                dmg,
+                ios: None,
+            }]
         };
 
-        Ok(ResolvedConfig {
-            // User-supplied input paths are resolved relative to the config file's
-            // directory (the one fixed anchor the user reasons about), independent of
-            // `source_dir`. info_json_path and icon_path are optional with no default.
-            info_json_path: build.info_json_path.map(|p| {
-                if p.is_absolute() {
-                    p
-                } else {
-                    // default is always ignored here.
-                    resolve_path(config_dir, Some(p), "info.json")
-                }
-            }),
-            entitlements_json_path: build.entitlements_json_path.map(|p| {
-                if p.is_absolute() {
-                    p
-                } else {
-                    // default is always ignored here.
-                    resolve_path(config_dir, Some(p), "entitlements.json")
-                }
-            }),
-            icon_path: build.icon_path.map(|p| {
-                if p.is_absolute() {
-                    p
-                } else {
-                    // default is always ignored here.
-                    resolve_path(config_dir, Some(p), "icon.png")
-                }
-            }),
-            archs: build.archs.unwrap_or_else(|| {
-                let arch = match std::env::consts::ARCH {
-                    "aarch64" => "arm64",
-                    other => other,
-                };
-                vec![arch.to_string()]
-            }),
-            // Identifiers: env var > strudel.toml > global config.
-            sign_identity: env_or_global(
-                signing.identity,
-                global.signing_identity.clone(),
-                "APPLE_SIGNING_IDENTITY",
-            ),
-            team_id: env_or_global(
-                signing.team_id,
-                global.signing_team_id.clone(),
-                "APPLE_TEAM_ID",
-            ),
-            apple_api_issuer: env_or_global(
-                notarize.api_issuer,
-                global.notarize_api_issuer.clone(),
-                "APPLE_API_ISSUER",
-            ),
-            apple_api_key: env_or_global(
-                notarize.api_key,
-                global.notarize_api_key.clone(),
-                "APPLE_API_KEY",
-            ),
-            // Like other input paths, resolved relative to the config file directory.
-            // Global config path is already absolute (resolved at load time).
-            apple_api_key_path: std::env::var("APPLE_API_KEY_PATH")
-                .ok()
-                .map(PathBuf::from)
-                .or(notarize.api_key_path)
-                .map(|p| resolve_to(config_dir, p))
-                .or_else(|| global.notarize_api_key_path.clone()),
-            // Secrets: environment only — these are never deserialized from the file.
-            apple_certificate: std::env::var("APPLE_CERTIFICATE")
-                .unwrap_or_default()
-                .into(),
-            apple_certificate_password: std::env::var("APPLE_CERTIFICATE_PASSWORD")
-                .unwrap_or_default()
-                .into(),
-            notarize_timeout: notarize.timeout.unwrap_or(600),
-            build_env: build.build_env.unwrap_or_default(),
-            embed_libs: build
-                .embed_libs
-                .unwrap_or_default()
-                .into_iter()
-                .map(|p| resolve_to(config_dir, p))
-                .collect(),
-            provisioning_profile: build
-                .provisioning_profile
-                .map(|p| resolve_to(config_dir, p)),
-            resources_dir: build.resources_dir.map(|p| resolve_to(config_dir, p)),
-            resources: build
-                .resources
-                .unwrap_or_default()
-                .into_iter()
-                .map(|p| resolve_to(config_dir, p))
-                .collect(),
-            app_name: app.name,
-            bundle_id: app.bundle_id,
-            version: app.version,
-            build_number: app.build_number,
-            source_dir,
-            build_dir,
-            target_name,
-            extensions,
-            ios_simulator,
-            ios_device,
-            ios_deployment_target,
-            ios_assets_dir,
-            ios_app_icon_name,
-            dmg,
-        })
+        let multi = targets.len() > 1;
+        let resolved = targets
+            .into_iter()
+            .map(|t| resolve_target(t, &signing, &notarize, &ios, config_dir, global, multi))
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(ResolvedProject { targets: resolved })
     }
+
+    #[cfg(test)]
+    pub fn resolve(
+        self,
+        config_dir: &Path,
+        global: Option<&GlobalConfig>,
+    ) -> Result<ResolvedConfig> {
+        Ok(self.resolve_project(config_dir, global)?.targets.remove(0))
+    }
+}
+
+fn resolve_target(
+    target: TargetSection,
+    signing: &SigningSection,
+    notarize: &NotarizeSection,
+    top_ios: &IosSection,
+    config_dir: &Path,
+    global: &GlobalConfig,
+    multi: bool,
+) -> Result<ResolvedConfig> {
+    let TargetSection {
+        platform,
+        app,
+        build,
+        extensions,
+        dmg,
+        ios,
+    } = target;
+    let ios = ios.unwrap_or_else(|| top_ios.clone());
+
+    let source_dir = resolve_path(config_dir, build.source_dir, ".");
+    let build_dir_default = if multi {
+        match platform {
+            Some(p) => format!(".build/dist/{}-{}", app.name, p.as_str()),
+            None => format!(".build/dist/{}", app.name),
+        }
+    } else {
+        ".build/dist".to_string()
+    };
+    let build_dir = resolve_path(&source_dir, build.build_dir, &build_dir_default);
+    let target_name = build.target_name.unwrap_or_else(|| app.name.clone());
+    let ios_simulator = ios.simulator.unwrap_or_else(|| "iPhone 16".to_string());
+    let ios_device = ios.device;
+    let ios_deployment_target = ios.deployment_target.unwrap_or_else(|| "18.0".to_string());
+    let ios_assets_dir = ios.assets_dir.map(|p| resolve_to(config_dir, p));
+    let ios_app_icon_name = ios.app_icon_name.unwrap_or_else(|| "AppIcon".to_string());
+
+    let extensions = extensions
+        .into_iter()
+        .map(|ext| ext.resolve(config_dir))
+        .collect::<Result<Vec<_>>>()?;
+
+    let dmg = match dmg {
+        None => Some(ResolvedDmg::default()),
+        Some(d) => d.resolve(config_dir),
+    };
+
+    Ok(ResolvedConfig {
+        platform,
+        // User-supplied input paths are resolved relative to the config file's
+        // directory (the one fixed anchor the user reasons about), independent of
+        // `source_dir`. info_json_path and icon_path are optional with no default.
+        info_json_path: build.info_json_path.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                // default is always ignored here.
+                resolve_path(config_dir, Some(p), "info.json")
+            }
+        }),
+        entitlements_json_path: build.entitlements_json_path.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                // default is always ignored here.
+                resolve_path(config_dir, Some(p), "entitlements.json")
+            }
+        }),
+        icon_path: build.icon_path.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                // default is always ignored here.
+                resolve_path(config_dir, Some(p), "icon.png")
+            }
+        }),
+        archs: build.archs.unwrap_or_else(|| {
+            let arch = match std::env::consts::ARCH {
+                "aarch64" => "arm64",
+                other => other,
+            };
+            vec![arch.to_string()]
+        }),
+        // Identifiers: env var > strudel.toml > global config.
+        sign_identity: env_or_global(
+            signing.identity.clone(),
+            global.signing_identity.clone(),
+            "APPLE_SIGNING_IDENTITY",
+        ),
+        team_id: env_or_global(
+            signing.team_id.clone(),
+            global.signing_team_id.clone(),
+            "APPLE_TEAM_ID",
+        ),
+        apple_api_issuer: env_or_global(
+            notarize.api_issuer.clone(),
+            global.notarize_api_issuer.clone(),
+            "APPLE_API_ISSUER",
+        ),
+        apple_api_key: env_or_global(
+            notarize.api_key.clone(),
+            global.notarize_api_key.clone(),
+            "APPLE_API_KEY",
+        ),
+        // Like other input paths, resolved relative to the config file directory.
+        // Global config path is already absolute (resolved at load time).
+        apple_api_key_path: std::env::var("APPLE_API_KEY_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| notarize.api_key_path.clone())
+            .map(|p| resolve_to(config_dir, p))
+            .or_else(|| global.notarize_api_key_path.clone()),
+        // Secrets: environment only — these are never deserialized from the file.
+        apple_certificate: std::env::var("APPLE_CERTIFICATE")
+            .unwrap_or_default()
+            .into(),
+        apple_certificate_password: std::env::var("APPLE_CERTIFICATE_PASSWORD")
+            .unwrap_or_default()
+            .into(),
+        notarize_timeout: notarize.timeout.unwrap_or(600),
+        build_env: build.build_env.unwrap_or_default(),
+        embed_libs: build
+            .embed_libs
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| resolve_to(config_dir, p))
+            .collect(),
+        provisioning_profile: build
+            .provisioning_profile
+            .map(|p| resolve_to(config_dir, p)),
+        resources_dir: build.resources_dir.map(|p| resolve_to(config_dir, p)),
+        resources: build
+            .resources
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| resolve_to(config_dir, p))
+            .collect(),
+        app_name: app.name,
+        bundle_id: app.bundle_id,
+        version: app.version,
+        build_number: app.build_number,
+        source_dir,
+        build_dir,
+        target_name,
+        extensions,
+        ios_simulator,
+        ios_device,
+        ios_deployment_target,
+        ios_assets_dir,
+        ios_app_icon_name,
+        dmg,
+    })
 }
 
 /// `[app]` — required application metadata.
@@ -425,10 +547,11 @@ mod tests {
         // otherwise `strudel init` produces a file `strudel build` rejects.
         let t = generate_initial_toml("MyApp", "com.example.myapp", "1.2.3", "42");
         let cfg: BuildConfig = toml::from_str(&t).expect("scaffolded TOML must parse");
-        assert_eq!(cfg.app.name, "MyApp");
-        assert_eq!(cfg.app.bundle_id, "com.example.myapp");
-        assert_eq!(cfg.app.version, "1.2.3");
-        assert_eq!(cfg.app.build_number, "42");
+        let app = cfg.app.as_ref().unwrap();
+        assert_eq!(app.name, "MyApp");
+        assert_eq!(app.bundle_id, "com.example.myapp");
+        assert_eq!(app.version, "1.2.3");
+        assert_eq!(app.build_number, "42");
     }
 
     #[test]
@@ -447,8 +570,8 @@ mod tests {
     #[test]
     fn parses_full_nested_config() {
         let cfg = parse_build_config(FULL).expect("should parse");
-        assert_eq!(cfg.app.name, "MyApp");
-        assert_eq!(cfg.app.build_number, "42");
+        assert_eq!(cfg.app.as_ref().unwrap().name, "MyApp");
+        assert_eq!(cfg.app.as_ref().unwrap().build_number, "42");
         assert_eq!(
             cfg.build.archs.as_deref(),
             Some(&["arm64".into(), "x86_64".into()][..])
@@ -473,7 +596,7 @@ mod tests {
             version = "1"
             build_number = "1"
         "#})
-        .expect("only [app] is required");
+        .expect("[app] is sufficient for the single-target form");
         assert!(cfg.build.source_dir.is_none());
         assert!(cfg.signing.identity.is_none());
         assert!(cfg.notarize.timeout.is_none());
@@ -772,5 +895,153 @@ mod tests {
                 assert_eq!(r.team_id, "TEAM123456");
             },
         );
+    }
+
+    #[test]
+    fn platform_deserializes_from_strings() {
+        let cfg = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "macos"
+            app.name = "A"
+            app.bundle_id = "com.a"
+            app.version = "1"
+            app.build_number = "1"
+
+            [[target]]
+            platform = "ios"
+            app.name = "B"
+            app.bundle_id = "com.b"
+            app.version = "1"
+            app.build_number = "1"
+        "#})
+        .unwrap();
+        assert_eq!(cfg.target[0].platform, Some(Platform::Macos));
+        assert_eq!(cfg.target[1].platform, Some(Platform::Ios));
+    }
+
+    #[test]
+    fn multi_target_parses_to_n_targets_with_platforms() {
+        let project = parse_build_config(MULTI)
+            .unwrap()
+            .resolve_project(Path::new("/cfg"), None)
+            .unwrap();
+        assert_eq!(project.targets.len(), 2);
+        assert_eq!(project.targets[0].platform, Some(Platform::Macos));
+        assert_eq!(project.targets[0].app_name, "MyApp");
+        assert_eq!(project.targets[1].platform, Some(Platform::Ios));
+        assert_eq!(project.targets[1].app_name, "MyApp");
+    }
+
+    #[test]
+    fn mixed_top_level_app_and_target_is_error() {
+        let err = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [[target]]
+            platform = "macos"
+            app.name = "X"
+            app.bundle_id = "y"
+            app.version = "1"
+            app.build_number = "1"
+        "#})
+        .unwrap()
+        .resolve_project(Path::new("/cfg"), None);
+        assert!(err.is_err(), "mixing [app] with [[target]] should fail");
+        let msg = format!("{:#}", err.unwrap_err());
+        assert!(msg.contains("cannot mix"), "got: {msg}");
+    }
+
+    #[test]
+    fn target_without_platform_is_error() {
+        let err = parse_build_config(indoc! { r#"
+            [[target]]
+            app.name = "A"
+            app.bundle_id = "com.a"
+            app.version = "1"
+            app.build_number = "1"
+        "#})
+        .unwrap()
+        .resolve_project(Path::new("/cfg"), None);
+        assert!(err.is_err(), "[[target]] without platform should fail");
+        let msg = format!("{:#}", err.unwrap_err());
+        assert!(msg.contains("missing `platform`"), "got: {msg}");
+    }
+
+    #[test]
+    fn neither_app_nor_target_is_error() {
+        let err = parse_build_config(indoc! { r#"
+            [signing]
+            identity = "x"
+        "#})
+        .unwrap()
+        .resolve_project(Path::new("/cfg"), None);
+        assert!(err.is_err(), "config with neither [app] nor [[target]] should fail");
+    }
+
+    #[test]
+    fn per_target_ios_overrides_top_level() {
+        let project = parse_build_config(indoc! { r#"
+            [ios]
+            simulator = "top-level-sim"
+            deployment_target = "17.0"
+
+            [[target]]
+            platform = "ios"
+            app.name = "A"
+            app.bundle_id = "com.a"
+            app.version = "1"
+            app.build_number = "1"
+            ios.deployment_target = "18.0"
+
+            [[target]]
+            platform = "ios"
+            app.name = "B"
+            app.bundle_id = "com.b"
+            app.version = "1"
+            app.build_number = "1"
+        "#})
+        .unwrap()
+        .resolve_project(Path::new("/cfg"), None)
+        .unwrap();
+        // Target A has per-target ios override.
+        assert_eq!(project.targets[0].ios_deployment_target, "18.0");
+        // Target B inherits top-level ios.
+        assert_eq!(project.targets[1].ios_simulator, "top-level-sim");
+        assert_eq!(project.targets[1].ios_deployment_target, "17.0");
+    }
+
+    #[test]
+    fn multi_build_dir_gets_platform_subdir() {
+        let project = parse_build_config(MULTI)
+            .unwrap()
+            .resolve_project(Path::new("/cfg"), None)
+            .unwrap();
+        // Multi-target: each target gets .build/dist/<name>-<platform>.
+        assert_eq!(
+            project.targets[0].build_dir,
+            PathBuf::from("/cfg/.build/dist/MyApp-macos")
+        );
+        assert_eq!(
+            project.targets[1].build_dir,
+            PathBuf::from("/cfg/.build/dist/MyApp-ios")
+        );
+    }
+
+    #[test]
+    fn single_target_keeps_default_build_dir() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(r.build_dir, PathBuf::from("/cfg/.build/dist"));
     }
 }

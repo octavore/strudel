@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use anyhow::{Result, bail};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::extension::ExtensionKind;
-use crate::config::user::NotaryAuth;
+use crate::config::user::{NotaryAuth, Platform};
 
 /// Resolved `[dmg]` customization. `None` in `ResolvedConfig` only when the
 /// user explicitly sets `plain = true` in their `[dmg]` section; the plain UDZO
@@ -37,8 +38,72 @@ impl Default for ResolvedDmg {
     }
 }
 
+/// All resolved targets from a `strudel.toml`. Single-target configs produce
+/// exactly one entry; `[[target]]` configs produce one per block.
+#[derive(Debug)]
+pub struct ResolvedProject {
+    pub targets: Vec<ResolvedConfig>,
+}
+
+impl ResolvedProject {
+    /// Return the subset of targets eligible for `platform`, optionally filtered
+    /// by `name` (matched against `app_name`).
+    ///
+    /// - Agnostic targets (`platform: None`) are eligible for every platform.
+    /// - `allow_all = true` returns all eligible when no name is given.
+    /// - `allow_all = false` with >1 eligible target (and no name) is an error.
+    pub fn select(
+        &self,
+        name: Option<&str>,
+        platform: Platform,
+        allow_all: bool,
+    ) -> Result<Vec<&ResolvedConfig>> {
+        let eligible: Vec<&ResolvedConfig> = self
+            .targets
+            .iter()
+            .filter(|t| t.platform.map_or(true, |p| p == platform))
+            .collect();
+
+        if eligible.is_empty() {
+            bail!("No {} targets in strudel.toml", platform.label());
+        }
+
+        if let Some(name) = name {
+            let matched: Vec<&ResolvedConfig> =
+                eligible.iter().filter(|t| t.app_name == name).copied().collect();
+            if matched.is_empty() {
+                let available: Vec<&str> =
+                    eligible.iter().map(|t| t.app_name.as_str()).collect();
+                bail!(
+                    "No {} target named {:?}. Available: {}",
+                    platform.label(),
+                    name,
+                    available.join(", ")
+                );
+            }
+            return Ok(matched);
+        }
+
+        if allow_all {
+            return Ok(eligible);
+        }
+
+        if eligible.len() == 1 {
+            return Ok(eligible);
+        }
+
+        let available: Vec<&str> = eligible.iter().map(|t| t.app_name.as_str()).collect();
+        bail!(
+            "Multiple {} targets; select one with --target. Available: {}",
+            platform.label(),
+            available.join(", ")
+        );
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
+    pub platform: Option<Platform>,
     pub app_name: String,
     pub bundle_id: String,
     pub version: String,
@@ -143,6 +208,96 @@ pub struct ResolvedExtension {
 }
 
 #[cfg(test)]
+mod select_tests {
+    use crate::config::fixtures::MULTI;
+    use crate::config::user::{BuildConfig, Platform};
+    use crate::config::resolved::ResolvedProject;
+
+    fn two_target_project() -> ResolvedProject {
+        use std::path::Path;
+        let cfg: BuildConfig = toml::from_str(MULTI).unwrap();
+        cfg.resolve_project(Path::new("/cfg"), None).unwrap()
+    }
+
+    #[test]
+    fn select_filters_by_platform() {
+        let proj = two_target_project();
+        let macos = proj.select(None, Platform::Macos, true).unwrap();
+        assert_eq!(macos.len(), 1);
+        assert_eq!(macos[0].platform, Some(Platform::Macos));
+
+        let ios = proj.select(None, Platform::Ios, true).unwrap();
+        assert_eq!(ios.len(), 1);
+        assert_eq!(ios[0].platform, Some(Platform::Ios));
+    }
+
+    #[test]
+    fn no_matching_platform_is_error() {
+        // Build a macos-only project, then ask for iOS.
+        use std::path::Path;
+        use indoc::indoc;
+        let cfg: BuildConfig = toml::from_str(indoc! { r#"
+            [[target]]
+            platform = "macos"
+            app.name = "A"
+            app.bundle_id = "com.a"
+            app.version = "1"
+            app.build_number = "1"
+        "#})
+        .unwrap();
+        let proj = cfg.resolve_project(Path::new("/cfg"), None).unwrap();
+        let err = proj.select(None, Platform::Ios, false).unwrap_err();
+        assert!(format!("{err}").contains("No iOS targets"), "got: {err}");
+    }
+
+    #[test]
+    fn name_not_found_is_error() {
+        let proj = two_target_project();
+        let err = proj.select(Some("DoesNotExist"), Platform::Macos, true).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("DoesNotExist"), "got: {msg}");
+    }
+
+    #[test]
+    fn ambiguous_without_target_flag_is_error() {
+        use std::path::Path;
+        use indoc::indoc;
+        let cfg: BuildConfig = toml::from_str(indoc! { r#"
+            [[target]]
+            platform = "macos"
+            app.name = "AppA"
+            app.bundle_id = "com.a"
+            app.version = "1"
+            app.build_number = "1"
+
+            [[target]]
+            platform = "macos"
+            app.name = "AppB"
+            app.bundle_id = "com.b"
+            app.version = "1"
+            app.build_number = "1"
+        "#})
+        .unwrap();
+        let proj = cfg.resolve_project(Path::new("/cfg"), None).unwrap();
+        // allow_all = false, no name -> error when >1 eligible
+        let err = proj.select(None, Platform::Macos, false).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("--target"), "got: {msg}");
+    }
+
+    #[test]
+    fn allow_all_returns_all_eligible() {
+        let proj = two_target_project();
+        // MULTI has one macos and one ios target; asking for macos with allow_all=true
+        // returns the single macos one.
+        let targets = proj.select(None, Platform::Macos, true).unwrap();
+        assert_eq!(targets.len(), 1);
+    }
+
+
+}
+
+#[cfg(test)]
 pub mod fixtures {
     use std::path::PathBuf;
 
@@ -171,7 +326,7 @@ pub mod fixtures {
     #[test]
     fn notary_auth_none_when_api_key_incomplete() {
         let mut r = RESOLVED.clone();
-        // Key path present but key id missing → incomplete API set.
+        // Key path present but key id missing -> incomplete API set.
         r.apple_api_key_path = Some(PathBuf::from("/k.p8"));
         assert!(r.notary_auth().is_none());
     }

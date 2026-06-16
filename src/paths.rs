@@ -102,6 +102,7 @@ mod tests {
 
     fn cfg(build_dir: &str, app_name: &str, version: &str) -> ResolvedConfig {
         ResolvedConfig {
+            platform: None,
             app_name: app_name.into(),
             bundle_id: "x".into(),
             version: version.into(),
