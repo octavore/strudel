@@ -11,6 +11,10 @@ const ANSI_RESET: &str = "\x1b[0m";
 const TOPICS: &[(&str, &str)] = &[
     ("config", "Full strudel.toml reference"),
     (
+        "targets",
+        "Multiple targets: product × platform in one strudel.toml",
+    ),
+    (
         "global-config",
         "Machine-wide defaults in ~/.config/strudel/config.toml",
     ),
@@ -37,6 +41,7 @@ pub fn run(topic: Option<&str>, mut app: Command) {
             let key = t.to_lowercase();
             match key.as_str() {
                 "config" => print_config(),
+                "targets" | "target" => print_targets(),
                 "global-config" | "global_config" => print_global_config(),
                 "signing" => print_signing(),
                 "notarize" | "notarization" => print_notarize(),
@@ -101,6 +106,101 @@ fn print_help(text: &str) {
     }
 }
 
+fn print_targets() {
+    print_help(&formatdoc! {r#"
+        # Multiple targets (product x platform)
+
+        A single `strudel.toml` can declare multiple build targets using `[[target]]`
+        blocks. Each target is a product x platform pair with its own [app], [build],
+        [[extensions]], [dmg], and optional [ios] settings.
+
+        ## When to use [[target]]
+
+        - Cross-platform projects shipping both a macOS app and an iOS app from the
+          same Swift package.
+        - Monorepos with multiple executables that share signing/notarization creds.
+
+        ## Example: macOS + iOS from one strudel.toml
+        {ANSI_PURPLE}
+        # Shared across all targets:
+        [signing]
+        identity = "Developer ID Application: You (XXXXXXXXXX)"
+        team_id  = "XXXXXXXXXX"
+
+        [notarize]
+        api_key      = "2X9R4HXF34"
+        api_key_path = "AuthKey_2X9R4HXF34.p8"
+
+        # Optional top-level [ios] acts as a fallback for iOS targets.
+        # A per-target [ios] section overrides the whole top-level section.
+        [ios]
+        simulator = "iPhone 16"
+
+        [[target]]
+        platform = "macos"
+        app.name         = "MyApp"
+        app.bundle_id    = "com.example.app"
+        app.version      = "1.0.0"
+        app.build_number = "1"
+        build.entitlements_json_path = "mac/entitlements.json"
+
+        [[target.extensions]]
+        kind          = "safari_web_extension"
+        target_name   = "MyAppExtension"
+        bundle_id     = "com.example.app.Extension"
+        resources_dir = "extension/dist"
+        entitlements_json_path = "extension/entitlements.json"
+
+        [[target]]
+        platform = "ios"
+        app.name         = "MyApp"
+        app.bundle_id    = "com.example.app"
+        app.version      = "1.0.0"
+        app.build_number = "1"
+        ios.deployment_target = "18.0"
+        {ANSI_RESET}
+        ## Rules
+
+        - A config defines EITHER a top-level [app] OR one or more [[target]] blocks,
+          never both. Mixing them is an error.
+        - `platform` is required on every [[target]] block. Must be `"macos"` or `"ios"`.
+        - `[signing]` and `[notarize]` are always shared (top-level only).
+        - `[ios]` at the top level is a fallback; a per-target `ios.*` block overrides
+          the entire top-level section (not individual fields).
+
+        ## Selecting targets at runtime
+
+        When multiple targets are eligible for a command, strudel runs them all and
+        prints a per-target header. To narrow to a single target:
+        {ANSI_BLUE}
+        strudel build --target MyApp
+        strudel sim   --target MyApp
+        {ANSI_RESET}
+        Each command routes to the matching platform automatically:
+          bundle / build / release -> macOS targets
+          sim / device             -> iOS targets
+
+        ## Build directories
+
+        With multiple targets, each gets its own build directory to avoid collisions:
+          .build/dist/<name>-macos
+          .build/dist/<name>-ios
+
+        Override per-target with {ANSI_PURPLE}build.build_dir{ANSI_RESET}.
+
+        ## iOS extension caveat
+
+        Assembling and signing [[extensions]] inside an iOS bundle is not yet
+        supported. A warning is printed and the extensions list is ignored for
+        `strudel sim` and `strudel device`.
+
+        ## See also
+
+        {ANSI_BLUE}strudel help config{ANSI_RESET}
+        {ANSI_BLUE}strudel help extensions{ANSI_RESET}
+    "#});
+}
+
 fn print_config() {
     print_help(&formatdoc! {r#"
         # strudel.toml reference
@@ -160,6 +260,13 @@ fn print_config() {
         {ANSI_RESET}
         Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
         See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
+
+        ## [[target]] — optional, repeatable (multi-target configs)
+
+        Replace [app] with one or more [[target]] blocks to build multiple
+        products or platforms (e.g. macOS + iOS) from the same strudel.toml.
+        See: {ANSI_BLUE}strudel help targets{ANSI_RESET}
+
         ## [[extensions]] — optional, repeatable
 
         See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}

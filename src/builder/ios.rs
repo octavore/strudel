@@ -598,6 +598,9 @@ impl Builder {
         Ok(())
     }
 
+    /// Assemble a flat iOS `.app` bundle (no `Contents/` subdirectory).
+    /// Generates `Info.plist` from `info_json_path` (if set) merged with
+    /// required iOS keys. Optionally compiles the asset catalog.
     fn assemble_ios_bundle(
         &self,
         binary: &Path,
@@ -719,8 +722,10 @@ impl Builder {
         Ok(())
     }
 
-    /// Sign a device `.app` bundle with entitlements extracted from the
-    /// profile.
+    /// Sign a device `.app` bundle with entitlements extracted directly from
+    /// the provisioning profile. Using profile-derived entitlements (rather
+    /// than a hand-edited JSON) ensures the signature matches the profile
+    /// exactly. `--generate-entitlement-der` is required on modern iOS.
     fn sign_ios_device(
         &self,
         app_bundle: &Path,

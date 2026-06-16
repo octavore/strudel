@@ -40,7 +40,24 @@ pub const FULL: &str = indoc::indoc! {r#"
   applications_y = 200
 "#};
 
+pub const MULTI: &str = indoc::indoc! {r#"
+  [[target]]
+  platform = "macos"
+  app.name = "MyApp"
+  app.bundle_id = "com.example.myapp"
+  app.version = "1.2.3"
+  app.build_number = "42"
+
+  [[target]]
+  platform = "ios"
+  app.name = "MyApp"
+  app.bundle_id = "com.example.myapp"
+  app.version = "1.2.3"
+  app.build_number = "42"
+"#};
+
 pub static RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
+    platform: None,
     app_name: "A".into(),
     bundle_id: "b".into(),
     version: "1".into(),

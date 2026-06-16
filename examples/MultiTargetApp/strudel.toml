@@ -1,0 +1,52 @@
+# strudel.toml — multi-target example: macOS + iOS from one Swift package
+#
+# This configuration builds two separate targets from the same repository:
+#   - macOS: `strudel bundle / build / release`
+#   - iOS:   `strudel sim / device`
+#
+# [signing] and [notarize] are shared across all targets. Per-target settings
+# live inside each [[target]] block.
+#
+# Signing & notarization — identifiers here or in the environment;
+# secrets (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD) in the environment only.
+
+[signing]
+# identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
+# team_id  = "XXXXXXXXXX"
+
+[notarize]
+# api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+# api_key      = "2X9R4HXF34"
+# api_key_path = "AuthKey_2X9R4HXF34.p8"
+
+# Default iOS settings inherited by iOS targets.
+[ios]
+simulator         = "iPhone 16"
+deployment_target = "18.0"
+
+# macOS target
+[[target]]
+platform = "macos"
+
+app.name         = "MultiTargetApp"
+app.bundle_id    = "com.example.multitarget"
+app.version      = "0.1.0"
+app.build_number = "1"
+
+build.target_name            = "MultiTargetApp"
+build.entitlements_json_path = "entitlements-mac.json"
+
+# iOS target
+[[target]]
+platform = "ios"
+
+app.name         = "MultiTargetApp"
+app.bundle_id    = "com.example.multitarget.mobile"
+app.version      = "0.1.0"
+app.build_number = "1"
+
+build.target_name            = "MultiTargetAppMobile"
+build.entitlements_json_path = "entitlements-ios.json"
+
+ios.deployment_target = "18.0"
+ios.assets_dir        = "Sources/MultiTargetAppMobile/Assets.xcassets"
