@@ -17,14 +17,10 @@ pub struct DsStoreSpec<'a> {
     pub background_alias: Option<Vec<u8>>,
 }
 
-// ─── Public entry point ──────────────────────────────────────────────────────
-
 pub fn build(spec: &DsStoreSpec<'_>) -> Result<Vec<u8>> {
     let records = make_records(spec)?;
     assemble(&records)
 }
-
-// ─── Record model ────────────────────────────────────────────────────────────
 
 /// One B-tree leaf record: keyed on `(filename, structure_id)`, carrying a
 /// typed payload. This is the only part of a `.DS_Store` that varies between
@@ -140,8 +136,6 @@ fn tn1150_key(s: &str) -> Vec<u8> {
     s.chars().map(|c| c.to_ascii_lowercase() as u8).collect()
 }
 
-// ─── plist builders ──────────────────────────────────────────────────────────
-
 fn build_bwsp_plist(width: u32, height: u32) -> Result<Vec<u8>> {
     // WindowBounds: outer bounds including title bar (+22 px)
     let bounds = format!("{{{{100, 100}}, {{{width}, {}}}}}", height + 22);
@@ -194,22 +188,21 @@ fn plist_to_bytes(v: Value) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-// ─── Binary file assembly ────────────────────────────────────────────────────
-
+// Binary file assembly
 // The `.DS_Store` format is a buddy-allocated 2 GiB address space holding a
 // B-tree. Reproducing a full allocator is unnecessary: Finder only reads the
-// `DSDB` master block → B-tree, and the allocation never changes as long as the
-// three fixed blocks below stay put. So we lay out a byte-for-byte copy of the
-// canonical empty store (as shipped by appdmg / written by Finder) and stamp
-// our records into the single leaf page.
+// `DSDB` master block -> B-tree, and the allocation never changes as long as
+// the three fixed blocks below stay put. So we lay out a byte-for-byte copy of
+// the canonical empty store (as shipped by appdmg / written by Finder) and
+// stamp our records into the single leaf page.
 //
 // Block addresses pack `(offset & ~0x1F) | log2(size)` in their low 5 bits, and
 // a block at address `a` lives at file offset `(a & ~0x1F) + 4` (the leading
 // 4-byte magic is outside the allocator's address space). The three blocks:
 //
-//   block 0  addr 0x200B → file 0x2004, 2048 B  buddy bookkeeping block
-//   block 1  addr 0x0045 → file 0x0044,   32 B  DSDB master block
-//   block 2  addr 0x100C → file 0x1004, 4096 B  B-tree leaf page (our records)
+//   block 0  addr 0x200B -> file 0x2004, 2048 B  buddy bookkeeping block
+//   block 1  addr 0x0045 -> file 0x0044,   32 B  DSDB master block
+//   block 2  addr 0x100C -> file 0x1004, 4096 B  B-tree leaf page (our records)
 
 /// Total file length, matching the canonical empty store.
 const FILE_LEN: usize = 15364;
@@ -220,7 +213,7 @@ fn assemble(records: &[Record]) -> Result<Vec<u8>> {
     let count = records.len() as u32;
     let mut cur = Cursor::new(vec![0u8; FILE_LEN]);
 
-    // ── File header + buddy-allocator header ─────────────────────────────────
+    // File header + buddy-allocator header
     put(&mut cur, 0x00, &[0x0000_0001])?; // magic prefix
     cur.seek(SeekFrom::Start(0x04))?;
     cur.write_all(b"Bud1")?;
@@ -236,7 +229,7 @@ fn assemble(records: &[Record]) -> Result<Vec<u8>> {
     )?;
     put(&mut cur, 0x2C, &[0x0000_0800, 0x0000_0800])?; // allocator-size copies
 
-    // ── DSDB master block @ file 0x44 ────────────────────────────────────────
+    // DSDB master block @ file 0x44
     put(
         &mut cur,
         0x44,
@@ -249,7 +242,7 @@ fn assemble(records: &[Record]) -> Result<Vec<u8>> {
         ],
     )?;
 
-    // ── B-tree leaf page @ file 0x1004 ───────────────────────────────────────
+    // B-tree leaf page @ file 0x1004
     cur.seek(SeekFrom::Start(0x1004))?;
     cur.write_be(&0u32)?; // P: child block number (0 in a leaf)
     cur.write_be(&count)?; // record count in this node
@@ -262,7 +255,7 @@ fn assemble(records: &[Record]) -> Result<Vec<u8>> {
         "DS_Store records ({leaf_used} bytes) overflow the 4 KiB B-tree leaf page"
     );
 
-    // ── Buddy-allocator bookkeeping block @ file 0x2004 ──────────────────────
+    // Buddy-allocator bookkeeping block @ file 0x2004
     write_bookkeeping(&mut cur)?;
 
     Ok(cur.into_inner())
@@ -285,7 +278,7 @@ fn write_bookkeeping<W: Write + Seek>(w: &mut W) -> BinResult<()> {
         w.write_be(&entry)?;
     }
 
-    // Table of contents: a single "DSDB" → block 1 entry.
+    // Table of contents: a single "DSDB" -> block 1 entry.
     w.write_be(&1u32)?; // TOC entry count
     w.write_all(&[4])?; // name length
     w.write_all(b"DSDB")?;
@@ -332,8 +325,6 @@ const FREE_LIST: [u8; 231] = [
     0x00, 0x00, 0x00,
 ];
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,7 +358,7 @@ mod tests {
         assert_eq!(read_u32(&bytes, 0x2010), 0x0000_0045);
         assert_eq!(read_u32(&bytes, 0x2014), 0x0000_100C);
 
-        // DSDB → block 1 in the table of contents (after the 256-entry table).
+        // DSDB -> block 1 in the table of contents (after the 256-entry table).
         assert_eq!(read_u32(&bytes, 0x240C), 1); // TOC count
         assert_eq!(bytes[0x2410], 4);
         assert_eq!(&bytes[0x2411..0x2415], b"DSDB");

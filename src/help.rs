@@ -230,7 +230,7 @@ fn print_signing() {
         When running on CI where the signing identity is not already in a keychain:
 
         1. Export your Developer ID certificate as a .p12 from Keychain Access
-           (right-click → Export, set an export password)
+           (right-click -> Export, set an export password)
         2. Base64-encode it:
                {ANSI_BLUE}base64 -i DeveloperID.p12 | pbcopy{ANSI_RESET}
         3. Set CI secrets:
@@ -267,7 +267,7 @@ fn print_notarize() {
 
         strudel uses the App Store Connect API key for notarization.
 
-        Obtain a key at: App Store Connect → Users & Access → Integrations → App Store Connect API
+        Obtain a key at: App Store Connect -> Users & Access -> Integrations -> App Store Connect API
 
         Three ways to set credentials (highest to lowest priority):
 
@@ -344,7 +344,7 @@ fn print_entitlements() {
         The profile is copied into Contents/embedded.provisionprofile inside the bundle.
 
         Provisioning profiles are created in the Apple Developer portal (Certificates,
-        Identifiers & Profiles → Profiles).
+        Identifiers & Profiles -> Profiles).
 
         ## Ad-hoc + entitlements
 
@@ -431,7 +431,7 @@ fn print_extensions() {
 
         ## Sign order
 
-        Inside-out: embedded dylibs → each .appex → host .app. Never use --deep on the
+        Inside-out: embedded dylibs -> each .appex -> host .app. Never use --deep on the
         host — it would apply host entitlements to nested bundles incorrectly.
     "#});
 }
@@ -594,8 +594,8 @@ fn print_ci() {
 
         ## Preparing APPLE_CERTIFICATE
 
-        1. Open Keychain Access → find your Developer ID Application certificate
-        2. Right-click → Export → save as DeveloperID.p12, set an export password
+        1. Open Keychain Access -> find your Developer ID Application certificate
+        2. Right-click -> Export -> save as DeveloperID.p12, set an export password
         3. Encode: {ANSI_BLUE}base64 -i DeveloperID.p12 | pbcopy{ANSI_RESET}
         4. Paste the result as the APPLE_CERTIFICATE secret
 

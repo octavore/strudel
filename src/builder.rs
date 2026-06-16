@@ -80,7 +80,7 @@ impl Builder {
         Ok(())
     }
 
-    /// Build bundle only (clean → binary → assemble).
+    /// Build bundle only (clean -> binary -> assemble).
     pub fn bundle(&self) -> Result<()> {
         self.clean()?;
         let bin_dir = self.build_binary()?;
@@ -95,7 +95,7 @@ impl Builder {
         Ok(())
     }
 
-    /// Local/dev pipeline: clean → build → assemble → sign, stopping at a
+    /// Local/dev pipeline: clean -> build -> assemble -> sign, stopping at a
     /// signed `.app`. Uses the configured signing identity if set, otherwise
     /// signs ad-hoc (can test entitlements and the hardened runtime
     /// without an Apple Developer account, but can't be notarized).
@@ -122,10 +122,10 @@ impl Builder {
         Ok(())
     }
 
-    /// Full release pipeline: clean → binary → assemble → sign → package DMG →
-    /// notarize. With `--resume`, skips the build and resumes a pending
-    /// notarization instead. With `--skip-notarization`, stops after packaging
-    /// the DMG.
+    /// Full release pipeline: clean -> binary -> assemble -> sign -> package
+    /// DMG -> notarize. With `--resume`, skips the build and resumes a
+    /// pending notarization instead. With `--skip-notarization`, stops
+    /// after packaging the DMG.
     pub fn release(&self) -> Result<()> {
         if let Some(ref uuid_hint) = self.resume {
             return self.resume_notarization(uuid_hint);

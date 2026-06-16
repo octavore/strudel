@@ -516,9 +516,9 @@ of any `info_json_path` you provide:
 
 You will need to enable developer mode in Safari:
 
-1. **Enable Safari's Develop menu**. Go to Safari → Settings → Advanced → "Show
+1. **Enable Safari's Develop menu**. Go to Safari -> Settings -> Advanced -> "Show
    features for web developers".
-2. **Allow unsigned extensions** Go to Safari → Develop → "Allow Unsigned
+2. **Allow unsigned extensions** Go to Safari -> Develop -> "Allow Unsigned
    Extensions". This resets each time Safari quits, so re-enable per session.
 
 ### 5. Testing in Safari
@@ -535,15 +535,15 @@ this step.
    Ad-hoc signing is fine for local dev. Safari only discovers extensions
    whose host `.app` has been registered with Launch Services, which happens
    the first time the app is opened.
-2. **Enable the extension** Go to Safari → Settings → Extensions and enable yours.
+2. **Enable the extension** Go to Safari -> Settings -> Extensions and enable yours.
 
 #### Debugging
 
 | Target              | How                                                                                                                           |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Background script   | Safari → Develop → Web Extension Background Content → `<your extension>`                                                      |
-| Popup UI            | Open the popup, right-click → Inspect Element                                                                                 |
-| Content scripts     | Web Inspector on the page (⌘⌥I) → Sources tab → "Extensions"                                                                  |
+| Background script   | Safari -> Develop -> Web Extension Background Content -> `<your extension>`                                                      |
+| Popup UI            | Open the popup, right-click -> Inspect Element                                                                                 |
+| Content scripts     | Web Inspector on the page (⌘⌥I) -> Sources tab -> "Extensions"                                                                  |
 | Native handler logs | `Console.app`, filter by your extension's bundle id; or `log stream --predicate 'subsystem == "com.example.myapp.Extension"'` |
 
 

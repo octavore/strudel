@@ -19,7 +19,7 @@ impl Builder {
         fs::create_dir_all(path).with_context(|| format!("Failed to create {}", path.display()))
     }
 
-    /// Copy a file, logging source → dest in dry-run instead of acting.
+    /// Copy a file, logging source -> dest in dry-run instead of acting.
     pub(super) fn copy_file(&self, from: &Path, to: &Path) -> Result<()> {
         if self.dry_run {
             cprintln!(

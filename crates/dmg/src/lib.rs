@@ -7,9 +7,6 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
-// ─── Public API
-// ────────────────────────────────────────────────────────────────
-
 pub struct DmgSpec {
     pub vol_name: String,
     pub app_name: String,
@@ -62,9 +59,6 @@ pub fn create(spec: &DmgSpec, output: &Path) -> Result<()> {
 
     Ok(())
 }
-
-// ─── Volume population
-// ──────────────────────────────────────────────────────────
 
 /// Lay out the DMG contents in `staging`: the `.app`, the `Applications`
 /// symlink, an optional background image, and the `.DS_Store` that styles the
@@ -122,8 +116,6 @@ fn populate(spec: &DmgSpec, staging: &Path) -> Result<()> {
 
     Ok(())
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn run(args: &[&str]) -> Result<()> {
     let (prog, rest) = args.split_first().context("empty command")?;

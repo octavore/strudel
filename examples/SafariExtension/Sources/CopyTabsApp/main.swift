@@ -25,7 +25,7 @@ struct ContentView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .padding(.top, 12)
 
-            Text("Enable this extension in Safari:\nSettings → Extensions → Copy Tabs")
+            Text("Enable this extension in Safari:\nSettings -> Extensions -> Copy Tabs")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
