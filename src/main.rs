@@ -1,5 +1,7 @@
+mod appstore;
 mod builder;
 mod config;
+mod devices;
 mod help;
 mod icns;
 mod init;
@@ -19,7 +21,7 @@ use crate::config::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
 #[derive(Parser)]
 #[command(
     name = "strudel",
-    about = "Build, sign, notarize, and package macOS Swift apps",
+    about = "Build, sign, notarize, and package macOS/iOS Swift apps",
     version,
     disable_help_subcommand = true
 )]
@@ -76,13 +78,25 @@ impl Cli {
                 let cfg = config::load_config(&cli.config)?;
                 Builder::new(cfg, dry_run, false, debug, None, false).sim(simulator.as_deref())?;
             },
-            Cmd::Device {
+            Cmd::Device(DeviceArgs {
+                command: None,
                 dry_run,
                 debug,
                 device,
-            } => {
+            }) => {
                 let cfg = config::load_config(&cli.config)?;
-                Builder::new(cfg, dry_run, false, debug, None, false).device(device.as_deref())?;
+                Builder::new(cfg, dry_run, false, debug, None, false).device(&device)?;
+            },
+            Cmd::Device(DeviceArgs {
+                command: Some(DeviceCmd::Register { devices, dry_run }),
+                ..
+            }) => {
+                let cfg = config::load_config(&cli.config)?;
+                Builder::new(cfg, dry_run, false, false, None, false).device_register(&devices)?;
+            },
+            Cmd::Profile { dry_run, force } => {
+                let cfg = config::load_config(&cli.config)?;
+                Builder::new(cfg, dry_run, false, false, None, false).profile_fetch(force)?;
             },
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
@@ -166,21 +180,23 @@ enum Cmd {
         #[arg(long)]
         simulator: Option<String>,
     },
-    /// Build for a connected iOS device, then install and launch
-    Device {
+    /// Build for a connected iOS device, then install and launch.
+    /// Run `strudel device register` first to register your device(s).
+    #[command(args_conflicts_with_subcommands = true)]
+    Device(DeviceArgs),
+    /// Fetch (or refresh) the development provisioning profile for iOS device
+    /// builds
+    Profile {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,
-        /// Build with the Debug configuration instead of Release
+        /// Recreate the profile even if the cached one is already current
         #[arg(long)]
-        debug: bool,
-        /// Device name or UDID (default from [ios] config or auto-detected)
-        #[arg(long)]
-        device: Option<String>,
+        force: bool,
     },
     /// Convert a PNG to .icns using sips + iconutil
     MakeIcns {
-        /// Source PNG path (should be at least 1024×1024)
+        /// Source PNG path (should be at least 1024x1024)
         png: PathBuf,
         /// Destination .icns path
         icns: PathBuf,
@@ -196,6 +212,38 @@ enum Cmd {
     Config {
         #[command(subcommand)]
         command: ConfigCmd,
+    },
+}
+
+#[derive(clap::Args)]
+pub struct DeviceArgs {
+    #[command(subcommand)]
+    command: Option<DeviceCmd>,
+
+    /// Print commands without executing them
+    #[arg(long)]
+    dry_run: bool,
+    /// Build with the Debug configuration instead of Release
+    #[arg(long)]
+    debug: bool,
+    /// Device name or UDID to target (may be repeated to install on multiple
+    /// devices)
+    #[arg(long)]
+    device: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum DeviceCmd {
+    /// Register connected iOS devices on the App Store Connect portal and
+    /// track them in .strudel/devices.toml
+    Register {
+        /// Device name or UDID to register (may be repeated; default: all
+        /// connected devices)
+        #[arg(long = "device")]
+        devices: Vec<String>,
+        /// Print commands without executing them
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 

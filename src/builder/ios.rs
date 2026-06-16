@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Cursor, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
@@ -9,6 +10,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{Builder, step};
+use crate::appstore::AppStoreClient;
+use crate::devices::DeviceSet;
+use crate::paths::ensure_strudel_dir;
 use crate::shell::ShellCommand;
 
 /// Simulator or device flavor — selects the SDK, triple suffix, and
@@ -70,11 +74,13 @@ struct DevicectlDeviceProperties {
 
 impl Builder {
     /// Build for the iOS Simulator and launch in Simulator.app.
-    ///
-    /// Uses `swift build --triple --sdk` (via `xcrun -f swift` to avoid the
-    /// `Wincompatible-sysroot` warning), assembles a flat `.app` bundle, ad-hoc
-    /// signs it, and installs/launches via `xcrun simctl`.
     pub fn sim(&self, sim_override: Option<&str>) -> Result<()> {
+        if !self.cfg.extensions.is_empty() {
+            cprintln!(
+                "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
+                 [[extensions]] in this target will be ignored."
+            );
+        }
         let sim_name = sim_override.unwrap_or(&self.cfg.ios_simulator);
         let target = &self.cfg.target_name;
         let config_flag = if self.debug { "debug" } else { "release" };
@@ -157,12 +163,18 @@ impl Builder {
         Ok(())
     }
 
-    /// Build for a connected iOS device, then install and launch it.
+    /// Build for one or more connected iOS devices, then install and launch.
     ///
-    /// Requires a provisioning profile (set `provisioning_profile` in
-    /// `[build]`). Extracts entitlements directly from the profile so the
-    /// signature matches exactly. Requires Xcode 15+ for `xcrun devicectl`.
-    pub fn device(&self, device_override: Option<&str>) -> Result<()> {
+    /// Requires devices to be registered via `strudel device register`. Auto-
+    /// fetches and caches a development provisioning profile via the App Store
+    /// Connect API when one is not already current.
+    pub fn device(&self, device_selectors: &[String]) -> Result<()> {
+        if !self.cfg.extensions.is_empty() {
+            cprintln!(
+                "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
+                 [[extensions]] in this target will be ignored."
+            );
+        }
         let target = &self.cfg.target_name;
         let config_flag = if self.debug { "debug" } else { "release" };
         let deployment = &self.cfg.ios_deployment_target;
@@ -209,14 +221,14 @@ impl Builder {
         let app_bundle = bundle_dir.join(format!("{target}.app"));
         self.assemble_ios_bundle(&binary, &app_bundle, IosFlavor::Device)?;
 
-        // Provisioning profile — required for device signing.
-        let profile_path = self.cfg.provisioning_profile.as_ref().context(
-            "A provisioning profile is required for device builds.\n\
-             Set `provisioning_profile` in the `[build]` section of strudel.toml.",
-        )?;
+        // Resolve target devices (returns UDIDs).
+        let target_udids = self.resolve_target_udids(device_selectors)?;
+
+        // Resolve provisioning profile.
+        let profile_path = self.resolve_profile(&target_udids)?;
 
         step("Embedding provisioning profile...");
-        self.copy_file(profile_path, &app_bundle.join("embedded.mobileprovision"))?;
+        self.copy_file(&profile_path, &app_bundle.join("embedded.mobileprovision"))?;
 
         step("Signing device bundle...");
         let identity = if self.cfg.sign_identity.is_empty() {
@@ -224,52 +236,368 @@ impl Builder {
         } else {
             &self.cfg.sign_identity
         };
-        self.sign_ios_device(&app_bundle, profile_path, identity)?;
+        self.sign_ios_device(&app_bundle, &profile_path, identity)?;
 
-        // Resolve target device.
-        let device_id = match device_override
-            .map(str::to_string)
-            .or_else(|| self.cfg.ios_device.clone())
-        {
-            Some(d) => d,
-            None => self.find_connected_device()?,
-        };
-
-        step(&format!("Installing on {device_id}..."));
         let app_str = app_bundle.to_str().unwrap();
-        self.sh.run(&[
-            "xcrun",
-            "devicectl",
-            "device",
-            "install",
-            "app",
-            "--device",
-            &device_id,
-            app_str,
-        ])?;
+        for udid in &target_udids {
+            step(&format!("Installing on {udid}..."));
+            self.sh.run(&[
+                "xcrun",
+                "devicectl",
+                "device",
+                "install",
+                "app",
+                "--device",
+                udid,
+                app_str,
+            ])?;
 
-        step("Launching app...");
-        self.sh.run(&[
-            "xcrun",
-            "devicectl",
-            "device",
-            "process",
-            "launch",
-            "--device",
-            &device_id,
-            &self.cfg.bundle_id,
-        ])?;
+            step("Launching app...");
+            self.sh.run(&[
+                "xcrun",
+                "devicectl",
+                "device",
+                "process",
+                "launch",
+                "--device",
+                udid,
+                &self.cfg.bundle_id,
+            ])?;
+        }
 
         println!();
-        cprintln!("<green>Done!</green> App installed and launched on device.");
+        cprintln!(
+            "<green>Done!</green> App installed and launched on {} device(s).",
+            target_udids.len()
+        );
         Ok(())
     }
 
-    // ── Bundle assembly ────────────────────────────────────────────────────────
+    /// Fetch (or force-refresh) the development provisioning profile and write
+    /// it to `.strudel/<bundle_id>.mobileprovision`.
+    pub fn profile_fetch(&self, force: bool) -> Result<()> {
+        let cached = &self.paths.cached_profile;
+        let device_set = DeviceSet::load(&self.paths.devices_toml)?;
+        let udids = device_set.udids();
 
-    /// Assemble a flat iOS `.app` bundle (no `Contents/` subdirectory).
-    /// Generates `Info.plist` from `info_json_path` (if set) merged with
-    /// required iOS keys. Optionally compiles the asset catalog.
+        if !force
+            && cached.exists()
+            && profile_is_current(cached, &udids, &self.cfg.bundle_id, &self.cfg.team_id)?
+        {
+            cprintln!(
+                "<green>✔</green> Cached profile is current: {}",
+                cached.display()
+            );
+            return Ok(());
+        }
+
+        if self.dry_run {
+            cprintln!(
+                "<dim>[dry-run]</dim> Would fetch provisioning profile via App Store Connect API"
+            );
+            cprintln!("<dim>[dry-run]</dim> Would write to {}", cached.display());
+            return Ok(());
+        }
+
+        self.auto_fetch_profile()?;
+
+        println!();
+        cprintln!(
+            "<green>Done!</green> Profile written to {}",
+            cached.display()
+        );
+        cprintln!(
+            "<dim>Tip: to pin this profile explicitly, add to strudel.toml:\n  [build]\n  provisioning_profile = \"{}\"</dim>",
+            cached.display()
+        );
+        Ok(())
+    }
+
+    /// Register connected iOS devices on the portal and record them in
+    /// `.strudel/devices.toml`.
+    pub fn device_register(&self, device_selectors: &[String]) -> Result<()> {
+        let connected = self.list_connected_devices()?;
+
+        if connected.is_empty() {
+            bail!(
+                "No connected iOS devices found.\n\
+                 Plug in your iPhone, trust this Mac, and enable Developer Mode \
+                 (Settings -> Privacy & Security -> Developer Mode)."
+            );
+        }
+
+        let to_register: Vec<(String, String)> = if device_selectors.is_empty() {
+            connected
+        } else {
+            let filtered: Vec<_> = connected
+                .into_iter()
+                .filter(|(udid, name)| device_selectors.iter().any(|s| s == udid || s == name))
+                .collect();
+            if filtered.is_empty() {
+                bail!(
+                    "None of the connected devices match the given selectors.\n\
+                     Run `strudel device register` without `--device` to register \
+                     all connected devices."
+                );
+            }
+            filtered
+        };
+
+        if self.dry_run {
+            for (udid, name) in &to_register {
+                cprintln!("<dim>[dry-run]</dim> Would register {name} ({udid}) on portal");
+                cprintln!("<dim>[dry-run]</dim> Would add to .strudel/devices.toml");
+            }
+            return Ok(());
+        }
+
+        let mut device_set = DeviceSet::load(&self.paths.devices_toml)?;
+        let client = AppStoreClient::from_config(&self.cfg)?;
+        let portal_devices = client.list_devices()?;
+
+        for (udid, name) in &to_register {
+            let already_on_portal = portal_devices.iter().any(|d| d.udid == *udid);
+            if already_on_portal {
+                cprintln!("<dim>Already registered on portal:</dim> {name} ({udid})");
+            } else {
+                step(&format!("Registering {name} ({udid}) on portal..."));
+                match client.register_device(name, udid) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        // A 409 means the device is already on the portal; treat as success.
+                        if !format!("{e}").contains("409") {
+                            return Err(e);
+                        }
+                        cprintln!("<dim>Already registered (portal conflict):</dim> {name}");
+                    },
+                }
+            }
+            device_set.upsert(name.clone(), udid.clone());
+        }
+
+        ensure_strudel_dir(&self.paths.strudel_dir)?;
+        device_set.save(&self.paths.devices_toml)?;
+
+        println!();
+        for (udid, name) in &to_register {
+            cprintln!("<green>✔</green> {name} ({udid})");
+        }
+        cprintln!(
+            "\n<green>Done!</green> Registered {} device(s). \
+             Run `strudel device` to build and install.",
+            to_register.len()
+        );
+        Ok(())
+    }
+
+    /// Resolve which device UDIDs to target for a `device` build.
+    ///
+    /// Tries `--device` selectors, then `[ios] device` config, then
+    /// auto-detected connected devices. All resolved UDIDs must be tracked in
+    /// `.strudel/devices.toml`.
+    fn resolve_target_udids(&self, device_selectors: &[String]) -> Result<Vec<String>> {
+        let device_set = DeviceSet::load(&self.paths.devices_toml)?;
+
+        if !device_selectors.is_empty() {
+            let mut udids = Vec::new();
+            for selector in device_selectors {
+                match device_set.resolve(selector) {
+                    Some(udid) => udids.push(udid.to_string()),
+                    None => bail!(
+                        "Device {:?} is not tracked in .strudel/devices.toml.\n\
+                         Run `strudel device register` to register your device(s).",
+                        selector
+                    ),
+                }
+            }
+            return Ok(udids);
+        }
+
+        if let Some(ref selector) = self.cfg.ios_device {
+            return match device_set.resolve(selector) {
+                Some(udid) => Ok(vec![udid.to_string()]),
+                None => bail!(
+                    "Device {:?} (from [ios] config) is not tracked in .strudel/devices.toml.\n\
+                     Run `strudel device register` to register your device(s).",
+                    selector
+                ),
+            };
+        }
+
+        step("Detecting connected iOS device...");
+        let connected = self.list_connected_devices()?;
+
+        match connected.as_slice() {
+            [] => bail!(
+                "No connected iOS devices found.\n\
+                 Plug in your iPhone, trust this Mac, and enable Developer Mode \
+                 (Settings -> Privacy & Security -> Developer Mode).\n\
+                 List devices with: xcrun devicectl list devices"
+            ),
+            [(udid, name)] => {
+                if !device_set.contains_udid(udid) {
+                    bail!(
+                        "Connected device {name} ({udid}) is not tracked in \
+                         .strudel/devices.toml.\n\
+                         Run `strudel device register` first."
+                    );
+                }
+                cprintln!("<green>✔</green> Found device: {name}");
+                Ok(vec![udid.clone()])
+            },
+            _ => {
+                cprintln!("<bold>Multiple devices connected. Choose:</bold>");
+                cprintln!("  <bold>0</bold>. All devices");
+                for (i, (_, name)) in connected.iter().enumerate() {
+                    cprintln!("  <bold>{}</bold>. {name}", i + 1);
+                }
+                loop {
+                    print!("Device [0-{}]: ", connected.len());
+                    io::stdout().flush()?;
+                    let mut line = String::new();
+                    io::stdin().read_line(&mut line)?;
+                    let n: usize = line.trim().parse().unwrap_or(usize::MAX);
+                    if n == 0 {
+                        let mut udids = Vec::new();
+                        for (udid, name) in &connected {
+                            if !device_set.contains_udid(udid) {
+                                bail!(
+                                    "Device {name} ({udid}) is not tracked in \
+                                     .strudel/devices.toml.\n\
+                                     Run `strudel device register` first."
+                                );
+                            }
+                            udids.push(udid.clone());
+                        }
+                        return Ok(udids);
+                    }
+                    if n >= 1 && n <= connected.len() {
+                        let (udid, name) = &connected[n - 1];
+                        if !device_set.contains_udid(udid) {
+                            bail!(
+                                "Device {name} ({udid}) is not tracked in \
+                                 .strudel/devices.toml.\n\
+                                 Run `strudel device register` first."
+                            );
+                        }
+                        cprintln!("<green>✔</green> Using device: {name}");
+                        return Ok(vec![udid.clone()]);
+                    }
+                    cprintln!(
+                        "<red>error:</red> Enter a number between 0 and {}.",
+                        connected.len()
+                    );
+                }
+            },
+        }
+    }
+
+    /// Resolve the provisioning profile path for a device build.
+    ///
+    /// Uses the user-configured profile if set (warns if stale), the cached
+    /// profile if current, or auto-fetches via the App Store Connect API.
+    fn resolve_profile(&self, target_udids: &[String]) -> Result<PathBuf> {
+        let udid_refs: Vec<&str> = target_udids.iter().map(String::as_str).collect();
+
+        if let Some(ref p) = self.cfg.provisioning_profile {
+            if !self.dry_run
+                && matches!(
+                    profile_is_current(p, &udid_refs, &self.cfg.bundle_id, &self.cfg.team_id),
+                    Ok(false)
+                )
+            {
+                cprintln!(
+                    "<yellow>warning:</yellow> Configured provisioning profile may be \
+                     stale (expired or missing device UDIDs). Proceeding anyway.\n\
+                     Remove `provisioning_profile` from strudel.toml to let strudel \
+                     manage the profile automatically."
+                );
+            }
+            return Ok(p.clone());
+        }
+
+        let cached = &self.paths.cached_profile;
+
+        if !self.dry_run
+            && cached.exists()
+            && profile_is_current(cached, &udid_refs, &self.cfg.bundle_id, &self.cfg.team_id)?
+        {
+            cprintln!(
+                "<green>✔</green> Using cached profile: {}",
+                cached.display()
+            );
+            return Ok(cached.clone());
+        }
+
+        if self.dry_run {
+            cprintln!(
+                "<dim>[dry-run]</dim> Would auto-fetch provisioning profile \
+                 via App Store Connect API"
+            );
+            return Ok(cached.clone());
+        }
+
+        self.auto_fetch_profile()?;
+        Ok(cached.clone())
+    }
+
+    /// Call the App Store Connect API to create a development profile and write
+    /// it to the cache. Uses the full tracked device set from `devices.toml`.
+    fn auto_fetch_profile(&self) -> Result<()> {
+        let device_set = DeviceSet::load(&self.paths.devices_toml)?;
+        if device_set.device.is_empty() {
+            bail!(
+                "No devices are tracked in .strudel/devices.toml.\n\
+                 Run `strudel device register` first to register your device(s)."
+            );
+        }
+
+        let client = AppStoreClient::from_config(&self.cfg)?;
+
+        step("Looking up bundle ID on App Store Connect...");
+        let bundle_id_ref =
+            client.find_or_create_bundle_id(&self.cfg.bundle_id, &self.cfg.app_name)?;
+
+        step("Finding development certificates...");
+        let certs = client.list_development_certificates()?;
+        let cert_ids: Vec<String> = certs.iter().map(|c| c.id.clone()).collect();
+
+        step("Matching tracked devices to portal...");
+        let portal_devices = client.list_devices()?;
+        let mut device_ids = Vec::new();
+        for tracked in &device_set.device {
+            match portal_devices.iter().find(|d| d.udid == tracked.udid) {
+                Some(pd) => device_ids.push(pd.id.clone()),
+                None => bail!(
+                    "Device {} ({}) is in .strudel/devices.toml but not found on the \
+                     App Store Connect portal.\n\
+                     Run `strudel device register` to re-register your devices.",
+                    tracked.name,
+                    tracked.udid
+                ),
+            }
+        }
+
+        let profile_name = format!("strudel {} Development", self.cfg.app_name);
+        step(&format!(
+            "Creating provisioning profile \"{profile_name}\"..."
+        ));
+        let profile_bytes = client.create_development_profile(
+            &profile_name,
+            &bundle_id_ref,
+            &cert_ids,
+            &device_ids,
+        )?;
+
+        ensure_strudel_dir(&self.paths.strudel_dir)?;
+        fs::write(&self.paths.cached_profile, &profile_bytes)?;
+        cprintln!(
+            "<green>✔</green> Profile cached at {}",
+            self.paths.cached_profile.display()
+        );
+        Ok(())
+    }
+
     fn assemble_ios_bundle(
         &self,
         binary: &Path,
@@ -283,10 +611,8 @@ impl Builder {
             fs::create_dir_all(app_bundle)?;
         }
 
-        // Copy the binary flat into the bundle root.
         self.copy_file(binary, &app_bundle.join(&self.cfg.target_name))?;
 
-        // Build Info.plist from user JSON (if any) plus auto-injected iOS keys.
         let mut info: Value = match &self.cfg.info_json_path {
             Some(path) => {
                 let s = fs::read_to_string(path)
@@ -347,7 +673,6 @@ impl Builder {
             &json_bytes,
         )?;
 
-        // Compile asset catalog if configured.
         if let Some(assets_dir) = &self.cfg.ios_assets_dir {
             let platform = match flavor {
                 IosFlavor::Simulator => "iphonesimulator",
@@ -371,8 +696,6 @@ impl Builder {
         let deployment = &self.cfg.ios_deployment_target;
         let icon_name = &self.cfg.ios_app_icon_name;
 
-        // `xcrun actool` is noisy on success; capture its output silently and
-        // only surface it when the command fails.
         self.sh.run(ShellCommand::new("xcrun").args([
             "actool",
             assets_str,
@@ -396,20 +719,14 @@ impl Builder {
         Ok(())
     }
 
-    // ── Device signing ─────────────────────────────────────────────────────────
-
-    /// Sign a device `.app` bundle with entitlements extracted directly from
-    /// the provisioning profile. Using profile-derived entitlements (rather
-    /// than a hand-edited JSON) ensures the signature matches the profile
-    /// exactly. `--generate-entitlement-der` is required on modern iOS.
+    /// Sign a device `.app` bundle with entitlements extracted from the
+    /// profile.
     fn sign_ios_device(
         &self,
         app_bundle: &Path,
         profile_path: &Path,
         identity: &str,
     ) -> Result<()> {
-        // Decode the provisioning profile's CMS envelope and extract the
-        // Entitlements plist. The same approach used by build-device.sh.
         if self.dry_run {
             cprintln!(
                 "<dim>[dry-run]</dim> security cms -D -i {} | extract Entitlements",
@@ -424,26 +741,12 @@ impl Builder {
             return Ok(());
         }
 
-        let profile_str = profile_path
-            .to_str()
-            .context("Invalid provisioning profile path.")?;
-        let output = std::process::Command::new("security")
-            .args(["cms", "-D", "-i", profile_str])
-            .output()
-            .context("Failed to run `security cms`")?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to decode provisioning profile: {stderr}");
-        }
-
-        let profile_plist = plist::Value::from_reader(Cursor::new(&output.stdout))
-            .context("Failed to parse provisioning profile")?;
+        let profile_plist = decode_profile(profile_path)?;
         let entitlements = profile_plist
             .as_dictionary()
             .and_then(|d| d.get("Entitlements"))
             .context("Provisioning profile has no Entitlements key")?;
 
-        // Write the extracted entitlements plist next to the bundle.
         let ent_plist_path = app_bundle
             .parent()
             .unwrap_or(Path::new("."))
@@ -475,9 +778,6 @@ impl Builder {
         Ok(())
     }
 
-    /// Find the UDID of an available iOS simulator matching `name`.
-    /// Falls back to the first available iPhone simulator on any iOS runtime
-    /// when the named device isn't found, with a warning.
     fn find_simulator(&self, name: &str) -> Result<String> {
         if self.dry_run {
             return Ok(name.to_string());
@@ -489,7 +789,7 @@ impl Builder {
             .context("Failed to parse `xcrun simctl list devices` output")?;
 
         let mut exact: Option<String> = None;
-        let mut fallback: Option<(String, String)> = None; // (udid, name)
+        let mut fallback: Option<(String, String)> = None;
 
         for (runtime, devices) in &parsed.devices {
             if !runtime.contains("iOS") {
@@ -524,15 +824,14 @@ impl Builder {
         );
     }
 
-    /// Find the identifier of a connected iOS device (filtered by
-    /// `platform=iOS` and tunnel/developer-mode state). Used when `--device`
-    /// and `[ios] device` are both unset. Prompts the user to choose when
-    /// multiple devices are connected.
-    fn find_connected_device(&self) -> Result<String> {
+    /// Return all connected iOS devices as `(udid, name)` pairs.
+    fn list_connected_devices(&self) -> Result<Vec<(String, String)>> {
         if self.dry_run {
-            return Ok("<device-udid>".to_string());
+            return Ok(vec![(
+                "<device-udid>".to_string(),
+                "<device-name>".to_string(),
+            )]);
         }
-        step("Detecting connected iOS device...");
         let output = self.sh.run(&[
             "xcrun",
             "devicectl",
@@ -544,7 +843,7 @@ impl Builder {
         let parsed: DevicectlOutput =
             serde_json::from_str(&output).context("Failed to parse devicectl output")?;
 
-        let devices: Vec<(String, String)> = parsed
+        Ok(parsed
             .result
             .devices
             .into_iter()
@@ -569,46 +868,9 @@ impl Builder {
                     .unwrap_or_else(|| d.identifier.clone());
                 (d.identifier, name)
             })
-            .collect();
-
-        match devices.as_slice() {
-            [] => bail!(
-                "No connected iOS devices found.\n\
-                 Plug in your iPhone, trust this Mac, and enable Developer Mode \
-                 (Settings → Privacy & Security → Developer Mode).\n\
-                 List devices with: xcrun devicectl list devices"
-            ),
-            [(id, name)] => {
-                cprintln!("<green>✔</green> Found device: {name}");
-                Ok(id.clone())
-            },
-            _ => {
-                cprintln!("<bold>Multiple devices connected. Choose one:</bold>");
-                for (i, (_, name)) in devices.iter().enumerate() {
-                    cprintln!("  <bold>{}</bold>. {name}", i + 1);
-                }
-                loop {
-                    print!("Device [1-{}]: ", devices.len());
-                    io::stdout().flush()?;
-                    let mut line = String::new();
-                    io::stdin().read_line(&mut line)?;
-                    let n: usize = line.trim().parse().unwrap_or(0);
-                    if n >= 1 && n <= devices.len() {
-                        let (id, name) = &devices[n - 1];
-                        cprintln!("<green>✔</green> Using device: {name}");
-                        return Ok(id.clone());
-                    }
-                    cprintln!(
-                        "<red>error:</red> Enter a number between 1 and {}.",
-                        devices.len()
-                    );
-                }
-            },
-        }
+            .collect())
     }
 
-    /// Run `swift build --show-bin-path` with the same flags used for the real
-    /// build to locate the output directory.
     fn ios_bin_dir(
         &self,
         swift: &str,
@@ -643,16 +905,110 @@ impl Builder {
     }
 }
 
+/// Decode a `.mobileprovision` file's CMS envelope and return the plist value.
+pub fn decode_profile(profile_path: &Path) -> Result<plist::Value> {
+    let profile_str = profile_path
+        .to_str()
+        .context("Invalid provisioning profile path")?;
+    let output = std::process::Command::new("security")
+        .args(["cms", "-D", "-i", profile_str])
+        .output()
+        .context("Failed to run `security cms`")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to decode provisioning profile: {stderr}");
+    }
+    plist::Value::from_reader(Cursor::new(&output.stdout))
+        .context("Failed to parse provisioning profile plist")
+}
+
+/// Return `true` when `profile_path` is a valid, current profile for the
+/// given `required_udids`, `bundle_id`, and `team_id`. Returns `false` when:
+/// the profile has expired (or expires within 5 minutes), any required UDID
+/// is absent from `ProvisionedDevices`, or the `application-identifier`
+/// entitlement does not match `<team_id>.<bundle_id>` (when `team_id` is set).
+pub fn profile_is_current(
+    profile_path: &Path,
+    required_udids: &[&str],
+    bundle_id: &str,
+    team_id: &str,
+) -> Result<bool> {
+    if !profile_path.exists() {
+        return Ok(false);
+    }
+    let profile = match decode_profile(profile_path) {
+        Ok(v) => v,
+        Err(_) => return Ok(false),
+    };
+    let dict = match profile.as_dictionary() {
+        Some(d) => d,
+        None => return Ok(false),
+    };
+
+    // Expiration: must not expire within 5 minutes.
+    if let Some(exp) = dict.get("ExpirationDate").and_then(|v| v.as_date()) {
+        let sys_time = SystemTime::from(exp);
+        let cutoff = SystemTime::now()
+            .checked_add(Duration::from_secs(300))
+            .unwrap_or_else(SystemTime::now);
+        if sys_time <= cutoff {
+            return Ok(false);
+        }
+    } else {
+        return Ok(false);
+    }
+
+    // Device coverage: every required UDID must appear in ProvisionedDevices.
+    if !required_udids.is_empty() {
+        let provisioned: Vec<&str> = dict
+            .get("ProvisionedDevices")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_string()).collect())
+            .unwrap_or_default();
+        for udid in required_udids {
+            if !provisioned.contains(udid) {
+                return Ok(false);
+            }
+        }
+    }
+
+    // application-identifier entitlement match (when team_id is set).
+    if !team_id.is_empty() {
+        let expected = format!("{team_id}.{bundle_id}");
+        let actual = dict
+            .get("Entitlements")
+            .and_then(|v| v.as_dictionary())
+            .and_then(|d| d.get("application-identifier"))
+            .and_then(|v| v.as_string())
+            .unwrap_or("");
+        if actual != expected {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     #[test]
     fn ios_app_bundle_path_is_flat() {
-        // iOS bundles live directly in <build_dir>/ios-sim/<target>.app —
-        // no Contents/ subdirectory (unlike macOS).
         let bundle = PathBuf::from("/out/ios-sim").join("MyApp.app");
         assert_eq!(bundle, PathBuf::from("/out/ios-sim/MyApp.app"));
         assert!(!bundle.to_str().unwrap().contains("Contents"));
+    }
+
+    #[test]
+    fn profile_is_current_missing_file_returns_false() {
+        let result = super::profile_is_current(
+            std::path::Path::new("/nonexistent/path.mobileprovision"),
+            &[],
+            "com.example.app",
+            "",
+        )
+        .unwrap();
+        assert!(!result);
     }
 }

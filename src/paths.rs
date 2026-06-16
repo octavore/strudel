@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
 
 use crate::config::{ResolvedConfig, ResolvedExtension};
 
@@ -17,6 +19,10 @@ pub struct Paths {
     pub strudel_dir: PathBuf,
     pub strudel_temp_dmg: PathBuf,
     pub dmg_staging: PathBuf,
+    /// Cached provisioning profile: `.strudel/<bundle_id>.mobileprovision`.
+    pub cached_profile: PathBuf,
+    /// Tracked device set: `.strudel/devices.toml`.
+    pub devices_toml: PathBuf,
     /// One entry per [`ResolvedExtension`], in the same order. Empty when no
     /// extensions are configured.
     pub extensions: Vec<ExtensionPaths>,
@@ -59,6 +65,7 @@ impl Paths {
             build_dir,
             source_dir,
             app_name,
+            bundle_id,
             version,
             extensions,
             ..
@@ -73,6 +80,8 @@ impl Paths {
         Paths {
             strudel_temp_dmg: strudel_dir.join(&dmg_name),
             dmg_staging: strudel_dir.join("dmg-staging"),
+            cached_profile: strudel_dir.join(format!("{bundle_id}.mobileprovision")),
+            devices_toml: strudel_dir.join("devices.toml"),
             dmg: build_dir.join(dmg_name),
             info_plist: app_bundle.join("Contents/Info.plist"),
             entitlements_plist: build_dir.join("Entitlements.plist"),
@@ -92,6 +101,17 @@ impl Paths {
             dir,
         }
     }
+}
+
+/// Create the `.strudel` directory and write a self-ignoring `.gitignore`
+/// containing `*` so none of its contents are accidentally committed.
+pub fn ensure_strudel_dir(strudel_dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(strudel_dir)?;
+    let gitignore = strudel_dir.join(".gitignore");
+    if !gitignore.exists() {
+        std::fs::write(gitignore, "*\n")?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -150,6 +170,17 @@ mod tests {
             PathBuf::from("/out/Entitlements.plist")
         );
         assert_eq!(p.build_dir, PathBuf::from("/out"));
+    }
+
+    #[test]
+    fn ios_cache_paths_are_under_strudel_dir() {
+        let p = Paths::new(&cfg("/out", "MyApp", "1.0"));
+        // source_dir = "/src", so strudel_dir = "/src/.strudel"
+        assert_eq!(
+            p.cached_profile,
+            PathBuf::from("/src/.strudel/x.mobileprovision")
+        );
+        assert_eq!(p.devices_toml, PathBuf::from("/src/.strudel/devices.toml"));
     }
 
     #[test]

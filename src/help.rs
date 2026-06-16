@@ -24,6 +24,10 @@ const TOPICS: &[(&str, &str)] = &[
     ("dylibs", "Embedding dynamic C libraries in the bundle"),
     ("universal", "Universal (fat) binaries for arm64 + x86_64"),
     ("ci", "CI/CD setup: GitHub Actions, secrets, keychain"),
+    (
+        "ios-device",
+        "iOS device builds: register, profile, auto-fetch",
+    ),
 ];
 
 pub fn run(topic: Option<&str>, mut app: Command) {
@@ -41,6 +45,7 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                 "dylibs" | "dylib" => print_dylibs(),
                 "universal" => print_universal(),
                 "ci" => print_ci(),
+                "ios-device" | "ios_device" => print_ios_device(),
                 _ => {
                     if let Some(sub) = app.find_subcommand_mut(&key) {
                         sub.print_long_help().unwrap();
@@ -348,18 +353,27 @@ fn print_entitlements() {
 
         ## iOS device builds
 
-        strudel does not manage provisioning profiles or device registration. Before
-        running `strudel device` you must:
+        strudel can auto-manage development provisioning profiles via the App Store Connect
+        API (the same credentials used for notarization). The recommended workflow is:
 
-          1. Register the device's UDID on the Apple Developer portal:
-               https://developer.apple.com/account/resources/devices/list
-          2. Create a development provisioning profile that includes that device:
-               https://developer.apple.com/account/resources/profiles/list
-          3. Download the profile and set:
+          1. Run once to register your device on the portal and track it locally:
+               strudel device register
+
+          2. Then just run strudel device — it fetches and caches the profile automatically:
+               strudel device
+
+        The profile is cached at .strudel/<bundle_id>.mobileprovision (gitignored). On every
+        build strudel checks whether the cached profile is still current (not expired, includes
+        all tracked devices); if not, it re-fetches automatically.
+
+        To manage the profile manually instead, set:
         {ANSI_PURPLE}
           [build]
           provisioning_profile = "path/to/MyApp.mobileprovision"
         {ANSI_RESET}
+        When provisioning_profile is set strudel uses that file as-is and warns if it looks
+        stale, but does not overwrite it. See {ANSI_BLUE}strudel help ios-device{ANSI_RESET} for the full workflow.
+
         ## Ad-hoc + entitlements
 
         Ad-hoc signatures (no signing identity configured) won't work with entitlements
@@ -447,6 +461,78 @@ fn print_extensions() {
 
         Inside-out: embedded dylibs -> each .appex -> host .app. Never use --deep on the
         host — it would apply host entitlements to nested bundles incorrectly.
+    "#});
+}
+
+fn print_ios_device() {
+    print_help(&formatdoc! {r#"
+        # iOS device builds
+
+        ## One-time setup
+
+        Register your device on the App Store Connect portal and track it locally:
+        {ANSI_BLUE}
+          strudel device register
+        {ANSI_RESET}
+        With a device connected and Developer Mode enabled, this registers it on the portal
+        and adds it to .strudel/devices.toml (gitignored). Repeat whenever you add a device.
+
+        To register a specific subset of connected devices:
+        {ANSI_BLUE}
+          strudel device register --device "iPhone 15" --device "iPad Air"
+        {ANSI_RESET}
+        ## Building and installing
+        {ANSI_BLUE}
+          strudel device
+        {ANSI_RESET}
+        On first run, strudel calls the App Store Connect API to:
+          1. Look up (or create) the bundle ID
+          2. Find your development certificate(s)
+          3. Create a development profile embedding all tracked devices
+          4. Cache the profile at .strudel/<bundle_id>.mobileprovision
+
+        On subsequent runs the cached profile is reused if it is still current. A profile
+        is considered stale when it has expired (within 5 minutes), is missing a device
+        UDID, or the application-identifier no longer matches. Stale profiles are silently
+        re-fetched.
+
+        To target specific devices for one build (all must be in devices.toml):
+        {ANSI_BLUE}
+          strudel device --device "iPhone 15" --device "iPhone 16 Pro"
+        {ANSI_RESET}
+        ## Managing the profile manually
+
+        To fetch or force-refresh the cached profile without building:
+        {ANSI_BLUE}
+          strudel profile
+          strudel profile --force
+        {ANSI_RESET}
+        To opt out of auto-management and use your own profile, set in strudel.toml:
+        {ANSI_PURPLE}
+          [build]
+          provisioning_profile = "path/to/MyApp.mobileprovision"
+        {ANSI_RESET}
+        ## Credentials required
+
+        Profile auto-fetch uses the same App Store Connect API key as notarization:
+        {ANSI_GREEN}
+          APPLE_API_KEY_PATH   path to your .p8 key file
+          APPLE_API_KEY        key ID (shown in App Store Connect)
+          APPLE_API_ISSUER     issuer ID (shown in App Store Connect)
+        {ANSI_RESET}
+        See {ANSI_BLUE}strudel help notarize{ANSI_RESET} for how to configure these credentials.
+
+        ## .strudel/devices.toml
+
+        Tracked devices are stored in .strudel/devices.toml. This file is gitignored
+        automatically by .strudel/.gitignore (written by strudel). Do not commit it.
+
+        Example:
+        {ANSI_PURPLE}
+          [[device]]
+          name = "My iPhone"
+          udid = "00008101-001234AB3456001E"
+        {ANSI_RESET}
     "#});
 }
 
