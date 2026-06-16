@@ -2,9 +2,12 @@
 
 Build and ship macOS/iOS apps entirely from the command-line, without touching the Xcode IDE.
 
-`strudel` wraps the standard Apple toolchain (`swift`, `codesign`, `notarytool`, `stapler`, etc) into
-a config-driven, easy-to-introspect pipeline. Point it at a Package.swift project to produce
-a signed `.app` bundle and a notarized DMG.
+`strudel` uses the standard Apple toolchain (e.g. `swift`, `codesign`, `notarytool`) to build Swift Package Manager-based macOS and iOS apps with a config-driven, easy-to-introspect pipeline. It can produce signed `.app` bundles and notarized DMGs which can be distributed.
+
+> **Current limitations**
+> - **iOS support is still experimental.** `strudel sim` and `strudel device` work for local development, but distributing iOS apps is unsupported.
+> - iOS provisioning profiles and devices need to be manually registered with Apple (this has only been tested with a paid Apple Developer account).
+> - **App Store distribution is not supported yet.** strudel supports direct/notarized distribution (Developer ID) for macOS apps, but there is currently no support for submitting to the Mac App Store or iOS App Store.
 
 - [Installation](#installation)
 - [Example strudel build](#example-strudel-build)
@@ -37,13 +40,13 @@ brew install octavore/tools/strudel
 # create strudel.toml and a basic Package.swift file
 strudel init
 
-# ...edit strudel.toml, info.json, entitlements.json. e.g. add an icon
+# ...edit strudel.toml, info.json, entitlements.json...
 
 # create an unsigned app bundle
-strudel bundle
+strudel bundle # --dry-run
 
 # or create an ad-hoc codesigned app bundle
-strudel build
+strudel build # --dry-run
 
 # or create a real codesigned app bundel
 export APPLE_SIGNING_IDENTITY=...
@@ -52,7 +55,7 @@ strudel build
 # produce a signed, notarized DMG
 export APPLE_API_KEY_PATH=...
 export APPLE_API_KEY=...
-strudel release
+strudel release # --dry-run
 ```
 
 Note that the env vars above can also be stored in the `strudel.toml` config file.
@@ -143,8 +146,8 @@ Notarization may take a while the first time. Run `strudel help notarize` for mo
 
 The config file (`strudel.toml` by default) is TOML, organized into six
 sections. Relative paths are resolved **relative to the config file's directory**
-unless absolute. Unknown keys are rejected, so typos surface as errors. See
-[`strudel.example.toml`](./strudel.example.toml) for an annotated template.
+unless absolute. Unknown keys are rejected, so typos surface as errors. See the HelloWorldApp
+[`strudel.toml`](./examples/HelloWorldApp/strudel.toml) for an annotated template.
 
 ### `[app]` (required)
 
@@ -178,9 +181,14 @@ is user-facing, and it may have multiple unique internal tracking build numbers 
 | `resources`              | string[] | *(none)*            | Individual files to copy into `Contents/Resources/` by filename                                                                                            |
 | `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements                                                      |
 
-### `[ios]` (optional)
+### `[ios]` (optional, experimental)
 
-For iOS apps, this contains settings for `strudel sim` and `strudel device`. All fields are optional.
+For iOS apps, this contains settings for `strudel sim` and `strudel device`. iOS support is experimental. All fields are optional.
+
+> **Note:** strudel does not manage provisioning profiles or device registration. To use `strudel device`:
+> 1. Register the device's UDID on the [Apple Developer portal](https://developer.apple.com/account/resources/devices/list).
+> 2. Create a provisioning profile that includes that device on the [profiles page](https://developer.apple.com/account/resources/profiles/list).
+> 3. Download the profile and point `provisioning_profile` in `[build]` at it.
 
 | Key                 | Type   | Default       | Description                                                        |
 | ------------------- | ------ | ------------- | ------------------------------------------------------------------ |

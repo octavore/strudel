@@ -346,6 +346,20 @@ fn print_entitlements() {
         Provisioning profiles are created in the Apple Developer portal (Certificates,
         Identifiers & Profiles -> Profiles).
 
+        ## iOS device builds
+
+        strudel does not manage provisioning profiles or device registration. Before
+        running `strudel device` you must:
+
+          1. Register the device's UDID on the Apple Developer portal:
+               https://developer.apple.com/account/resources/devices/list
+          2. Create a development provisioning profile that includes that device:
+               https://developer.apple.com/account/resources/profiles/list
+          3. Download the profile and set:
+        {ANSI_PURPLE}
+          [build]
+          provisioning_profile = "path/to/MyApp.mobileprovision"
+        {ANSI_RESET}
         ## Ad-hoc + entitlements
 
         Ad-hoc signatures (no signing identity configured) won't work with entitlements
