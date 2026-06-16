@@ -14,6 +14,7 @@ pub struct AppStoreClient {
     key_id: String,
     issuer: String,
     key_pem: Vec<u8>,
+    agent: ureq::Agent,
 }
 
 #[derive(Serialize)]
@@ -75,10 +76,15 @@ impl AppStoreClient {
         }
         let key_pem = fs::read(key_path)
             .with_context(|| format!("Failed to read API key from {}", key_path.display()))?;
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .new_agent();
         Ok(AppStoreClient {
             key_id: cfg.apple_api_key.clone(),
             issuer: cfg.apple_api_issuer.clone(),
             key_pem,
+            agent,
         })
     }
 
@@ -103,18 +109,17 @@ impl AppStoreClient {
     fn get_json<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T> {
         let url = format!("https://api.appstoreconnect.apple.com{path}");
         let token = self.bearer_token()?;
-        match ureq::get(&url)
-            .set("Authorization", &format!("Bearer {token}"))
+        let mut resp = self.agent
+            .get(&url)
+            .header("Authorization", &format!("Bearer {token}"))
             .call()
-        {
-            Ok(resp) => resp
-                .into_json::<T>()
-                .context("Failed to parse API response"),
-            Err(ureq::Error::Status(code, resp)) => {
-                Err(api_error(code, &resp.into_string().unwrap_or_default()))
-            },
-            Err(e) => bail!("Network error calling {url}: {e}"),
+            .map_err(|e| anyhow::anyhow!("Network error calling {url}: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
+            return Err(api_error(status.as_u16(), &body));
         }
+        resp.body_mut().read_json::<T>().context("Failed to parse API response")
     }
 
     fn post_json<B: Serialize, T: for<'de> Deserialize<'de>>(
@@ -124,35 +129,33 @@ impl AppStoreClient {
     ) -> Result<T> {
         let url = format!("https://api.appstoreconnect.apple.com{path}");
         let token = self.bearer_token()?;
-        let body_str = serde_json::to_string(body)?;
-        match ureq::post(&url)
-            .set("Authorization", &format!("Bearer {token}"))
-            .set("Content-Type", "application/json")
-            .send_string(&body_str)
-        {
-            Ok(resp) => resp
-                .into_json::<T>()
-                .context("Failed to parse API response"),
-            Err(ureq::Error::Status(code, resp)) => {
-                Err(api_error(code, &resp.into_string().unwrap_or_default()))
-            },
-            Err(e) => bail!("Network error calling {url}: {e}"),
+        let mut resp = self.agent
+            .post(&url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .send_json(body)
+            .map_err(|e| anyhow::anyhow!("Network error calling {url}: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
+            return Err(api_error(status.as_u16(), &body));
         }
+        resp.body_mut().read_json::<T>().context("Failed to parse API response")
     }
 
     fn delete(&self, path: &str) -> Result<()> {
         let url = format!("https://api.appstoreconnect.apple.com{path}");
         let token = self.bearer_token()?;
-        match ureq::delete(&url)
-            .set("Authorization", &format!("Bearer {token}"))
+        let mut resp = self.agent
+            .delete(&url)
+            .header("Authorization", &format!("Bearer {token}"))
             .call()
-        {
-            Ok(_) => Ok(()),
-            Err(ureq::Error::Status(code, resp)) => {
-                Err(api_error(code, &resp.into_string().unwrap_or_default()))
-            },
-            Err(e) => bail!("Network error calling {url}: {e}"),
+            .map_err(|e| anyhow::anyhow!("Network error calling {url}: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
+            return Err(api_error(status.as_u16(), &body));
         }
+        Ok(())
     }
 
     /// Find or create the bundle ID resource. Returns the resource ID.
