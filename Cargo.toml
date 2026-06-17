@@ -26,7 +26,7 @@ clap = {version = "4", features = ["derive"]}
 color-print = "0.3.7"
 dmg = {path = "crates/dmg"}
 indoc = "2"
-jsonwebtoken = "10"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 plist = "1"
 secrecy = "0.10.3"
 serde = {version = "1", features = ["derive"]}
