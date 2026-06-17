@@ -160,6 +160,7 @@ impl Builder {
             HashMap::from([
                 ("CFBundleExecutable".into(), self.cfg.app_name.clone()),
                 ("CFBundleIdentifier".into(), self.cfg.bundle_id.clone()),
+                ("CFBundlePackageType".into(), "APPL".into()),
             ]),
         )?;
 
