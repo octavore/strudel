@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use color_print::cprintln;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -109,7 +110,8 @@ impl AppStoreClient {
     fn get_json<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T> {
         let url = format!("https://api.appstoreconnect.apple.com{path}");
         let token = self.bearer_token()?;
-        let mut resp = self.agent
+        let mut resp = self
+            .agent
             .get(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .call()
@@ -119,7 +121,9 @@ impl AppStoreClient {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
             return Err(api_error(status.as_u16(), &body));
         }
-        resp.body_mut().read_json::<T>().context("Failed to parse API response")
+        resp.body_mut()
+            .read_json::<T>()
+            .context("Failed to parse API response")
     }
 
     fn post_json<B: Serialize, T: for<'de> Deserialize<'de>>(
@@ -129,7 +133,8 @@ impl AppStoreClient {
     ) -> Result<T> {
         let url = format!("https://api.appstoreconnect.apple.com{path}");
         let token = self.bearer_token()?;
-        let mut resp = self.agent
+        let mut resp = self
+            .agent
             .post(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .send_json(body)
@@ -139,13 +144,16 @@ impl AppStoreClient {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
             return Err(api_error(status.as_u16(), &body));
         }
-        resp.body_mut().read_json::<T>().context("Failed to parse API response")
+        resp.body_mut()
+            .read_json::<T>()
+            .context("Failed to parse API response")
     }
 
     fn delete(&self, path: &str) -> Result<()> {
         let url = format!("https://api.appstoreconnect.apple.com{path}");
         let token = self.bearer_token()?;
-        let mut resp = self.agent
+        let mut resp = self
+            .agent
             .delete(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .call()
@@ -178,6 +186,7 @@ impl AppStoreClient {
             identifier: String,
         }
 
+        cprintln!("<dim>Looking for bundle ID on App Store Connect: {bundle_id}</dim>");
         let path = format!("/v1/bundleIds?filter[identifier]={bundle_id}");
         let list: ListResp = self.get_json(&path)?;
         if let Some(r) = list
@@ -193,8 +202,18 @@ impl AppStoreClient {
                 "attributes": {"identifier": bundle_id, "name": name, "platform": "IOS"}
             }
         });
-        let created: SingleResp = self.post_json("/v1/bundleIds", &body)?;
-        Ok(created.data.id)
+
+        cprintln!("<dim>Bundle ID not found, creating on App Store Connect...</dim>");
+        self.post_json::<_, SingleResp>("/v1/bundleIds", &body).map(|resp| resp.data.id).or_else(|e| {
+            if format!("{e}").contains("403") {
+                    bail!(
+                        "Insufficient permissions to create bundle ID {bundle_id}. \
+                         An API key with the Admin role is required to be able to manage bundle IDs on the App Store Connect portal. You can also create the bundle ID manually at https://developer.apple.com/account/resources/identifiers/list and run strudel again."
+                    )
+                } else {
+                    Err(e)
+                }
+            })
     }
 
     /// List development certificates in the account. Errors if none exist.
@@ -213,6 +232,7 @@ impl AppStoreClient {
             name: String,
         }
 
+        cprintln!("<dim>Listing development certificates on App Store Connect...</dim>");
         let list: ListResp =
             self.get_json("/v1/certificates?filter[certificateType]=DEVELOPMENT&limit=200")?;
         if list.data.is_empty() {
@@ -233,6 +253,7 @@ impl AppStoreClient {
 
     /// List registered iOS devices with ENABLED status.
     pub fn list_devices(&self) -> Result<Vec<PortalDevice>> {
+        cprintln!("<dim>Listing registered iOS devices on App Store Connect...</dim>");
         #[derive(Deserialize)]
         struct ListResp {
             data: Vec<DeviceResource>,
@@ -355,7 +376,17 @@ impl AppStoreClient {
             profile_content: String,
         }
 
-        let resp: CreateResp = self.post_json("/v1/profiles", &body)?;
+        let resp: CreateResp = self.post_json("/v1/profiles", &body).or_else(|e| {
+            if format!("{e}").contains("403") {
+                bail!(
+                    "Insufficient permissions to create provisioning profile. \
+                     An API key with the Admin role is required to manage profiles on the \
+                     App Store Connect portal."
+                )
+            } else {
+                Err(e)
+            }
+        })?;
         BASE64
             .decode(&resp.data.attributes.profile_content)
             .context("Failed to decode profile content (base64)")

@@ -57,6 +57,7 @@ struct DevicectlDevice {
 #[derive(Deserialize)]
 struct DevicectlHardwareProperties {
     platform: Option<String>,
+    udid: String,
 }
 
 #[derive(Deserialize)]
@@ -366,6 +367,16 @@ impl Builder {
                     Err(e) => {
                         // A 409 means the device is already on the portal; treat as success.
                         if !format!("{e}").contains("409") {
+                            if format!("{e}").contains("403") {
+                                cprintln!(
+                                    "<red>error:</red> Insufficient permissions to register device {name} ({udid}). \
+                                     Admin role is required to be able to register devices on the App Store Connect portal."
+                                );
+                            } else {
+                                cprintln!(
+                                    "<red>error:</red> Failed to register device {name} ({udid}): {e}"
+                                );
+                            }
                             return Err(e);
                         }
                         cprintln!("<dim>Already registered (portal conflict):</dim> {name}");
@@ -424,68 +435,60 @@ impl Builder {
             };
         }
 
+        // Fast path: a single registered device is unambiguous, so use it
+        // directly without scanning. If it isn't actually connected, the
+        // install step surfaces a clear error later.
+        if device_set.device.len() == 1 {
+            let d = &device_set.device[0];
+            cprintln!("<green>✔</green> Using registered device: {}", d.name);
+            return Ok(vec![d.udid.clone()]);
+        }
+
         step("Detecting connected iOS device...");
         let connected = self.list_connected_devices()?;
 
-        match connected.as_slice() {
-            [] => bail!(
-                "No connected iOS devices found.\n\
-                 Plug in your iPhone, trust this Mac, and enable Developer Mode \
-                 (Settings -> Privacy & Security -> Developer Mode).\n\
-                 List devices with: xcrun devicectl list devices"
-            ),
-            [(udid, name)] => {
-                if !device_set.contains_udid(udid) {
-                    bail!(
-                        "Connected device {name} ({udid}) is not tracked in \
-                         .strudel/devices.toml.\n\
-                         Run `strudel device register` first."
-                    );
-                }
+        if self.dry_run {
+            return Ok(connected.into_iter().map(|(udid, _)| udid).collect());
+        }
+
+        let (resolution, unregistered) = resolve_connected(&device_set, connected)?;
+
+        // Hint about connected devices that aren't tracked rather than failing.
+        for (udid, name) in &unregistered {
+            cprintln!(
+                "<dim>Skipping untracked device {name} ({udid}) — run \
+                 `strudel device register` to add it.</dim>"
+            );
+        }
+
+        match resolution {
+            DeviceResolution::Single { udid, name } => {
                 cprintln!("<green>✔</green> Found device: {name}");
-                Ok(vec![udid.clone()])
+                Ok(vec![udid])
             },
-            _ => {
-                cprintln!("<bold>Multiple devices connected. Choose:</bold>");
+            DeviceResolution::Prompt(registered) => {
+                cprintln!("<bold>Multiple registered devices connected. Choose:</bold>");
                 cprintln!("  <bold>0</bold>. All devices");
-                for (i, (_, name)) in connected.iter().enumerate() {
+                for (i, (_, name)) in registered.iter().enumerate() {
                     cprintln!("  <bold>{}</bold>. {name}", i + 1);
                 }
                 loop {
-                    print!("Device [0-{}]: ", connected.len());
+                    print!("Device [0-{}]: ", registered.len());
                     io::stdout().flush()?;
                     let mut line = String::new();
                     io::stdin().read_line(&mut line)?;
                     let n: usize = line.trim().parse().unwrap_or(usize::MAX);
                     if n == 0 {
-                        let mut udids = Vec::new();
-                        for (udid, name) in &connected {
-                            if !device_set.contains_udid(udid) {
-                                bail!(
-                                    "Device {name} ({udid}) is not tracked in \
-                                     .strudel/devices.toml.\n\
-                                     Run `strudel device register` first."
-                                );
-                            }
-                            udids.push(udid.clone());
-                        }
-                        return Ok(udids);
+                        return Ok(registered.into_iter().map(|(udid, _)| udid).collect());
                     }
-                    if n >= 1 && n <= connected.len() {
-                        let (udid, name) = &connected[n - 1];
-                        if !device_set.contains_udid(udid) {
-                            bail!(
-                                "Device {name} ({udid}) is not tracked in \
-                                 .strudel/devices.toml.\n\
-                                 Run `strudel device register` first."
-                            );
-                        }
+                    if n >= 1 && n <= registered.len() {
+                        let (udid, name) = &registered[n - 1];
                         cprintln!("<green>✔</green> Using device: {name}");
                         return Ok(vec![udid.clone()]);
                     }
                     cprintln!(
                         "<red>error:</red> Enter a number between 0 and {}.",
-                        connected.len()
+                        registered.len()
                     );
                 }
             },
@@ -557,17 +560,24 @@ impl Builder {
         step("Looking up bundle ID on App Store Connect...");
         let bundle_id_ref =
             client.find_or_create_bundle_id(&self.cfg.bundle_id, &self.cfg.app_name)?;
+        cprintln!("<dim>  Bundle ID: {} (portal ID: {})</dim>", self.cfg.bundle_id, bundle_id_ref);
 
         step("Finding development certificates...");
         let certs = client.list_development_certificates()?;
+        cprintln!("<dim>  Found {} development certificate(s)</dim>", certs.len());
         let cert_ids: Vec<String> = certs.iter().map(|c| c.id.clone()).collect();
 
         step("Matching tracked devices to portal...");
+        cprintln!("<dim>  Tracked devices: {}</dim>", device_set.device.len());
         let portal_devices = client.list_devices()?;
+        cprintln!("<dim>  Portal devices: {}</dim>", portal_devices.len());
         let mut device_ids = Vec::new();
         for tracked in &device_set.device {
             match portal_devices.iter().find(|d| d.udid == tracked.udid) {
-                Some(pd) => device_ids.push(pd.id.clone()),
+                Some(pd) => {
+                    cprintln!("<dim>  Matched: {} ({})</dim>", tracked.name, tracked.udid);
+                    device_ids.push(pd.id.clone());
+                },
                 None => bail!(
                     "Device {} ({}) is in .strudel/devices.toml but not found on the \
                      App Store Connect portal.\n\
@@ -746,7 +756,14 @@ impl Builder {
             return Ok(());
         }
 
+        step("Checking signing identity...");
+        self.check_signing_identity(identity)?;
+
         let profile_plist = decode_profile(profile_path)?;
+
+        step("Checking certificate is authorized by profile...");
+        self.check_identity_in_profile(identity, &profile_plist)?;
+
         let entitlements = profile_plist
             .as_dictionary()
             .and_then(|d| d.get("Entitlements"))
@@ -775,12 +792,133 @@ impl Builder {
             .context("Failed to run codesign")?;
 
         step("Verifying device signature...");
-        std::process::Command::new("codesign")
+        let verify_status = std::process::Command::new("codesign")
             .args(["--verify", "--deep", "--strict", "--verbose=2", bundle_str])
             .status()
             .context("Failed to run codesign --verify")?;
+        if !verify_status.success() {
+            // Show the identity actually embedded in the bundle for diagnosis.
+            let _ = std::process::Command::new("codesign")
+                .args(["-dvvv", bundle_str])
+                .status();
+            bail!(
+                "Signature verification failed - the app will be rejected at install time.\n\
+                 The signing certificate may have expired since the bundle was built.\n\
+                 Check: security find-identity -v -p codesigning"
+            );
+        }
 
         Ok(())
+    }
+
+    fn check_signing_identity(&self, identity: &str) -> Result<()> {
+        let valid_out = std::process::Command::new("security")
+            .args(["find-identity", "-v", "-p", "codesigning"])
+            .output()
+            .context("Failed to run `security find-identity`")?;
+        let valid_stdout = String::from_utf8_lossy(&valid_out.stdout);
+
+        if let Some(line) = valid_stdout.lines().find(|l| l.contains(identity)) {
+            // Extract cert name between quotes: `  N) HASH "Cert Name"`
+            let cert_name = line
+                .find('"')
+                .and_then(|s| line.rfind('"').filter(|&e| e > s).map(|e| &line[s + 1..e]))
+                .unwrap_or("");
+            if cert_name.starts_with("Apple Distribution")
+                || cert_name.starts_with("iPhone Distribution")
+            {
+                bail!(
+                    "Signing identity {identity:?} is a distribution certificate \
+                     and cannot be used for development device installs.\n\
+                     Use an \"Apple Development\" certificate instead."
+                );
+            }
+            return Ok(());
+        }
+
+        // Not in the valid list - check if it exists but is expired/revoked.
+        let all_out = std::process::Command::new("security")
+            .args(["find-identity", "-p", "codesigning"])
+            .output()
+            .context("Failed to run `security find-identity`")?;
+        let all_stdout = String::from_utf8_lossy(&all_out.stdout);
+
+        if all_stdout.contains(identity) {
+            bail!(
+                "Signing identity {identity:?} is expired or revoked.\n\
+                 Renew in Xcode (Settings > Accounts > Manage Certificates) \
+                 or at developer.apple.com."
+            );
+        }
+
+        bail!(
+            "Signing identity {identity:?} not found in Keychain.\n\
+             Valid identities:\n{}\n\
+             Set [ios] sign_identity in strudel.toml to match one of the above.",
+            valid_stdout.trim()
+        );
+    }
+
+    /// Verify that the signing identity's certificate is listed in the
+    /// profile's DeveloperCertificates. Mismatches cause iOS to reject the
+    /// app at install time even when the local signature verifies cleanly.
+    fn check_identity_in_profile(&self, identity: &str, profile: &plist::Value) -> Result<()> {
+        let Some(certs) = profile
+            .as_dictionary()
+            .and_then(|d| d.get("DeveloperCertificates"))
+            .and_then(|v| v.as_array())
+        else {
+            return Ok(());
+        };
+
+        // Extract the SHA1 fingerprint for our identity from the keychain.
+        let id_out = std::process::Command::new("security")
+            .args(["find-identity", "-v", "-p", "codesigning"])
+            .output()
+            .context("Failed to run `security find-identity`")?;
+        let id_stdout = String::from_utf8_lossy(&id_out.stdout);
+
+        // Lines look like: `  1) AABB...EE "Apple Development: Name (TEAM)"`
+        let Some(signing_fp) = id_stdout
+            .lines()
+            .find(|l| l.contains(identity))
+            .and_then(|l| {
+                l.split_whitespace()
+                    .find(|t| t.len() == 40 && t.chars().all(|c| c.is_ascii_hexdigit()))
+            })
+            .map(str::to_ascii_uppercase)
+        else {
+            return Ok(());
+        };
+
+        for cert_val in certs {
+            let Some(cert_data) = cert_val.as_data() else { continue };
+
+            let mut child = std::process::Command::new("openssl")
+                .args(["x509", "-inform", "DER", "-noout", "-fingerprint", "-sha1"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .context("Failed to run `openssl x509`")?;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(cert_data);
+            }
+            let fp_out = child.wait_with_output().context("openssl x509 failed")?;
+            let fp_str = String::from_utf8_lossy(&fp_out.stdout);
+            // Output: "SHA1 Fingerprint=AA:BB:CC:..."
+            if let Some(fp) = fp_str.split('=').nth(1) {
+                let fp_clean: String = fp.trim().replace(':', "").to_ascii_uppercase();
+                if fp_clean == signing_fp {
+                    return Ok(());
+                }
+            }
+        }
+
+        bail!(
+            "Signing identity {identity:?} is not authorized by the provisioning profile.\n\
+             The profile was created with an older certificate.\n\
+             Run: strudel profile fetch --force"
+        );
     }
 
     fn find_simulator(&self, name: &str) -> Result<String> {
@@ -867,11 +1005,12 @@ impl Builder {
                 platform == "iOS" && (tunnel == "connected" || dev_mode == "enabled")
             })
             .map(|d| {
+                let udid = d.hardware_properties.udid;
                 let name = d
                     .device_properties
                     .name
                     .unwrap_or_else(|| d.identifier.clone());
-                (d.identifier, name)
+                (udid, name)
             })
             .collect())
     }
@@ -911,6 +1050,54 @@ impl Builder {
 }
 
 /// Decode a `.mobileprovision` file's CMS envelope and return the plist value.
+/// Outcome of resolving connected devices against the tracked set, short of
+/// any interactive prompt.
+enum DeviceResolution {
+    /// Exactly one tracked device is connected; install to it directly.
+    Single { udid: String, name: String },
+    /// Multiple tracked devices are connected; the caller must prompt the user
+    /// to choose among these `(udid, name)` pairs.
+    Prompt(Vec<(String, String)>),
+}
+
+/// Partition `connected` `(udid, name)` devices into those tracked in
+/// `device_set` and those that aren't, deciding how the tracked ones resolve.
+///
+/// Returns the resolution alongside the untracked devices (so the caller can
+/// hint about them). Errors when nothing is connected, or when connected
+/// devices exist but none are tracked.
+fn resolve_connected(
+    device_set: &DeviceSet,
+    connected: Vec<(String, String)>,
+) -> Result<(DeviceResolution, Vec<(String, String)>)> {
+    if connected.is_empty() {
+        bail!(
+            "No connected iOS devices found.\n\
+             Plug in your iPhone, trust this Mac, and enable Developer Mode \
+             (Settings -> Privacy & Security -> Developer Mode).\n\
+             List devices with: xcrun devicectl list devices"
+        );
+    }
+
+    let (registered, unregistered): (Vec<_>, Vec<_>) = connected
+        .into_iter()
+        .partition(|(udid, _)| device_set.contains_udid(udid));
+
+    let resolution = match registered.len() {
+        0 => bail!(
+            "No connected devices are tracked in .strudel/devices.toml.\n\
+             Run `strudel device register` to register your device(s)."
+        ),
+        1 => {
+            let (udid, name) = registered.into_iter().next().unwrap();
+            DeviceResolution::Single { udid, name }
+        },
+        _ => DeviceResolution::Prompt(registered),
+    };
+
+    Ok((resolution, unregistered))
+}
+
 pub fn decode_profile(profile_path: &Path) -> Result<plist::Value> {
     let profile_str = profile_path
         .to_str()
@@ -997,6 +1184,65 @@ pub fn profile_is_current(
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use crate::devices::DeviceSet;
+
+    use super::{DeviceResolution, resolve_connected};
+
+    fn dev(udid: &str, name: &str) -> (String, String) {
+        (udid.to_string(), name.to_string())
+    }
+
+    fn device_set(udids: &[(&str, &str)]) -> DeviceSet {
+        let mut set = DeviceSet::default();
+        for (name, udid) in udids {
+            set.upsert(name.to_string(), udid.to_string());
+        }
+        set
+    }
+
+    #[test]
+    fn resolve_connected_errors_when_nothing_connected() {
+        let set = device_set(&[("iPhone", "AAA")]);
+        assert!(resolve_connected(&set, vec![]).is_err());
+    }
+
+    #[test]
+    fn resolve_connected_errors_when_none_tracked() {
+        let set = device_set(&[("iPhone", "AAA")]);
+        let connected = vec![dev("BBB", "Someone's iPhone")];
+        assert!(resolve_connected(&set, connected).is_err());
+    }
+
+    #[test]
+    fn resolve_connected_single_tracked_resolves_directly() {
+        let set = device_set(&[("iPhone", "AAA")]);
+        let connected = vec![dev("AAA", "My iPhone"), dev("BBB", "Untracked")];
+        let (resolution, unregistered) = resolve_connected(&set, connected).unwrap();
+        match resolution {
+            DeviceResolution::Single { udid, name } => {
+                assert_eq!(udid, "AAA");
+                assert_eq!(name, "My iPhone");
+            },
+            _ => panic!("expected a single resolved device"),
+        }
+        // The untracked device is reported back for a hint, not failed on.
+        assert_eq!(unregistered, vec![dev("BBB", "Untracked")]);
+    }
+
+    #[test]
+    fn resolve_connected_multiple_tracked_prompts() {
+        let set = device_set(&[("iPhone A", "AAA"), ("iPhone B", "BBB")]);
+        let connected = vec![dev("AAA", "iPhone A"), dev("BBB", "iPhone B")];
+        let (resolution, unregistered) = resolve_connected(&set, connected).unwrap();
+        match resolution {
+            DeviceResolution::Prompt(devices) => {
+                assert_eq!(devices.len(), 2);
+            },
+            _ => panic!("expected a prompt"),
+        }
+        assert!(unregistered.is_empty());
+    }
 
     #[test]
     fn ios_app_bundle_path_is_flat() {
