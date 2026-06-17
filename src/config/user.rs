@@ -170,7 +170,7 @@ fn resolve_target(
     } = target;
     let ios = ios.unwrap_or_else(|| top_ios.clone());
 
-    let source_dir = resolve_path(config_dir, build.source_dir, ".");
+    let source_dir = resolve_path(config_dir, build.source_dir.unwrap_or(".".into()));
     let build_dir_default = if multi {
         match platform {
             Some(p) => format!(".build/dist/{}-{}", app.name, p.as_str()),
@@ -179,7 +179,10 @@ fn resolve_target(
     } else {
         ".build/dist".to_string()
     };
-    let build_dir = resolve_path(&source_dir, build.build_dir, &build_dir_default);
+    let build_dir = resolve_path(
+        &source_dir,
+        build.build_dir.unwrap_or(build_dir_default.into()),
+    );
     let target_name = build.target_name.unwrap_or_else(|| app.name.clone());
     let ios_simulator = ios.simulator.unwrap_or_else(|| "iPhone 16".to_string());
     let ios_device = ios.device;
@@ -206,24 +209,21 @@ fn resolve_target(
             if p.is_absolute() {
                 p
             } else {
-                // default is always ignored here.
-                resolve_path(config_dir, Some(p), "info.json")
+                resolve_path(config_dir, p)
             }
         }),
         entitlements_json_path: build.entitlements_json_path.map(|p| {
             if p.is_absolute() {
                 p
             } else {
-                // default is always ignored here.
-                resolve_path(config_dir, Some(p), "entitlements.json")
+                resolve_path(config_dir, p)
             }
         }),
         icon_path: build.icon_path.map(|p| {
             if p.is_absolute() {
                 p
             } else {
-                // default is always ignored here.
-                resolve_path(config_dir, Some(p), "icon.png")
+                resolve_path(config_dir, p)
             }
         }),
         archs: build.archs.unwrap_or_else(|| {

@@ -12,9 +12,8 @@ pub fn resolve_to(base: &Path, p: PathBuf) -> PathBuf {
     if p.is_absolute() { p } else { base.join(p) }
 }
 
-pub fn resolve_path(base: &Path, p: Option<PathBuf>, default: impl AsRef<Path>) -> PathBuf {
-    p.map(|p| resolve_to(base, p))
-        .unwrap_or_else(|| base.join(default))
+pub fn resolve_path(base: &Path, p: impl AsRef<Path>) -> PathBuf {
+    resolve_to(base, p.as_ref().to_path_buf())
 }
 
 /// Select config var by checking the following in order: env, project, global.
