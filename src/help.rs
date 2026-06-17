@@ -12,7 +12,7 @@ const TOPICS: &[(&str, &str)] = &[
     ("config", "Full strudel.toml reference"),
     (
         "targets",
-        "Multiple targets: product × platform in one strudel.toml",
+        "Multiple targets: product x platform in one strudel.toml",
     ),
     (
         "global-config",
@@ -628,6 +628,12 @@ fn print_ios_device() {
           APPLE_API_ISSUER     issuer ID (shown in App Store Connect)
         {ANSI_RESET}
         See {ANSI_BLUE}strudel help notarize{ANSI_RESET} for how to configure these credentials.
+
+        Note: registering devices and creating bundle IDs and profiles requires an API key
+        with the {ANSI_GREEN}Admin{ANSI_RESET} role. A {ANSI_GREEN}Developer{ANSI_RESET} key
+        is fine for notarization but fails with "insufficient permissions" on
+        `strudel device register`, `strudel device`, and `strudel profile`. Either use an Admin
+        key or register the device and create the profile manually and set build.provisioning_profile.
 
         ## .strudel/devices.toml
 

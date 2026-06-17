@@ -34,7 +34,7 @@ impl Platform {
     }
 }
 
-/// One entry in a `[[target]]` array — a product × platform pair.
+/// One entry in a `[[target]]` array — a product x platform pair.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TargetSection {

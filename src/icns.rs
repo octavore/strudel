@@ -8,7 +8,7 @@ use crate::shell::Shell;
 const SIZES: &[u32] = &[16, 32, 64, 128, 256, 512];
 
 /// Convert a PNG to an .icns file using macOS built-in tools (sips + iconutil).
-/// The source PNG should be at least 1024×1024.
+/// The source PNG should be at least 1024x1024.
 pub fn make_icns(png_path: &Path, icns_path: &Path, dry_run: bool) -> Result<()> {
     if !png_path.exists() {
         bail!("Source PNG not found: {}", png_path.display());

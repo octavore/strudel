@@ -272,9 +272,9 @@ enum Cmd {
         /// Destination .icns path
         icns: PathBuf,
     },
-    /// Show documentation for a topic (config, global-config, signing,
-    /// notarize, entitlements, extensions, dylibs, universal, ci). Run with
-    /// no argument to list topics.
+    /// Show documentation for a topic (config, targets, global-config,
+    /// signing, notarize, entitlements, extensions, dylibs, universal, ci,
+    /// ios-device). Run with no argument to list topics.
     Help {
         /// Topic to show docs for
         topic: Option<String>,

@@ -4,15 +4,17 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 
 `strudel` uses the standard Apple toolchain (e.g. `swift`, `codesign`, `notarytool`) to build Swift Package Manager-based macOS and iOS apps with a config-driven, easy-to-introspect pipeline. It can produce signed `.app` bundles and notarized DMGs which can be distributed.
 
-> **Current limitations**
+> [!IMPORTANT] **Current limitations**
 > - **iOS support is still experimental.** `strudel sim` and `strudel device` work for local development, but distributing iOS apps is unsupported.
-> - iOS provisioning profiles and devices need to be manually registered with Apple (this has only been tested with a paid Apple Developer account).
+> - iOS device builds require a paid Apple Developer account. strudel can auto-register devices and provision development profiles via the App Store Connect API (see [iOS device builds](#ios-device-builds)), but this has only been tested with a paid account.
 > - **App Store distribution is not supported yet.** strudel supports direct/notarized distribution (Developer ID) for macOS apps, but there is currently no support for submitting to the Mac App Store or iOS App Store.
 
 - [Installation](#installation)
 - [Example strudel build](#example-strudel-build)
 - [Usage](#usage)
 - [Config file structure](#config-file-structure)
+- [Multiple targets](#multiple-targets)
+- [iOS device builds](#ios-device-builds)
 - [Global config](#global-config)
 - [Signing \& notarization](#signing--notarization)
 - [Safari Web Extensions](#safari-web-extensions)
@@ -67,21 +69,28 @@ Note that the env vars above can also be stored in the `strudel.toml` config fil
 strudel [OPTIONS] <COMMAND>
 
 Commands:
-  bundle     Build app bundle only (no signing/notarization)
+  bundle     Build the app bundle only (no signing/notarization)
   build      Build and sign the app bundle (no notarization or DMG); for local dev
   release    Full release: build, sign, notarize, and package DMG
   sim        Build for the iOS Simulator and launch in Simulator.app
   device     Build for a connected iOS device, then install and launch
-  init       Scaffold a config file in the given directory
+  profile    Fetch (or refresh) the development provisioning profile for iOS device builds
+  init       Scaffold a strudel.toml in the given directory
   config     Manage global strudel config (~/.config/strudel/config.toml)
   make-icns  Convert a PNG to .icns using sips + iconutil
-  help       Print this message or the help of the given subcommand(s)
+  help       Show documentation for a topic (run `strudel help` to list topics)
 
 Options:
       --config <CONFIG>  Path to config file [default: strudel.toml]
+      --target <TARGET>  Select a target by app name (multi-target configs only)
   -h, --help             Print help
   -V, --version          Print version
 ```
+
+`strudel help <topic>` has extended documentation for many subjects beyond the
+subcommands above, including `config`, `targets`, `signing`, `notarize`,
+`entitlements`, `extensions`, `ios-device`, and more. Run `strudel help` with no
+argument to list every topic.
 
 ### `init`
 
@@ -133,7 +142,11 @@ This step requires valid signing credentials from a paid Apple Developer members
 
 ```sh
 strudel release
-strudel release --dry-run    # print commands without executing them
+strudel release --dry-run            # print commands without executing them
+strudel release --open               # open the .app after a successful build
+strudel release --skip-notarization  # build and package the DMG, but don't notarize
+strudel release --resume             # resume the most recent pending notarization
+strudel release --resume <uuid>      # resume a specific notarization submission
 ```
 
 Output artifacts are saved to `build_dir`:
@@ -141,7 +154,9 @@ Output artifacts are saved to `build_dir`:
 - `<app_name>.app` is the signed, stapled app bundle
 - `<app_name>-<version>.dmg` is the notarized, stapled DMG
 
-Notarization may take a while the first time. Run `strudel help notarize` for more.
+Notarization may take a while the first time. If it stalls or you lose the
+connection, re-run with `--resume` to pick up the pending submission instead of
+resubmitting. Run `strudel help notarize` for more.
 
 ## Config file structure
 
@@ -182,14 +197,25 @@ is user-facing, and it may have multiple unique internal tracking build numbers 
 | `resources`              | string[] | *(none)*            | Individual files to copy into `Contents/Resources/` by filename                                                                                            |
 | `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements                                                      |
 
+### `[build_env]` (optional)
+
+Extra environment variables forwarded to `swift build` (e.g. for `pkg-config`).
+Each key/value is passed through to the build environment:
+
+```toml
+[build_env]
+PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
+```
+
 ### `[ios]` (optional, experimental)
 
 For iOS apps, this contains settings for `strudel sim` and `strudel device`. iOS support is experimental. All fields are optional.
 
-> **Note:** strudel does not manage provisioning profiles or device registration. To use `strudel device`:
-> 1. Register the device's UDID on the [Apple Developer portal](https://developer.apple.com/account/resources/devices/list).
-> 2. Create a provisioning profile that includes that device on the [profiles page](https://developer.apple.com/account/resources/profiles/list).
-> 3. Download the profile and point `provisioning_profile` in `[build]` at it.
+> [!TIP] strudel can auto-manage device registration and development provisioning
+> profiles via the App Store Connect API. The usual flow is `strudel device register`
+> once, then `strudel device` to build, install, and launch. See
+> [iOS device builds](#ios-device-builds) for the full workflow, or set
+> `provisioning_profile` in `[build]` to manage the profile yourself.
 
 | Key                 | Type   | Default       | Description                                                        |
 | ------------------- | ------ | ------------- | ------------------------------------------------------------------ |
@@ -241,17 +267,17 @@ default (no `[dmg]` section), strudel generates a styled drag-to-install window
 with the app icon on the left and an Applications symlink on the right. Add the
 section to override individual fields or opt out entirely with `plain = true`.
 
-| Key               | Type    | Default | Description                                                              |
-| ----------------- | ------- | ------- | ------------------------------------------------------------------------ |
-| `plain`           | bool    | `false` | Skip the styled window; produce a plain compressed DMG instead           |
-| `background`      | string  | *(none)*| Path to a PNG or JPEG background image (relative to config file)         |
-| `window_width`    | integer | `660`   | Finder window width in pixels                                            |
-| `window_height`   | integer | `400`   | Finder window height in pixels                                           |
-| `icon_size`       | integer | `128`   | Icon size in pixels                                                      |
-| `app_x`           | integer | `192`   | Horizontal position of the `.app` icon                                   |
-| `app_y`           | integer | `192`   | Vertical position of the `.app` icon                                     |
-| `applications_x`  | integer | `468`   | Horizontal position of the Applications symlink                          |
-| `applications_y`  | integer | `192`   | Vertical position of the Applications symlink                            |
+| Key              | Type    | Default  | Description                                                      |
+| ---------------- | ------- | -------- | ---------------------------------------------------------------- |
+| `plain`          | bool    | `false`  | Skip the styled window; produce a plain compressed DMG instead   |
+| `background`     | string  | *(none)* | Path to a PNG or JPEG background image (relative to config file) |
+| `window_width`   | integer | `660`    | Finder window width in pixels                                    |
+| `window_height`  | integer | `400`    | Finder window height in pixels                                   |
+| `icon_size`      | integer | `128`    | Icon size in pixels                                              |
+| `app_x`          | integer | `192`    | Horizontal position of the `.app` icon                           |
+| `app_y`          | integer | `192`    | Vertical position of the `.app` icon                             |
+| `applications_x` | integer | `468`    | Horizontal position of the Applications symlink                  |
+| `applications_y` | integer | `192`    | Vertical position of the Applications symlink                    |
 
 Example (custom background and larger icons):
 
@@ -300,6 +326,117 @@ for the full reference.
   from an empty object, so the generated `Info.plist` contains only those injected keys.
 - **`entitlements.json`**: A JSON object of entitlement keys/values, converted to a
   plist and passed to `codesign --entitlements` during signing.
+
+## Multiple targets
+
+A single `strudel.toml` can declare multiple build targets using `[[target]]`
+blocks instead of a top-level `[app]`. Each target is a product x platform pair
+with its own `[app]`, `[build]`, `[[extensions]]`, `[dmg]`, and optional `[ios]`
+settings. This is useful for shipping both a macOS and an iOS app from the same
+Swift package, or for monorepos with several executables that share signing and
+notarization credentials.
+
+- `platform` is required on every `[[target]]`, either `macos` or `ios`.
+- `[signing]` and `[notarize]` are always shared (top-level only).
+- A top-level `[ios]` is a fallback; a per-target `ios.*` block overrides the
+  entire top-level section (not individual fields).
+
+
+```toml
+# Shared across all targets (top-level only):
+[signing]
+identity = "Developer ID Application: You (XXXXXXXXXX)"
+team_id  = "XXXXXXXXXX"
+
+[notarize]
+api_key      = "2X9R4HXF34"
+api_key_path = "AuthKey_2X9R4HXF34.p8"
+
+# Optional top-level [ios] acts as a fallback for iOS targets.
+[ios]
+simulator = "iPhone 16"
+
+[[target]]
+platform         = "macos"
+app.name         = "MyApp"
+app.bundle_id    = "com.example.app"
+app.version      = "1.0.0"
+app.build_number = "1"
+build.entitlements_json_path = "mac/entitlements.json"
+
+[[target]]
+platform         = "ios"
+app.name         = "MyApp"
+app.bundle_id    = "com.example.app" # may be the same for macos/ios
+app.version      = "1.0.0"
+app.build_number = "1"
+ios.deployment_target = "18.0"
+```
+
+When multiple targets are eligible for a command, strudel runs them all and
+prints a per-target header. Narrow to one target with `--target <app name>`:
+
+```sh
+strudel build --target MyApp
+strudel sim   --target MyApp
+```
+
+Each command routes to the matching platform automatically:
+
+- `bundle` / `build` / `release` select macOS targets
+- `sim` / `device` select iOS targets.
+
+With multiple targets, each gets its own build directory (`.build/dist/<name>-macos`,
+`.build/dist/<name>-ios`) to avoid collisions; override per-target with
+`build.build_dir`. See the [`MultiTargetApp`](./examples/MultiTargetApp/strudel.toml)
+example or run `strudel help targets` for more.
+
+## iOS device builds
+
+`strudel device` builds for a connected iOS device, then installs and launches
+it. strudel can auto-manage device registration and a development provisioning
+profile through the App Store Connect API, using the same credentials as
+notarization (see [Notarization auth](#notarization-auth)).
+
+> [!IMPORTANT] **Admin vs Developer API keys.** Registering devices and creating bundle IDs
+> and provisioning profiles modifies your App Store Connect account, so it
+> requires an API key with the **Admin** role. A lower-privilege **Developer**
+> key is enough for notarization (`strudel release`) but will fail with an
+> "insufficient permissions" error on `strudel device register`, `strudel
+> device`, or `strudel profile`. Either issue an Admin key for these flows, or
+> register the device and create the profile manually in the
+> [Developer portal](https://developer.apple.com/account/resources/) and point
+> `provisioning_profile` at it.
+
+```sh
+# One-time: register connected device(s) on the portal and track them locally
+strudel device register
+
+# Build, install, and launch on a connected device
+strudel device
+```
+
+`strudel device register` registers connected devices on the App Store Connect
+portal and records them in `.strudel/devices.toml`. This file should be .gitignored
+since devices are per-developer.
+
+On the first `strudel device`, strudel looks up (or creates) the bundle ID,
+finds your development certificate, creates a provisioning profile embedding all
+specified devices, and caches it at `.strudel/<bundle_id>.mobileprovision`.
+Subsequent runs reuse the cached profile while it's still current, re-fetching
+automatically if it has expired or no longer covers every tracked device.
+
+Useful flags and the standalone profile command:
+
+```sh
+strudel device --device "iPhone 15"   # target specific tracked device(s)
+strudel profile                        # fetch/refresh the cached profile without building
+strudel profile --force                # recreate the profile even if current
+```
+
+To opt out of auto-management and supply your own profile, set
+`provisioning_profile` under `[build]`; strudel then uses that file as-is. See
+`strudel help ios-device` for the full workflow.
 
 ## Global config
 
@@ -550,9 +687,9 @@ this step.
 
 | Target              | How                                                                                                                           |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Background script   | Safari -> Develop -> Web Extension Background Content -> `<your extension>`                                                      |
-| Popup UI            | Open the popup, right-click -> Inspect Element                                                                                 |
-| Content scripts     | Web Inspector on the page (⌘⌥I) -> Sources tab -> "Extensions"                                                                  |
+| Background script   | Safari -> Develop -> Web Extension Background Content -> `<your extension>`                                                   |
+| Popup UI            | Open the popup, right-click -> Inspect Element                                                                                |
+| Content scripts     | Web Inspector on the page (⌘⌥I) -> Sources tab -> "Extensions"                                                                |
 | Native handler logs | `Console.app`, filter by your extension's bundle id; or `log stream --predicate 'subsystem == "com.example.myapp.Extension"'` |
 
 
