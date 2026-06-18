@@ -4,7 +4,8 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 
 `strudel` uses the standard Apple toolchain (e.g. `swift`, `codesign`, `notarytool`) to build Swift Package Manager-based macOS and iOS apps with a config-driven, easy-to-introspect pipeline. It can produce signed `.app` bundles and notarized DMGs which can be distributed.
 
-> [!IMPORTANT] **Current limitations**
+> [!IMPORTANT]
+> **Current limitations**
 > - **iOS support is still experimental.** `strudel sim` and `strudel device` work for local development, but distributing iOS apps is unsupported.
 > - iOS device builds require a paid Apple Developer account. strudel can auto-register devices and provision development profiles via the App Store Connect API (see [iOS device builds](#ios-device-builds)), but this has only been tested with a paid account.
 > - **App Store distribution is not supported yet.** strudel supports direct/notarized distribution (Developer ID) for macOS apps, but there is currently no support for submitting to the Mac App Store or iOS App Store.
@@ -211,7 +212,8 @@ PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 
 For iOS apps, this contains settings for `strudel sim` and `strudel device`. iOS support is experimental. All fields are optional.
 
-> [!TIP] strudel can auto-manage device registration and development provisioning
+> [!TIP]
+> strudel can auto-manage device registration and development provisioning
 > profiles via the App Store Connect API. The usual flow is `strudel device register`
 > once, then `strudel device` to build, install, and launch. See
 > [iOS device builds](#ios-device-builds) for the full workflow, or set
@@ -398,7 +400,8 @@ it. strudel can auto-manage device registration and a development provisioning
 profile through the App Store Connect API, using the same credentials as
 notarization (see [Notarization auth](#notarization-auth)).
 
-> [!IMPORTANT] **Admin vs Developer API keys.** Registering devices and creating bundle IDs
+> [!IMPORTANT]
+> **Admin vs Developer API keys.** Registering devices and creating bundle IDs
 > and provisioning profiles modifies your App Store Connect account, so it
 > requires an API key with the **Admin** role. A lower-privilege **Developer**
 > key is enough for notarization (`strudel release`) but will fail with an
