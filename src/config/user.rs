@@ -42,7 +42,7 @@ pub struct TargetSection {
     pub app: AppSection,
     #[serde(default)]
     pub build: BuildSection,
-    #[serde(default, rename = "extensions")]
+    #[serde(default)]
     pub extensions: Vec<ExtensionSection>,
     pub dmg: Option<DmgSection>,
     pub ios: Option<IosSection>,
@@ -53,7 +53,6 @@ pub struct TargetSection {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct BuildConfig {
-    #[serde(default)]
     pub app: Option<AppSection>,
     #[serde(default)]
     pub build: BuildSection,
@@ -63,11 +62,10 @@ pub struct BuildConfig {
     pub notarize: NotarizeSection,
     /// Zero or more app extensions embedded under `Contents/PlugIns/` in the
     /// host bundle. See [`ExtensionSection`].
-    #[serde(default, rename = "extensions")]
+    #[serde(default)]
     pub extensions: Vec<ExtensionSection>,
     #[serde(default)]
     pub ios: IosSection,
-    #[serde(default)]
     pub dmg: Option<DmgSection>,
     /// Multi-target declarations — one per `[[target]]` block.
     #[serde(default)]
