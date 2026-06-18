@@ -75,6 +75,17 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
         println!("Created {}", pkg_path.display());
     }
 
+    let gitignore_path = output_dir.join(".gitignore");
+    if gitignore_path.exists() {
+        println!("Skipped {} (already exists)", gitignore_path.display());
+    } else {
+        std::fs::write(&gitignore_path, indoc::indoc! {"
+            .build/    # Swift package manager build artifacts
+            .strudel/  # strudel cache and intermediate build outputs
+        "})?;
+        println!("Created {}", gitignore_path.display());
+    }
+
     println!("\nNext steps:");
     println!("  strudel bundle   # build app bundle (unsigned)");
     println!("  strudel build    # build + sign for local dev (ad-hoc if no identity)");
