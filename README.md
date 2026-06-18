@@ -803,6 +803,7 @@ cargo install --path .
 
 - Use `swift-format` for formatting Swift code
 - `// swift-tools-version: 6.0` in `Package.swift` to use `.v15`
+- IconComposer, which comes bundled with Xcode, is great for making icons.
 
 ## Acknowledgements
 
