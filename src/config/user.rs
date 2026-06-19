@@ -53,6 +53,7 @@ pub struct TargetSection {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct BuildConfig {
+    #[serde(default)]
     pub app: Option<AppSection>,
     #[serde(default)]
     pub build: BuildSection,
@@ -66,6 +67,7 @@ pub struct BuildConfig {
     pub extensions: Vec<ExtensionSection>,
     #[serde(default)]
     pub ios: IosSection,
+    #[serde(default)]
     pub dmg: Option<DmgSection>,
     /// Multi-target declarations — one per `[[target]]` block.
     #[serde(default)]

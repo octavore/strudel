@@ -328,7 +328,26 @@ impl Builder {
         }
 
         let to_register: Vec<(String, String)> = if device_selectors.is_empty() {
-            connected
+            if connected.len() > 1 {
+                let options: Vec<String> = connected
+                    .iter()
+                    .map(|(udid, name)| format!("{name} ({udid})"))
+                    .collect();
+                let selected = inquire::MultiSelect::new("Select devices to register:", options)
+                    .with_all_selected_by_default()
+                    .prompt()?;
+                if selected.is_empty() {
+                    bail!("No devices selected.");
+                }
+                connected
+                    .into_iter()
+                    .filter(|(udid, name)| {
+                        selected.iter().any(|s| s == &format!("{name} ({udid})"))
+                    })
+                    .collect()
+            } else {
+                connected
+            }
         } else {
             let filtered: Vec<_> = connected
                 .into_iter()
