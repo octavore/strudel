@@ -1,66 +1,20 @@
-//! Signing-credential handling: preflight checks for required credentials, and
-//! importing an `APPLE_CERTIFICATE` into a throwaway keychain that is torn down
-//! when the build finishes, so nothing is left on the machine.
+//! Ephemeral keychain for a supplied `APPLE_CERTIFICATE` (the paid / CI path).
+//! The keychain and its search-list entry are removed when the build finishes,
+//! so a build leaves no credentials behind on the machine.
 
 use std::fs;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as b64;
 use color_print::cprintln;
 use secrecy::{ExposeSecret, SecretString};
 
-use super::{Builder, step};
+use crate::builder::{Builder, step};
 use crate::shell::{Shell, ShellCommand};
 
+#[allow(dead_code)]
 impl Builder {
-    /// Describe any signing/notarization credentials that are missing or
-    /// incomplete. Empty means a real `run` has everything it needs.
-    pub(super) fn credential_problems(&self) -> Vec<String> {
-        let mut problems = Vec::new();
-        if self.cfg.sign_identity.is_empty() {
-            problems.push("APPLE_SIGNING_IDENTITY (signing identity) is not set".to_string());
-        }
-        if self.cfg.notary_auth().is_none() {
-            problems.push(
-                "no complete notarization credentials. Provide the App Store Connect API key \
-                    (APPLE_API_KEY_PATH, APPLE_API_KEY, APPLE_API_ISSUER)."
-                    .to_string(),
-            );
-        }
-        problems
-    }
-
-    /// Verify the credentials required for signing and notarization are
-    /// present. Bails early so a missing value doesn't surface deep into
-    /// the pipeline (e.g. `codesign: no identity found`). In dry-run, only
-    /// warns — there's nothing to sign.
-    pub(super) fn preflight_credentials(&self) -> Result<()> {
-        let problems = self.credential_problems();
-        if problems.is_empty() {
-            return Ok(());
-        }
-
-        let hint = "Set identifiers in strudel.toml or the environment, and \
-                    secrets (passwords, certificate) in the environment only. \
-                    See the README's \"Signing & notarization\" section.";
-
-        if self.dry_run {
-            for p in &problems {
-                cprintln!("<yellow>[warning]</yellow> {p}");
-            }
-            cprintln!("<yellow>[warning]</yellow> {hint}");
-            Ok(())
-        } else {
-            let mut msg = String::from("Cannot run signing/notarization:");
-            for p in &problems {
-                msg.push_str(&format!("\n  - {p}"));
-            }
-            msg.push_str(&format!("\n{hint}"));
-            bail!(msg);
-        }
-    }
-
     /// The user's current keychain search list (absolute paths).
     fn user_keychains(&self) -> Result<Vec<String>> {
         let out = self.sh.run(&["security", "list-keychains", "-d", "user"])?;
@@ -83,15 +37,14 @@ impl Builder {
         }
     }
 
-    #[allow(dead_code)]
     /// If a signing certificate is provided via `APPLE_CERTIFICATE`, decode it
     /// into a throwaway keychain and add that keychain to the user search list
     /// so `codesign` can find the identity. The returned guard removes the
     /// keychain and restores the search list on drop, so a build leaves no
-    /// credentials behind — useful on a fresh CI runner. When no certificate is
+    /// credentials behind - useful on a fresh CI runner. When no certificate is
     /// configured (the common local case, where the identity already lives in
     /// the login keychain), this is a no-op returning `None`.
-    pub(super) fn import_certificate(&self) -> Result<Option<TempKeychain<'_>>> {
+    pub(in crate::builder) fn import_certificate(&self) -> Result<Option<TempKeychain<'_>>> {
         let Some((cert_b64, cert_password)) = self.cfg.signing_cert() else {
             return Ok(None);
         };
@@ -201,7 +154,7 @@ impl Builder {
 /// restores the original keychain search list and deletes the keychain, so a
 /// build never leaves credentials behind on the machine. Cleanup is
 /// best-effort: we're tearing down, so failures are ignored.
-pub(super) struct TempKeychain<'a> {
+pub(in crate::builder) struct TempKeychain<'a> {
     sh: &'a Shell,
     path: String,
     original_list: Vec<String>,
@@ -223,92 +176,5 @@ impl Drop for TempKeychain<'_> {
             let _ = self.sh.run(args.as_slice());
         }
         let _ = self.sh.run(&["security", "delete-keychain", &self.path]);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-    use std::path::PathBuf;
-
-    use super::*;
-    use crate::config::ResolvedConfig;
-
-    fn empty_cfg() -> ResolvedConfig {
-        ResolvedConfig {
-            platform: None,
-            app_name: "A".into(),
-            bundle_id: "b".into(),
-            version: "1".into(),
-            build_number: "1".into(),
-            source_dir: PathBuf::from("/x"),
-            build_dir: PathBuf::from("/x"),
-            info_json_path: None,
-            entitlements_json_path: None,
-            icon_path: None,
-            archs: vec!["arm64".into()],
-            target_name: "A".into(),
-            sign_identity: String::new(),
-            notarize_timeout: 600,
-            build_env: HashMap::new(),
-            embed_libs: Vec::new(),
-            provisioning_profile: None,
-            extensions: Vec::new(),
-            ios_simulator: "iPhone 16".into(),
-            ios_device: None,
-            ios_deployment_target: "18.0".into(),
-            ios_assets_dir: None,
-            ios_app_icon_name: "AppIcon".into(),
-            team_id: String::new(),
-            apple_api_issuer: String::new(),
-            apple_api_key: String::new(),
-            apple_api_key_path: None,
-            apple_certificate: String::new().into(),
-            apple_certificate_password: String::new().into(),
-            resources_dir: None,
-            resources: Vec::new(),
-            dmg: None,
-        }
-    }
-
-    fn builder(cfg: ResolvedConfig) -> Builder {
-        Builder::new(cfg, true, false, false, None, false)
-    }
-
-    #[test]
-    fn problems_reports_missing_identity_and_notary() {
-        let b = builder(empty_cfg());
-        let problems = b.credential_problems();
-        assert_eq!(problems.len(), 2);
-        assert!(
-            problems
-                .iter()
-                .any(|p| p.contains("APPLE_SIGNING_IDENTITY"))
-        );
-        assert!(
-            problems
-                .iter()
-                .any(|p| p.contains("notarization credentials"))
-        );
-    }
-
-    #[test]
-    fn problems_empty_when_api_key_set() {
-        let mut cfg = empty_cfg();
-        cfg.sign_identity = "Developer ID Application: X (TEAM)".into();
-        cfg.apple_api_key_path = Some(PathBuf::from("/k.p8"));
-        cfg.apple_api_key = "KID".into();
-        cfg.apple_api_issuer = "ISS".into();
-        assert!(builder(cfg).credential_problems().is_empty());
-    }
-
-    #[test]
-    fn preflight_warns_but_passes_in_dry_run() {
-        // Dry-run must not bail: a missing-credential dry-run is the user
-        // explicitly checking what `release` would do — they shouldn't have to
-        // populate every secret just to preview the pipeline.
-        let b = builder(empty_cfg());
-        b.preflight_credentials()
-            .expect("dry-run preflight must succeed even without credentials");
     }
 }

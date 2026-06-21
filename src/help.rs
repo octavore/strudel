@@ -32,6 +32,10 @@ const TOPICS: &[(&str, &str)] = &[
         "ios-device",
         "iOS device builds: register, profile, auto-fetch",
     ),
+    (
+        "ios-free-provisioning",
+        "Free Apple ID provisioning: login, 7-day profiles, no paid account needed",
+    ),
 ];
 
 pub fn run(topic: Option<&str>, mut app: Command) {
@@ -51,6 +55,8 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                 "universal" => print_universal(),
                 "ci" => print_ci(),
                 "ios-device" | "ios_device" => print_ios_device(),
+                "ios-free-provisioning" | "ios_free_provisioning" | "free-provisioning"
+                | "free_provisioning" => print_ios_free_provisioning(),
                 _ => {
                     if let Some(sub) = app.find_subcommand_mut(&key) {
                         sub.print_long_help().unwrap();
@@ -270,6 +276,23 @@ fn print_config() {
         ## [[extensions]] — optional, repeatable
 
         See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
+
+        ## [ios] — optional
+        {ANSI_PURPLE}
+        [ios]
+        simulator         = "iPhone 16"  # default; override with --simulator
+        device            = "My iPhone"  # name or UDID; auto-detected if unset
+        deployment_target = "18.0"       # iOS deployment target
+        assets_dir        = "Sources/App/Assets.xcassets"  # xcassets for actool
+        app_icon_name     = "AppIcon"    # icon set name inside assets_dir
+
+        # Provisioning backend. Default: "app_store_connect" (requires paid account +
+        # App Store Connect API key). Use "free" for a plain Apple ID (7-day profiles,
+        # max 3 devices). Run `strudel login` first with the free path.
+        provisioning = "app_store_connect"
+        apple_id     = "you@example.com"  # pre-fills the login prompt (free path only)
+        {ANSI_RESET}
+        See {ANSI_BLUE}strudel help ios-device{ANSI_RESET} and {ANSI_BLUE}strudel help ios-free-provisioning{ANSI_RESET}.
 
         ## [dmg] — optional overrides (styled Finder window is the default)
         {ANSI_PURPLE}
@@ -575,7 +598,26 @@ fn print_ios_device() {
     print_help(&formatdoc! {r#"
         # iOS device builds
 
-        ## One-time setup
+        ## Provisioning backends
+
+        strudel supports two provisioning backends:
+
+          "app_store_connect"  Default. Requires a paid Apple Developer account and an
+                               App Store Connect API key (Admin role). Produces 1-year
+                               profiles. See "Credentials required" below.
+
+          "free"               Sign in with any Apple ID (no paid account). Produces
+                               7-day profiles; max 3 devices and 10 App IDs per team.
+                               Run `strudel login` first, then the normal device workflow.
+
+        Select the backend in strudel.toml:
+        {ANSI_PURPLE}
+          [ios]
+          provisioning = "free"   # or "app_store_connect" (default)
+        {ANSI_RESET}
+        For the free path, see: {ANSI_BLUE}strudel help ios-free-provisioning{ANSI_RESET}
+
+        ## One-time setup (App Store Connect path)
 
         Register your device on the App Store Connect portal and track it locally:
         {ANSI_BLUE}
@@ -619,7 +661,7 @@ fn print_ios_device() {
           [build]
           provisioning_profile = "path/to/MyApp.mobileprovision"
         {ANSI_RESET}
-        ## Credentials required
+        ## Credentials required (App Store Connect path only)
 
         Profile auto-fetch uses the same App Store Connect API key as notarization:
         {ANSI_GREEN}
@@ -825,5 +867,97 @@ fn print_ci() {
 
         {ANSI_BLUE}strudel help signing{ANSI_RESET}
         {ANSI_BLUE}strudel help notarize{ANSI_RESET}
+    "#});
+}
+
+fn print_ios_free_provisioning() {
+    print_help(&formatdoc! {r#"
+        # Free Apple ID provisioning
+
+        strudel can provision iOS device builds using any Apple ID - no paid Apple
+        Developer account required. This mirrors what Xcode does when you sign in with
+        a plain Apple ID: 7-day development profiles, max 3 devices and 10 App IDs per
+        Personal Team.
+
+        ## Limits vs paid provisioning
+
+          Free (Apple ID)          Paid (App Store Connect)
+          ─────────────────────    ────────────────────────
+          7-day profiles           1-year profiles
+          Max 3 devices            Unlimited devices
+          Max 10 App IDs           Unlimited App IDs
+          No Admin API key needed  Requires Admin API key
+          strudel login required   App Store Connect creds
+
+        ## Setup
+
+        1. Enable the free backend in strudel.toml:
+        {ANSI_PURPLE}
+           [ios]
+           provisioning = "free"
+           apple_id     = "you@example.com"   # optional; pre-fills login prompt
+        {ANSI_RESET}
+        2. Sign in with your Apple ID:
+        {ANSI_BLUE}
+           strudel login
+        {ANSI_RESET}
+           Prompts for your Apple ID, password, and a 2FA code if your account has
+           two-factor authentication enabled. The session token (never the password)
+           is saved to {ANSI_GREEN}~/.local/share/strudel/session.json{ANSI_RESET}.
+
+        3. Register your device and build as usual:
+        {ANSI_BLUE}
+           strudel device register
+           strudel device
+        {ANSI_RESET}
+        ## Session management
+        {ANSI_BLUE}
+        strudel login                        # interactive sign-in
+        strudel login --apple-id you@ex.com  # pre-fill the email
+        strudel logout                       # clear session and cached credentials
+        {ANSI_RESET}
+        The session token expires. If a `strudel device` run fails with an auth
+        error, re-run `strudel login`.
+
+        ## What strudel stores
+
+        All data lives in {ANSI_GREEN}~/.local/share/strudel/{ANSI_RESET} (per-machine, not per-project):
+
+          session.json          GSA token + DSID (no password stored)
+          device-uuid.txt       Stable UUID used as the anisette machine fingerprint
+          dev-cert.der          Cached DER-encoded developer certificate
+          dev-key.pem           Cached private key (generated fresh each cert rotation)
+          strudel-dev.keychain  Persistent keychain holding the signing identity
+
+        The keypair and certificate are regenerated on each profile refresh (every
+        7 days). The keychain is created once and reused across rotations.
+
+        ## Profile refresh
+
+        A fresh profile is fetched whenever the cached one is stale (expired or
+        missing a device). `strudel device` does this automatically. To trigger
+        manually:
+        {ANSI_BLUE}
+        strudel profile           # fetch if stale
+        strudel profile --force   # force-refresh
+        {ANSI_RESET}
+        Each refresh revokes the previous dev certificate for this machine (to stay
+        within the 2-cert limit per team) and generates a new RSA keypair + CSR.
+
+        ## Under the hood
+
+        strudel implements the Apple developer-services provisioning protocol natively:
+          - Authenticates via Apple's GrandSlam SRP-6a flow (SHA-256, custom pre-hash)
+          - Generates anisette headers via {ANSI_GREEN}AOSKit.framework{ANSI_RESET} (no Docker required)
+          - Calls {ANSI_GREEN}developerservices2.apple.com{ANSI_RESET} endpoints used by Xcode itself
+          - Shells {ANSI_GREEN}openssl{ANSI_RESET} to generate the RSA keypair + CSR
+
+        Known issue: {ANSI_GREEN}AOSKit.retrieveOTPHeadersForDSID:{ANSI_RESET} returned -45070 in early
+        macOS 27 betas. If you see anisette errors, file an issue.
+
+        ## See also
+
+        {ANSI_BLUE}strudel help ios-device{ANSI_RESET}
+        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
     "#});
 }

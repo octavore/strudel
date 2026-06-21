@@ -1,0 +1,24 @@
+[package]
+name = "appleid"
+version = "0.4.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+num-bigint = "0.4"
+rand = "0.10"
+sha2 = "0.11"
+hmac = "0.13"
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc", "block-padding"] }
+ureq = { version = "3", features = ["json", "native-tls"] }
+plist = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSBundle", "NSDictionary", "NSString"] }
+tempfile = "3"

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::config::{ResolvedConfig, ResolvedExtension};
 
@@ -103,6 +103,39 @@ impl Paths {
     }
 }
 
+/// Paths for per-machine strudel data stored under `$XDG_DATA_HOME/strudel/`
+/// (defaults to `~/.local/share/strudel/`). These files are global to the
+/// machine, not tied to any project directory.
+pub struct StrudelData {
+    /// `session.json` — persisted GSA token/DSID. Password is never stored.
+    pub session_json: PathBuf,
+    /// `dev-cert.der` — cached DER-encoded developer certificate.
+    pub cert_der: PathBuf,
+    /// `dev-key.pem` — cached private key PEM (permission 0600).
+    pub key_pem: PathBuf,
+    /// `strudel-dev.keychain-db` — persistent keychain holding the dev
+    /// identity.
+    pub keychain_db: PathBuf,
+}
+
+impl StrudelData {
+    /// Locate (and create if needed) the XDG data directory.
+    pub fn locate() -> Result<Self> {
+        let dirs = xdg::BaseDirectories::with_prefix("strudel");
+        // place_data_file creates the parent directory.
+        let session_json = dirs
+            .place_data_file("session.json")
+            .context("Failed to locate strudel data dir")?;
+        let dir = session_json.parent().unwrap().to_owned();
+        Ok(StrudelData {
+            session_json,
+            cert_der: dir.join("dev-cert.der"),
+            key_pem: dir.join("dev-key.pem"),
+            keychain_db: dir.join("strudel-dev.keychain-db"),
+        })
+    }
+}
+
 /// Create the `.strudel` directory and write a self-ignoring `.gitignore`
 /// containing `*` so none of its contents are accidentally committed.
 pub fn ensure_strudel_dir(strudel_dir: &Path) -> Result<()> {
@@ -119,6 +152,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::config::ProvisioningBackend;
 
     fn cfg(build_dir: &str, app_name: &str, version: &str) -> ResolvedConfig {
         ResolvedConfig {
@@ -145,6 +179,8 @@ mod tests {
             ios_deployment_target: "18.0".into(),
             ios_assets_dir: None,
             ios_app_icon_name: "AppIcon".into(),
+            ios_provisioning: ProvisioningBackend::AppStoreConnect,
+            ios_apple_id: None,
             team_id: String::new(),
             apple_api_issuer: String::new(),
             apple_api_key: String::new(),

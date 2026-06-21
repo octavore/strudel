@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools::build-utils"]
 
 [workspace]
 resolver = "2"
-members = [".", "crates/dmg"]
+members = [".", "crates/dmg", "crates/appleid"]
 
 [[bin]]
 name = "strudel"
@@ -24,18 +24,21 @@ anyhow = "1"
 base64 = "0.22"
 clap = {version = "4", features = ["derive"]}
 color-print = "0.3.7"
+appleid = {path = "crates/appleid"}
 dmg = {path = "crates/dmg"}
 indoc = "2"
-inquire = "0.7"
+inquire = "0.9"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 plist = "1"
 secrecy = "0.10.3"
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
+tempfile = "3"
 shellexpand = "3"
 toml = "1.1"
 ureq = {version = "3", features = ["json"]}
 xdg = "3.0.0"
+srp = "=0.7.0-rc.3"
 
 [dev-dependencies]
 temp-env = "0.3"

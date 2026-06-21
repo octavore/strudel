@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 
 use super::{Builder, step};
 use crate::appstore::AppStoreClient;
+use crate::config::ProvisioningBackend;
 use crate::devices::DeviceSet;
 use crate::paths::ensure_strudel_dir;
 use crate::shell::ShellCommand;
@@ -231,6 +232,10 @@ impl Builder {
         step("Embedding provisioning profile...");
         self.copy_file(&profile_path, &app_bundle.join("embedded.mobileprovision"))?;
 
+        if self.cfg.ios_provisioning == ProvisioningBackend::Free && !self.dry_run {
+            crate::freeprov::ensure_keychain_ready()?;
+        }
+
         step("Signing device bundle...");
         let identity = if self.cfg.sign_identity.is_empty() {
             "Apple Development"
@@ -372,37 +377,49 @@ impl Builder {
         }
 
         let mut device_set = DeviceSet::load(&self.paths.devices_toml)?;
-        let client = AppStoreClient::from_config(&self.cfg)?;
-        let portal_devices = client.list_devices()?;
 
-        for (udid, name) in &to_register {
-            let already_on_portal = portal_devices.iter().any(|d| d.udid == *udid);
-            if already_on_portal {
-                cprintln!("<dim>Already registered on portal:</dim> {name} ({udid})");
-            } else {
-                step(&format!("Registering {name} ({udid}) on portal..."));
-                match client.register_device(name, udid) {
-                    Ok(_) => {},
-                    Err(e) => {
-                        // A 409 means the device is already on the portal; treat as success.
-                        if !format!("{e}").contains("409") {
-                            if format!("{e}").contains("403") {
-                                cprintln!(
-                                    "<red>error:</red> Insufficient permissions to register device {name} ({udid}). \
-                                     Admin role is required to be able to register devices on the App Store Connect portal."
-                                );
-                            } else {
-                                cprintln!(
-                                    "<red>error:</red> Failed to register device {name} ({udid}): {e}"
-                                );
-                            }
-                            return Err(e);
-                        }
-                        cprintln!("<dim>Already registered (portal conflict):</dim> {name}");
-                    },
-                }
+        if self.cfg.ios_provisioning == ProvisioningBackend::Free {
+            cprintln!(
+                "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
+            );
+            for (udid, name) in &to_register {
+                step(&format!("Registering {name} ({udid}) via Apple ID..."));
+                crate::freeprov::register_device(&self.cfg, name, udid)?;
+                device_set.upsert(name.clone(), udid.clone());
             }
-            device_set.upsert(name.clone(), udid.clone());
+        } else {
+            let client = AppStoreClient::from_config(&self.cfg)?;
+            let portal_devices = client.list_devices()?;
+
+            for (udid, name) in &to_register {
+                let already_on_portal = portal_devices.iter().any(|d| d.udid == *udid);
+                if already_on_portal {
+                    cprintln!("<dim>Already registered on portal:</dim> {name} ({udid})");
+                } else {
+                    step(&format!("Registering {name} ({udid}) on portal..."));
+                    match client.register_device(name, udid) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            // A 409 means the device is already on the portal; treat as success.
+                            if !format!("{e}").contains("409") {
+                                if format!("{e}").contains("403") {
+                                    cprintln!(
+                                        "<red>error:</red> Insufficient permissions to register device {name} ({udid}). \
+                                         Admin role is required to be able to register devices on the App Store Connect portal."
+                                    );
+                                } else {
+                                    cprintln!(
+                                        "<red>error:</red> Failed to register device {name} ({udid}): {e}"
+                                    );
+                                }
+                                return Err(e);
+                            }
+                            cprintln!("<dim>Already registered (portal conflict):</dim> {name}");
+                        },
+                    }
+                }
+                device_set.upsert(name.clone(), udid.clone());
+            }
         }
 
         ensure_strudel_dir(&self.paths.strudel_dir)?;
@@ -563,9 +580,16 @@ impl Builder {
         Ok(cached.clone())
     }
 
-    /// Call the App Store Connect API to create a development profile and write
-    /// it to the cache. Uses the full tracked device set from `devices.toml`.
+    /// Fetch (or re-create) a development profile and write it to the cache.
+    /// Routes through the configured provisioning backend.
     fn auto_fetch_profile(&self) -> Result<()> {
+        if self.cfg.ios_provisioning == ProvisioningBackend::Free {
+            cprintln!(
+                "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
+            );
+            return crate::freeprov::auto_fetch_profile(&self.cfg, &self.paths);
+        }
+
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;
         if device_set.device.is_empty() {
             bail!(

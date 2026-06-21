@@ -2,6 +2,7 @@ mod appstore;
 mod builder;
 mod config;
 mod devices;
+mod freeprov;
 mod help;
 mod icns;
 mod init;
@@ -172,6 +173,23 @@ impl Cli {
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
             },
+            Cmd::Login { apple_id } => {
+                // If no --apple-id flag, try reading it from [ios] apple_id in
+                // strudel.toml (best-effort; not required for login to work).
+                let from_config = if apple_id.is_none() {
+                    config::load_config(&cli.config)
+                        .ok()
+                        .and_then(|p| p.targets.into_iter().next())
+                        .and_then(|c| c.ios_apple_id)
+                } else {
+                    None
+                };
+                let hint = apple_id.as_deref().or(from_config.as_deref());
+                freeprov::login(hint)?;
+            },
+            Cmd::Logout => {
+                freeprov::logout()?;
+            },
             Cmd::Config { command } => match command {
                 ConfigCmd::Edit => {
                     let path = GlobalConfig::xdg_path()?;
@@ -279,6 +297,16 @@ enum Cmd {
         /// Topic to show docs for
         topic: Option<String>,
     },
+    /// Sign in with an Apple ID for free iOS provisioning (7-day profiles,
+    /// max 3 devices). Saves the session to ~/.local/share/strudel/.
+    /// Set [ios] provisioning = "free" in strudel.toml to enable.
+    Login {
+        /// Apple ID email address (prompted if omitted)
+        #[arg(long)]
+        apple_id: Option<String>,
+    },
+    /// Sign out and clear the saved Apple ID session and cached dev credentials
+    Logout,
     /// Manage global strudel config (~/.config/strudel/config.toml)
     Config {
         #[command(subcommand)]

@@ -8,7 +8,7 @@
 
 mod fs;
 mod ios;
-mod keychain;
+pub(crate) mod keychain;
 mod notarize;
 mod steps;
 mod validators;

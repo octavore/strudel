@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::config::ResolvedConfig;
 use crate::config::extension::ExtensionSection;
 use crate::config::global::GlobalConfig;
-use crate::config::resolved::{ResolvedDmg, ResolvedProject};
+use crate::config::resolved::{ProvisioningBackend, ResolvedDmg, ResolvedProject};
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
 
 /// The target platform for a build target.
@@ -189,6 +189,15 @@ fn resolve_target(
     let ios_deployment_target = ios.deployment_target.unwrap_or_else(|| "18.0".to_string());
     let ios_assets_dir = ios.assets_dir.map(|p| resolve_to(config_dir, p));
     let ios_app_icon_name = ios.app_icon_name.unwrap_or_else(|| "AppIcon".to_string());
+    let ios_provisioning = match ios.provisioning.as_deref() {
+        None | Some("app_store_connect") => ProvisioningBackend::AppStoreConnect,
+        Some("free") => ProvisioningBackend::Free,
+        Some(other) => bail!(
+            "Invalid ios.provisioning value {:?}. Use \"free\" or \"app_store_connect\".",
+            other
+        ),
+    };
+    let ios_apple_id = ios.apple_id.clone();
 
     let extensions = extensions
         .into_iter()
@@ -300,6 +309,8 @@ fn resolve_target(
         ios_deployment_target,
         ios_assets_dir,
         ios_app_icon_name,
+        ios_provisioning,
+        ios_apple_id,
         dmg,
     })
 }
@@ -417,16 +428,27 @@ impl DmgSection {
 pub struct IosSection {
     /// iOS Simulator name for `strudel sim`. Default: `"iPhone 16"`.
     pub simulator: Option<String>,
+
     /// Connected device name or UDID for `strudel device`.
     /// If unset, strudel auto-detects the first connected device.
     pub device: Option<String>,
+
     /// iOS deployment target (e.g. `"18.0"`). Default: `"18.0"`.
     pub deployment_target: Option<String>,
+
     /// Path to a `.xcassets` directory to compile into the bundle with
     /// `xcrun actool`. Optional; skipped when unset.
     pub assets_dir: Option<PathBuf>,
+
     /// Name of the app icon set inside `assets_dir`. Default: `"AppIcon"`.
     pub app_icon_name: Option<String>,
+
+    /// Provisioning backend: `"free"` (Apple ID, 7-day profiles) or
+    /// `"app_store_connect"` (paid account, default).
+    pub provisioning: Option<String>,
+
+    /// Apple ID email for `provisioning = "free"`. Pre-fills the login prompt.
+    pub apple_id: Option<String>,
 }
 
 /// App Store Connect API key credentials for `notarytool`.
