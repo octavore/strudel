@@ -80,6 +80,31 @@ impl Builder {
         Ok(())
     }
 
+    /// User-facing clean: wipe the strudel output dir and run `swift package clean`.
+    pub fn clean_command(&self) -> Result<()> {
+        let source = self.cfg.source_dir.to_str().unwrap();
+        let build_dir = &self.paths.build_dir;
+
+        if build_dir.as_os_str().is_empty() || build_dir == Path::new("/") {
+            anyhow::bail!("build_dir is empty or root, refusing to clean");
+        }
+
+        step("Cleaning strudel output...");
+        let prefix = if self.dry_run { "[dry-run] " } else { "" };
+        cprintln!("<dim>{prefix}rm -rf {}</dim>", build_dir.display());
+        if !self.dry_run && build_dir.exists() {
+            std::fs::remove_dir_all(build_dir)?;
+        }
+
+        step("Cleaning Swift build cache...");
+        self.sh
+            .run(&["swift", "package", "clean", "--package-path", source])?;
+
+        println!();
+        cprintln!("<green>Done!</green>");
+        Ok(())
+    }
+
     /// Build bundle only (clean -> binary -> assemble).
     pub fn bundle(&self) -> Result<()> {
         self.clean()?;

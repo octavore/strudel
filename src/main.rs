@@ -170,6 +170,16 @@ impl Cli {
                     },
                 )?;
             },
+            Cmd::Clean { dry_run } => {
+                let project = config::load_config(&cli.config)?;
+                for_each_selected(
+                    &project,
+                    cli.target.as_deref(),
+                    Platform::Macos,
+                    true,
+                    |cfg| Builder::new(cfg.clone(), dry_run, false, false, None, false).clean_command(),
+                )?;
+            },
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
             },
@@ -282,6 +292,12 @@ enum Cmd {
         /// Recreate the profile even if the cached one is already current
         #[arg(long)]
         force: bool,
+    },
+    /// Remove the strudel output directory and run `swift package clean`
+    Clean {
+        /// Print commands without executing them
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Convert a PNG to .icns using sips + iconutil
     MakeIcns {
