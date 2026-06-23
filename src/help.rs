@@ -925,11 +925,10 @@ fn print_ios_free_provisioning() {
 
         All data lives in {ANSI_GREEN}~/.local/share/strudel/{ANSI_RESET} (per-machine, not per-project):
 
-          session.json          GSA token + DSID (no password stored)
-          device-uuid.txt       Stable UUID used as the anisette machine fingerprint
-          dev-cert.der          Cached DER-encoded developer certificate
-          dev-key.pem           Cached private key (generated fresh each cert rotation)
-          strudel-dev.keychain  Persistent keychain holding the signing identity
+          session.json             GSA token + DSID (no password stored)
+          dev-cert.der             Cached DER-encoded developer certificate
+          dev-key.pem              Cached private key (generated fresh each cert rotation)
+          strudel-dev.keychain-db  Persistent keychain holding the signing identity
 
         The keypair and certificate are regenerated on each profile refresh (every
         7 days). The keychain is created once and reused across rotations.
