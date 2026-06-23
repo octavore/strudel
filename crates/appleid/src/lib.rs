@@ -127,14 +127,26 @@ impl AppleId {
     /// 7-day development profile for `bundle_id`. The returned `DevProfile`
     /// contains the raw `.mobileprovision` bytes, the signed certificate in
     /// DER format, and the private key in PEM format.
+    ///
+    /// `cached_identity` is a previously issued `(cert_der, key_pem)` pair; it is
+    /// reused when the certificate is still valid on the portal (not expired or
+    /// revoked), avoiding a needless revoke+reissue on every profile refresh.
+    ///
+    /// Free accounts allow only one development certificate, so when a new cert
+    /// is needed any existing cert must be revoked first. `confirm_revoke` is
+    /// invoked with a human-readable description of each cert that would be
+    /// revoked; returning `Ok(false)` aborts without revoking. It is not called
+    /// when the cached cert is reused or when there are no existing certs.
     pub fn fetch_development_profile(
         &self,
         session: &Session,
         team_id: &str,
         bundle_id: &str,
         udids: &[&str],
+        cached_identity: Option<(&[u8], &[u8])>,
+        confirm_revoke: impl FnMut(&[String]) -> Result<bool>,
     ) -> Result<DevProfile> {
         dev_services::DevServicesClient::new(&self.agent, &self.anisette, session)
-            .fetch_development_profile(team_id, bundle_id, udids)
+            .fetch_development_profile(team_id, bundle_id, udids, cached_identity, confirm_revoke)
     }
 }

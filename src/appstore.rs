@@ -67,7 +67,9 @@ impl AppStoreClient {
         let key_path = cfg.apple_api_key_path.as_ref().context(
             "App Store Connect API credentials required for provisioning profile management.\n\
              Set APPLE_API_KEY_PATH (path to your .p8 file), APPLE_API_KEY (key ID), \
-             and APPLE_API_ISSUER in your environment or strudel.toml.",
+             and APPLE_API_ISSUER in your environment or strudel.toml.\n\
+             Alternatively, set [ios] provisioning = \"free\" in strudel.toml to use a \
+             plain Apple ID instead (no paid account needed).",
         )?;
         if cfg.apple_api_key.is_empty() {
             bail!("APPLE_API_KEY (key ID) is required but not set.");

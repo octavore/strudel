@@ -4,7 +4,7 @@
 
 use std::io::Cursor;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use hmac::{Hmac, KeyInit, Mac};
 use num_bigint::BigUint;
 use pbkdf2::pbkdf2_hmac;
@@ -138,6 +138,61 @@ pub(super) fn decrypt_spd(spd_bytes: &[u8], k_srp: &[u8; 32]) -> Result<plist::V
     plist::Value::from_reader(Cursor::new(plaintext)).context("spd plaintext is not a valid plist")
 }
 
+// Checksum for the `apptokens` GSA request:
+//   HMAC-SHA256(sk, "apptokens" || adsid || app0 || app1 || ...)
+
+pub(super) fn app_tokens_checksum(sk: &[u8], adsid: &str, apps: &[&str]) -> [u8; 32] {
+    let mut mac = HmacSha256::new_from_slice(sk).expect("HMAC accepts any key length");
+    mac.update(b"apptokens");
+    mac.update(adsid.as_bytes());
+    for app in apps {
+        mac.update(app.as_bytes());
+    }
+    mac.finalize().into_bytes().into()
+}
+
+// Decrypt the encrypted app token (`et`) returned by the `apptokens` request.
+//
+// The blob is AES-256-GCM with a 16-byte IV and the 3-byte version marker as
+// additional authenticated data:
+//   [ "XYZ" (3) ][ iv (16) ][ ciphertext ][ tag (16) ]   aad = "XYZ", key = sk
+pub(super) fn decrypt_app_token(sk: &[u8], blob: &[u8]) -> Result<Vec<u8>> {
+    // aes-gcm 0.10 re-exports generic-array 0.14, whose GenericArray is
+    // deprecated in favour of 1.x; the API is still the supported one here.
+    use aes_gcm::AesGcm;
+    use aes_gcm::aead::consts::U16;
+    #[allow(deprecated)]
+    use aes_gcm::aead::generic_array::GenericArray;
+    use aes_gcm::aead::{Aead, KeyInit, Payload};
+    use aes_gcm::aes::Aes256;
+
+    // AES-256-GCM with a 16-byte nonce (the default Aes256Gcm uses 12).
+    type Aes256Gcm16 = AesGcm<Aes256, U16>;
+
+    if blob.len() < 35 {
+        bail!("encrypted app token too short ({} bytes)", blob.len());
+    }
+    if &blob[..3] != b"XYZ" {
+        bail!("encrypted app token has unexpected version marker");
+    }
+
+    let cipher = Aes256Gcm16::new_from_slice(sk)
+        .map_err(|_| anyhow::anyhow!("invalid GCM session key length ({} bytes)", sk.len()))?;
+    #[allow(deprecated)]
+    let nonce = GenericArray::from_slice(&blob[3..19]);
+    // aes-gcm expects the tag appended to the ciphertext, matching the layout.
+    let ct_and_tag = &blob[19..];
+    cipher
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ct_and_tag,
+                aad: &blob[..3],
+            },
+        )
+        .map_err(|_| anyhow::anyhow!("app token GCM decryption/authentication failed"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +233,29 @@ mod tests {
         let r1 = derive_x("testpassword", &salt, 1000, "s2k");
         let r2 = derive_x("testpassword", &salt, 1000, "s2k_fo");
         assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn app_tokens_checksum_is_deterministic_and_keyed() {
+        let sk = [9u8; 32];
+        let a = app_tokens_checksum(&sk, "1234", &["com.apple.gs.xcode.auth"]);
+        let b = app_tokens_checksum(&sk, "1234", &["com.apple.gs.xcode.auth"]);
+        assert_eq!(a, b);
+        // Different adsid changes the checksum.
+        let c = app_tokens_checksum(&sk, "5678", &["com.apple.gs.xcode.auth"]);
+        assert_ne!(a, c);
+        // Different key changes the checksum.
+        let d = app_tokens_checksum(&[8u8; 32], "1234", &["com.apple.gs.xcode.auth"]);
+        assert_ne!(a, d);
+    }
+
+    #[test]
+    fn decrypt_app_token_rejects_malformed_input() {
+        let sk = [0u8; 32];
+        // Too short.
+        assert!(decrypt_app_token(&sk, &[0u8; 10]).is_err());
+        // Long enough but wrong version marker.
+        assert!(decrypt_app_token(&sk, &[0u8; 64]).is_err());
     }
 
     #[test]

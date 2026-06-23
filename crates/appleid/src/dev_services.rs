@@ -1,17 +1,15 @@
-use std::io::Cursor;
-use std::process::Command;
+use std::io::{Cursor, Write};
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
 use uuid::Uuid;
 
 use crate::anisette::AnisetteProvider;
 use crate::{DevProfile, Device, Session, Team};
 
-const BASE_URL: &str = "https://developerservices2.apple.com/services/QH65B2/ios";
-// Fixed widget key Xcode sends for developer services.
-const WIDGET_KEY: &str = "83545bf919730e51dbfba24e7e8a78d2";
+// Account-level actions (listTeams) live directly under the protocol path;
+// resource actions (devices, app IDs, certs, profiles) are under `ios/`.
+const BASE_URL: &str = "https://developerservices2.apple.com/services/QH65B2";
 const CLIENT_ID: &str = "XABBG36SBA";
 const PROTOCOL_VERSION: &str = "QH65B2";
 
@@ -61,7 +59,7 @@ impl<'a> DevServicesClient<'a> {
             plist::Value::String(team_id.to_string()),
         );
 
-        let resp = self.post("listDevices", body)?;
+        let resp = self.post("ios/listDevices", body)?;
         let devices = resp
             .get("devices")
             .and_then(|v| v.as_array())
@@ -93,7 +91,7 @@ impl<'a> DevServicesClient<'a> {
             "deviceNumber".to_string(),
             plist::Value::String(udid.to_string()),
         );
-        self.post("addDevice", body)?;
+        self.post("ios/addDevice", body)?;
         Ok(())
     }
 
@@ -104,7 +102,7 @@ impl<'a> DevServicesClient<'a> {
             plist::Value::String(team_id.to_string()),
         );
 
-        let resp = self.post("listAppIds", body)?;
+        let resp = self.post("ios/listAppIds", body)?;
         let ids = resp
             .get("appIds")
             .and_then(|v| v.as_array())
@@ -130,7 +128,7 @@ impl<'a> DevServicesClient<'a> {
         );
         add_body.insert("name".to_string(), plist::Value::String(name.to_string()));
 
-        let add_resp = self.post("addAppId", add_body)?;
+        let add_resp = self.post("ios/addAppId", add_body)?;
         let created = add_resp
             .get("appId")
             .and_then(|v| v.as_dictionary())
@@ -140,12 +138,27 @@ impl<'a> DevServicesClient<'a> {
 
     // Generates a keypair + CSR internally, submits to Apple, returns DER cert +
     // private key PEM.
-    fn provision_cert(&self, team_id: &str) -> Result<(Vec<u8>, Vec<u8>)> {
+    fn provision_cert(
+        &self,
+        team_id: &str,
+        cached: Option<(&[u8], &[u8])>,
+        confirm_revoke: &mut impl FnMut(&[String]) -> Result<bool>,
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        // Reuse the cached cert+key when it's still valid on the portal, so we
+        // don't needlessly revoke our own (and Xcode's) cert on every 7-day
+        // profile refresh. The cert is valid ~1 year; only the profile rotates.
+        if let Some((cert_der, key_pem)) = cached
+            && self.cached_cert_usable(team_id, cert_der)?
+        {
+            return Ok((cert_der.to_vec(), key_pem.to_vec()));
+        }
+
         let machine_id = &self.anisette.device_id;
         let machine_name = hostname();
 
-        // Revoke any existing certs for this machine to stay under the 2-cert limit.
-        self.revoke_existing_certs(team_id, machine_id)?;
+        // Revoke any existing development cert so a fresh CSR is accepted
+        // (free accounts allow only one).
+        self.revoke_existing_certs(team_id, confirm_revoke)?;
 
         // Generate private key + CSR with openssl.
         let tmp = tempfile::Builder::new()
@@ -155,7 +168,9 @@ impl<'a> DevServicesClient<'a> {
         let key_path = tmp.path().join("key.pem");
         let csr_path = tmp.path().join("csr.pem");
 
-        let status = Command::new("openssl")
+        // Capture output (rather than inheriting stdio) so openssl's key-gen
+        // progress doesn't leak to the terminal; surface stderr only on failure.
+        let output = Command::new("openssl")
             .args([
                 "req",
                 "-newkey",
@@ -168,10 +183,14 @@ impl<'a> DevServicesClient<'a> {
                 "-subj",
                 "/CN=Apple Development",
             ])
-            .status()
+            .output()
             .context("running openssl to generate keypair + CSR")?;
-        if !status.success() {
-            bail!("openssl req failed with status {status}");
+        if !output.status.success() {
+            bail!(
+                "openssl req failed with status {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
         }
 
         let csr_pem = std::fs::read_to_string(&csr_path).context("reading generated CSR")?;
@@ -193,59 +212,130 @@ impl<'a> DevServicesClient<'a> {
             plist::Value::String(machine_name),
         );
 
-        let resp = self.post("submitDevelopmentCSR", body)?;
-        let cert_dict = resp
+        let resp = self.post("ios/submitDevelopmentCSR", body)?;
+
+        // submitDevelopmentCSR returns only metadata (no cert bytes), so read
+        // the signed certificate back from listAllDevelopmentCerts by id.
+        let certificate_id = resp
             .get("certRequest")
             .and_then(|v| v.as_dictionary())
-            .context("missing certRequest in submitDevelopmentCSR response")?;
-
-        let cert_b64 =
-            plist_str(cert_dict, "certContent").context("missing certContent in certRequest")?;
-        let cert_der = BASE64
-            .decode(cert_b64.replace(['\n', '\r', ' '], ""))
-            .context("decoding base64 cert content")?;
+            .and_then(|d| d.get("certificateId"))
+            .and_then(|v| v.as_string())
+            .map(str::to_string)
+            .context("missing certificateId in submitDevelopmentCSR response")?;
+        let cert_der = self.download_development_cert(team_id, &certificate_id)?;
 
         Ok((cert_der, key_pem))
     }
 
-    fn revoke_existing_certs(&self, team_id: &str, machine_id: &str) -> Result<()> {
+    /// Read a freshly issued development certificate's DER bytes back from
+    /// `listAllDevelopmentCerts`, matched by `certificate_id`.
+    /// `submitDevelopmentCSR` only returns metadata, so the actual
+    /// `certContent` must be fetched here.
+    fn download_development_cert(&self, team_id: &str, certificate_id: &str) -> Result<Vec<u8>> {
         let mut body = plist::Dictionary::new();
         body.insert(
             "teamId".to_string(),
             plist::Value::String(team_id.to_string()),
         );
+
+        let resp = self.post("ios/listAllDevelopmentCerts", body)?;
+        let certs = resp
+            .get("certificates")
+            .and_then(|v| v.as_array())
+            .context("missing certificates in listAllDevelopmentCerts response")?;
+
+        let cert = certs
+            .iter()
+            .filter_map(|c| c.as_dictionary())
+            .find(|d| d.get("certificateId").and_then(|v| v.as_string()) == Some(certificate_id))
+            .with_context(|| {
+                format!("certificate {certificate_id} not found in listAllDevelopmentCerts")
+            })?;
+
+        // certContent is the raw DER bytes (plist <data>).
+        cert.get("certContent")
+            .and_then(|v| v.as_data())
+            .map(|b| b.to_vec())
+            .with_context(|| format!("certificate {certificate_id} has no certContent"))
+    }
+
+    /// Whether a cached `cert_der` can still be reused: it isn't expiring soon
+    /// and is still present on the portal (i.e. hasn't been revoked, including
+    /// by Xcode or another machine).
+    fn cached_cert_usable(&self, team_id: &str, cert_der: &[u8]) -> Result<bool> {
+        if !cert_not_expiring(cert_der)? {
+            return Ok(false);
+        }
+
+        let mut body = plist::Dictionary::new();
         body.insert(
-            "machineId".to_string(),
-            plist::Value::String(machine_id.to_string()),
+            "teamId".to_string(),
+            plist::Value::String(team_id.to_string()),
+        );
+        let resp = self.post("ios/listAllDevelopmentCerts", body)?;
+        let present = resp
+            .get("certificates")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_dictionary())
+            .any(|d| d.get("certContent").and_then(|v| v.as_data()) == Some(cert_der));
+        Ok(present)
+    }
+
+    fn revoke_existing_certs(
+        &self,
+        team_id: &str,
+        confirm_revoke: &mut impl FnMut(&[String]) -> Result<bool>,
+    ) -> Result<()> {
+        let mut body = plist::Dictionary::new();
+        body.insert(
+            "teamId".to_string(),
+            plist::Value::String(team_id.to_string()),
         );
 
-        let resp = self.post("listAllDevelopmentCerts", body)?;
-        let certs = match resp.get("certRequests").and_then(|v| v.as_array()) {
-            Some(c) => c,
-            None => return Ok(()),
+        let resp = self.post("ios/listAllDevelopmentCerts", body)?;
+        let Some(certs) = resp.get("certificates").and_then(|v| v.as_array()) else {
+            return Ok(());
         };
+        if certs.is_empty() {
+            return Ok(());
+        }
+
+        // Free accounts allow only a single development certificate, so any
+        // existing cert (created by Xcode or an earlier run) blocks a new CSR
+        // with error 7460. We can't reuse a cert whose private key we don't
+        // hold, so revoke every development cert to make room for a fresh one.
+        // Revoking can invalidate Xcode's signing, so confirm with the caller.
+        let descriptions: Vec<String> = certs
+            .iter()
+            .filter_map(|c| c.as_dictionary())
+            .map(|d| plist_str(d, "name").unwrap_or_else(|_| "development certificate".into()))
+            .collect();
+
+        if !confirm_revoke(&descriptions)? {
+            bail!(
+                "Declined to revoke the existing development certificate. Free \
+                 provisioning allows only one, so a new profile cannot be issued \
+                 without revoking it."
+            );
+        }
 
         for cert in certs {
-            let d = match cert.as_dictionary() {
-                Some(d) => d,
-                None => continue,
-            };
-            let cert_id = match plist_str(d, "serialNumber") {
-                Ok(id) => id,
-                Err(_) => continue,
-            };
-            // Only revoke certs issued for this machine.
-            let this_machine = plist_str(d, "machineId").unwrap_or_default();
-            if this_machine != machine_id {
+            let Some(d) = cert.as_dictionary() else {
                 continue;
-            }
+            };
+            let Ok(serial) = plist_str(d, "serialNumber") else {
+                continue;
+            };
             let mut revoke_body = plist::Dictionary::new();
             revoke_body.insert(
                 "teamId".to_string(),
                 plist::Value::String(team_id.to_string()),
             );
-            revoke_body.insert("serialNumber".to_string(), plist::Value::String(cert_id));
-            self.post("revokeDevelopmentCert", revoke_body)?;
+            revoke_body.insert("serialNumber".to_string(), plist::Value::String(serial));
+            self.post("ios/revokeDevelopmentCert", revoke_body)?;
         }
 
         Ok(())
@@ -256,8 +346,11 @@ impl<'a> DevServicesClient<'a> {
         team_id: &str,
         bundle_id: &str,
         _udids: &[&str],
+        cached_identity: Option<(&[u8], &[u8])>,
+        mut confirm_revoke: impl FnMut(&[String]) -> Result<bool>,
     ) -> Result<DevProfile> {
-        let (cert_der, key_pem) = self.provision_cert(team_id)?;
+        let (cert_der, key_pem) =
+            self.provision_cert(team_id, cached_identity, &mut confirm_revoke)?;
         let app_id_id = self.ensure_app_id(team_id, bundle_id, &bundle_id_display(bundle_id))?;
 
         let mut body = plist::Dictionary::new();
@@ -267,17 +360,18 @@ impl<'a> DevServicesClient<'a> {
         );
         body.insert("appIdId".to_string(), plist::Value::String(app_id_id));
 
-        let resp = self.post("downloadTeamProvisioningProfile", body)?;
+        let resp = self.post("ios/downloadTeamProvisioningProfile", body)?;
         let profile_dict = resp
             .get("provisioningProfile")
             .and_then(|v| v.as_dictionary())
             .context("missing provisioningProfile in downloadTeamProvisioningProfile response")?;
 
-        let profile_b64 = plist_str(profile_dict, "encodedProfile")
-            .context("missing encodedProfile in provisioningProfile")?;
-        let mobileprovision = BASE64
-            .decode(profile_b64.replace(['\n', '\r', ' '], ""))
-            .context("decoding base64 mobileprovision")?;
+        // encodedProfile is the raw .mobileprovision bytes (plist <data>).
+        let mobileprovision = profile_dict
+            .get("encodedProfile")
+            .and_then(|v| v.as_data())
+            .context("missing encodedProfile in provisioningProfile")?
+            .to_vec();
 
         Ok(DevProfile {
             mobileprovision,
@@ -307,16 +401,25 @@ impl<'a> DevServicesClient<'a> {
             .to_writer_xml(&mut buf)
             .context("serializing dev services request plist")?;
 
-        let anisette_hdrs = self.anisette.headers(&self.session.dsid)?;
+        // "-2" yields the machine-level OTP; a real DSID returns empty OTP
+        // headers unless the account is provisioned in AOSKit on this Mac.
+        let anisette_hdrs = self.anisette.headers("-2")?;
 
+        // The developer-services portal authenticates with the adsid in
+        // X-Apple-I-Identity-Id and the app-specific Xcode token (obtained at
+        // login via the `apptokens` exchange) in X-Apple-GS-Token.The raw GsIdmsToken
+        // is rejected with resultCode 1100.
         let mut builder = self
             .agent
             .post(&url)
             .header("Content-Type", "text/x-xml-plist")
             .header("Accept", "text/x-xml-plist")
+            .header("Accept-Language", "en-us")
             .header("User-Agent", "Xcode")
-            .header("X-Apple-GS-Token", &self.session.gs_token)
-            .header("X-Apple-Widget-Key", WIDGET_KEY);
+            .header("X-Apple-App-Info", "com.apple.gs.xcode.auth")
+            .header("X-Xcode-Version", "11.2 (11B41)")
+            .header("X-Apple-I-Identity-Id", &self.session.dsid)
+            .header("X-Apple-GS-Token", &self.session.gs_token);
         for (k, v) in &anisette_hdrs {
             builder = builder.header(k, v);
         }
@@ -348,6 +451,23 @@ impl<'a> DevServicesClient<'a> {
     }
 }
 
+/// True if the DER certificate is valid and not expiring within ~1 day, via
+/// `openssl x509 -checkend` (exit 0 = not expiring).
+fn cert_not_expiring(cert_der: &[u8]) -> Result<bool> {
+    let mut child = Command::new("openssl")
+        .args(["x509", "-inform", "DER", "-noout", "-checkend", "86400"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("running openssl x509 -checkend")?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(cert_der).ok();
+    }
+    let status = child.wait().context("waiting for openssl x509 -checkend")?;
+    Ok(status.success())
+}
+
 fn check_result_code(dict: &plist::Dictionary, action: &str) -> Result<()> {
     let code = dict
         .get("resultCode")
@@ -359,6 +479,9 @@ fn check_result_code(dict: &plist::Dictionary, action: &str) -> Result<()> {
             .or_else(|| dict.get("resultString"))
             .and_then(|v| v.as_string())
             .unwrap_or("unknown error");
+        if code == 1100 {
+            bail!("Apple session expired. Run `strudel login` to sign in again.");
+        }
         bail!("dev services {action} failed (code {code}): {msg}");
     }
     Ok(())

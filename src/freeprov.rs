@@ -91,9 +91,38 @@ pub fn auto_fetch_profile(cfg: &ResolvedConfig, paths: &Paths) -> Result<()> {
     }
     let udids: Vec<&str> = device_set.device.iter().map(|d| d.udid.as_str()).collect();
 
+    // Reuse a previously issued cert+key if it's still valid, so refreshing the
+    // 7-day profile doesn't revoke and reissue the (year-long) cert each time.
+    let cached_cert = std::fs::read(&data.cert_der).ok();
+    let cached_key = std::fs::read(&data.key_pem).ok();
+    let cached_identity = match (&cached_cert, &cached_key) {
+        (Some(c), Some(k)) => Some((c.as_slice(), k.as_slice())),
+        _ => None,
+    };
+
     cprintln!("Fetching 7-day development profile via Apple ID...");
     let profile = apple_id
-        .fetch_development_profile(&session, &team.id, &cfg.bundle_id, &udids)
+        .fetch_development_profile(
+            &session,
+            &team.id,
+            &cfg.bundle_id,
+            &udids,
+            cached_identity,
+            |certs| {
+                cprintln!("<yellow>This account already has a development certificate:</yellow>");
+                for c in certs {
+                    cprintln!("  - {}", c);
+                }
+                inquire::Confirm::new("Revoke it to issue a new one?")
+                    .with_default(false)
+                    .with_help_message(
+                        "Free accounts allow only one development certificate. \
+                         Revoking may break Xcode's signing until it creates a new one.",
+                    )
+                    .prompt()
+                    .context("reading revoke confirmation")
+            },
+        )
         .context("Failed to fetch development profile")?;
 
     ensure_strudel_dir(&paths.strudel_dir)?;
@@ -126,6 +155,47 @@ pub fn ensure_keychain_ready() -> Result<()> {
             .context("re-importing cached dev cert")?;
     }
     kc::dev::ensure_keychain_in_search_list(&data.keychain_db)
+}
+
+/// SHA-1 fingerprint (uppercase hex, no separators) of the cached
+/// free-provisioning development certificate, or `None` if it isn't cached.
+///
+/// Used to sign with that exact certificate rather than the ambiguous "Apple
+/// Development" name: revoked/older "Apple Development" certs may still sit in
+/// the login keychain, and signing by name would pick the wrong one (and
+/// codesign would refuse an ambiguous match).
+pub fn dev_cert_sha1() -> Result<Option<String>> {
+    let data = StrudelData::locate()?;
+    if !data.cert_der.exists() {
+        return Ok(None);
+    }
+    let out = std::process::Command::new("openssl")
+        .args([
+            "x509",
+            "-inform",
+            "DER",
+            "-in",
+            data.cert_der.to_str().unwrap(),
+            "-noout",
+            "-fingerprint",
+            "-sha1",
+        ])
+        .output()
+        .context("computing dev cert fingerprint")?;
+    if !out.status.success() {
+        bail!(
+            "openssl x509 fingerprint failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    // Output: "SHA1 Fingerprint=AA:BB:CC:..."
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let fp = stdout
+        .split('=')
+        .nth(1)
+        .map(|s| s.trim().replace(':', "").to_ascii_uppercase())
+        .filter(|s| !s.is_empty());
+    Ok(fp)
 }
 
 fn get_apple_id(_data: &StrudelData) -> Result<AppleId> {

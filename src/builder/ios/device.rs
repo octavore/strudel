@@ -78,12 +78,22 @@ impl Builder {
         step("Embedding provisioning profile...");
         self.copy_file(&profile_path, &app_bundle.join("embedded.mobileprovision"))?;
 
+        // For free provisioning, sign with the exact certificate we issued,
+        // identified by SHA-1, rather than the ambiguous "Apple Development"
+        // name: the login keychain may still hold older/revoked "Apple
+        // Development" certs that would otherwise be picked instead.
+        let mut dev_fp = None;
         if self.cfg.ios_provisioning == ProvisioningBackend::Free && !self.dry_run {
             crate::freeprov::ensure_keychain_ready()?;
+            if self.cfg.sign_identity.is_empty() {
+                dev_fp = crate::freeprov::dev_cert_sha1()?;
+            }
         }
 
         step("Signing device bundle...");
-        let identity = if self.cfg.sign_identity.is_empty() {
+        let identity = if let Some(fp) = &dev_fp {
+            fp.as_str()
+        } else if self.cfg.sign_identity.is_empty() {
             "Apple Development"
         } else {
             &self.cfg.sign_identity

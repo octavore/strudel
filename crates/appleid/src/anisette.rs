@@ -37,14 +37,16 @@ impl AnisetteProvider {
             let otp_result: Option<Retained<AnyObject>> =
                 objc2::msg_send![aos_cls, retrieveOTPHeadersForDSID: &*dsid_ns];
             let otp_dict = otp_result.context("retrieveOTPHeadersForDSID: returned nil")?;
-            h.insert(
-                "X-Apple-I-MD".to_string(),
-                nsobj_string(&otp_dict, "X-Apple-MD")?,
-            );
-            h.insert(
-                "X-Apple-I-MD-M".to_string(),
-                nsobj_string(&otp_dict, "X-Apple-MD-M")?,
-            );
+            // OTP headers: only available when the account is registered with
+            // AOSKit (i.e. signed in via System Settings > Apple Account).
+            // Omit them silently rather than failing — Apple may accept the
+            // request without them when the gs_token is otherwise valid.
+            if let Ok(v) = nsobj_string(&otp_dict, "X-Apple-MD") {
+                h.insert("X-Apple-I-MD".to_string(), v);
+            }
+            if let Ok(v) = nsobj_string(&otp_dict, "X-Apple-MD-M") {
+                h.insert("X-Apple-I-MD-M".to_string(), v);
+            }
             h.insert("X-Apple-I-MD-RINFO".to_string(), "17106176".to_string());
 
             // Machine serial number from AOSUtilities.
@@ -80,6 +82,7 @@ impl AnisetteProvider {
             h.insert("X-Apple-I-Client-Time".to_string(), iso8601_now());
             h.insert("X-Apple-I-TimeZone".to_string(), "UTC".to_string());
             h.insert("X-Apple-Locale".to_string(), "en_US".to_string());
+            h.insert("X-Apple-I-Locale".to_string(), "en_US".to_string());
             Ok(h)
         }
     }

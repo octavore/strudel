@@ -19,21 +19,40 @@ pub fn import_dev_cert(cert_der: &[u8], key_pem: &[u8], keychain_db: &Path) -> R
         .prefix("strudel-cert-")
         .tempdir()
         .context("creating temp dir for cert import")?;
-    let cert_path = tmp.path().join("cert.der");
+    let cert_der_path = tmp.path().join("cert.der");
+    let cert_pem_path = tmp.path().join("cert.pem");
     let key_path = tmp.path().join("key.pem");
     let p12_path = tmp.path().join("dev.p12");
 
-    fs::write(&cert_path, cert_der).context("writing temp cert")?;
+    fs::write(&cert_der_path, cert_der).context("writing temp cert")?;
     fs::write(&key_path, key_pem).context("writing temp key")?;
 
-    let status = std::process::Command::new("openssl")
+    // `openssl pkcs12 -export` expects a PEM certificate, so convert the DER first.
+    let out = std::process::Command::new("openssl")
+        .args([
+            "x509",
+            "-inform",
+            "DER",
+            "-in",
+            cert_der_path.to_str().unwrap(),
+            "-out",
+            cert_pem_path.to_str().unwrap(),
+        ])
+        .output()
+        .context("running openssl x509 to convert dev cert to PEM")?;
+    if !out.status.success() {
+        bail!(
+            "openssl x509 (DER to PEM) failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+
+    let out = std::process::Command::new("openssl")
         .args([
             "pkcs12",
             "-export",
             "-in",
-            cert_path.to_str().unwrap(),
-            "-inform",
-            "DER",
+            cert_pem_path.to_str().unwrap(),
             "-inkey",
             key_path.to_str().unwrap(),
             "-out",
@@ -41,10 +60,13 @@ pub fn import_dev_cert(cert_der: &[u8], key_pem: &[u8], keychain_db: &Path) -> R
             "-passout",
             &format!("pass:{DEV_KC_PASSWORD}"),
         ])
-        .status()
+        .output()
         .context("running openssl pkcs12")?;
-    if !status.success() {
-        bail!("openssl pkcs12 failed with status {status}");
+    if !out.status.success() {
+        bail!(
+            "openssl pkcs12 failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
 
     let kc_str = keychain_db.to_str().unwrap();

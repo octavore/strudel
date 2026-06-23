@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 use anyhow::{Context, Result, bail};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use num_bigint::BigUint;
 use rand::Rng;
 
@@ -9,7 +11,14 @@ use crate::Session;
 use crate::anisette::AnisetteProvider;
 
 mod srp;
-use srp::{compute_m1, decrypt_spd, derive_x, pad256, sha256, srp_n};
+use srp::{
+    app_tokens_checksum, compute_m1, decrypt_app_token, decrypt_spd, derive_x, pad256, sha256,
+    srp_n,
+};
+
+// App token requested from GSA; the developer-services portal authenticates
+// with this token rather than the raw GsIdmsToken.
+const XCODE_APP: &str = "com.apple.gs.xcode.auth";
 
 const GSA_URL: &str = "https://gsa.apple.com/grandslam/GsService2";
 const AUTH_URL: &str = "https://gsa.apple.com/auth";
@@ -133,6 +142,66 @@ pub fn login(
     password: &str,
     mut two_factor: impl FnMut() -> Result<String>,
 ) -> Result<Session> {
+    // Apple requires two-factor to be completed, then the whole SRP handshake
+    // re-run from a now-trusted device. Loop until we get a non-2FA result.
+    for attempt in 0..2 {
+        let spd = srp_exchange(agent, anisette, apple_id, password)?;
+        let session = spd
+            .as_dictionary()
+            .context("decrypted spd is not a plist dict")?;
+
+        let dsid = session
+            .get("adsid")
+            .or_else(|| session.get("dsid"))
+            .and_then(|v| v.as_string())
+            .context("missing dsid in decrypted spd")?
+            .to_string();
+        let idms_token = session
+            .get("GsIdmsToken")
+            .and_then(|v| v.as_string())
+            .context("missing GsIdmsToken in decrypted spd")?
+            .to_string();
+
+        let auth_type = session
+            .get("auth_type_marker")
+            .and_then(|v| v.as_string())
+            .unwrap_or("");
+
+        if auth_type == "trustedDeviceSecondaryAuth" || auth_type == "secondaryAuth" {
+            if attempt == 1 {
+                bail!("Two-factor authentication did not complete; please try again.");
+            }
+            handle_two_factor(agent, anisette, &dsid, &idms_token, &mut two_factor)?;
+            continue;
+        }
+
+        // Exchange the IDMS token for an Xcode app token. The developer-services
+        // portal authenticates with this token, not the raw GsIdmsToken.
+        let sk = session
+            .get("sk")
+            .and_then(|v| v.as_data())
+            .context("missing sk in decrypted spd")?;
+        let c = session
+            .get("c")
+            .and_then(|v| v.as_data())
+            .context("missing c in decrypted spd")?;
+        let gs_token = fetch_app_token(agent, anisette, &dsid, &idms_token, sk, c)?;
+
+        return Ok(Session { dsid, gs_token });
+    }
+    unreachable!("login loop always returns or bails within 2 attempts")
+}
+
+/// Run the GSA SRP init/complete handshake and return the decrypted SPD as a
+/// plist dictionary. The `au` (auth-type) field from the complete response is
+/// folded into the SPD under the synthetic `auth_type_marker` key so the caller
+/// can decide whether two-factor is required.
+fn srp_exchange(
+    agent: &ureq::Agent,
+    anisette: &AnisetteProvider,
+    apple_id: &str,
+    password: &str,
+) -> Result<plist::Value> {
     let n = srp_n();
 
     let mut a_bytes = [0u8; 32];
@@ -163,7 +232,8 @@ pub fn login(
     );
     init_dict.insert("cpd".to_string(), cpd.clone());
 
-    let init_resp = gsa_post(agent, &plist::Value::Dictionary(init_dict), &anisette_hdrs)?;
+    let init_resp = gsa_post(agent, &plist::Value::Dictionary(init_dict), &anisette_hdrs)
+        .context("GSA SRP init")?;
     let init = init_resp
         .as_dictionary()
         .context("GSA init response is not a dict")?;
@@ -240,7 +310,8 @@ pub fn login(
         agent,
         &plist::Value::Dictionary(complete_dict),
         &complete_anisette_hdrs,
-    )?;
+    )
+    .context("GSA SRP complete")?;
     let complete = complete_resp
         .as_dictionary()
         .context("GSA complete response is not a dict")?;
@@ -252,48 +323,125 @@ pub fn login(
         .to_vec();
 
     let session_plist = decrypt_spd(&spd_bytes, &k_srp)?;
-    let session = session_plist
-        .as_dictionary()
+    let mut session = session_plist
+        .into_dictionary()
         .context("decrypted spd is not a plist dict")?;
 
-    let dsid = session
-        .get("adsid")
-        .or_else(|| session.get("dsid"))
+    // Fold the complete response's auth-type into the SPD so the caller can
+    // detect a two-factor challenge without re-threading the response. Apple
+    // returns it as `au` inside the `Status` sub-dictionary.
+    let auth_type = complete
+        .get("Status")
+        .and_then(|v| v.as_dictionary())
+        .and_then(|s| s.get("au"))
         .and_then(|v| v.as_string())
-        .context("missing dsid in decrypted spd")?
+        .unwrap_or("")
         .to_string();
-    let gs_token = session
-        .get("GsIdmsToken")
+    session.insert(
+        "auth_type_marker".to_string(),
+        plist::Value::String(auth_type),
+    );
+
+    Ok(plist::Value::Dictionary(session))
+}
+
+/// Exchange the IDMS token for an app-specific token scoped to
+/// `com.apple.gs.xcode.auth` via the GSA `apptokens` request. The portal
+/// authenticates developer-services calls with this token.
+fn fetch_app_token(
+    agent: &ureq::Agent,
+    anisette: &AnisetteProvider,
+    dsid: &str,
+    idms_token: &str,
+    sk: &[u8],
+    c: &[u8],
+) -> Result<String> {
+    let checksum = app_tokens_checksum(sk, dsid, &[XCODE_APP]);
+    // "-2" requests the machine-level OTP. A real DSID only returns valid OTP
+    // headers when the account is provisioned in AOSKit on this Mac; otherwise
+    // the machine headers come back empty and GSA rejects the request (-22410).
+    let anisette_hdrs = anisette.headers("-2")?;
+
+    let mut req = plist::Dictionary::new();
+    req.insert("u".to_string(), plist::Value::String(dsid.to_string()));
+    req.insert(
+        "app".to_string(),
+        plist::Value::Array(vec![plist::Value::String(XCODE_APP.to_string())]),
+    );
+    req.insert("c".to_string(), plist::Value::Data(c.to_vec()));
+    req.insert(
+        "t".to_string(),
+        plist::Value::String(idms_token.to_string()),
+    );
+    req.insert(
+        "checksum".to_string(),
+        plist::Value::Data(checksum.to_vec()),
+    );
+    req.insert("cpd".to_string(), build_cpd(&anisette_hdrs));
+    req.insert(
+        "o".to_string(),
+        plist::Value::String("apptokens".to_string()),
+    );
+
+    let resp = gsa_post(agent, &plist::Value::Dictionary(req), &anisette_hdrs)
+        .context("GSA app-token exchange (apptokens)")?;
+    let resp = resp
+        .as_dictionary()
+        .context("GSA apptokens response is not a dict")?;
+
+    let et = resp
+        .get("et")
+        .and_then(|v| v.as_data())
+        .context("missing encrypted token (et) in apptokens response")?;
+
+    let decrypted = decrypt_app_token(sk, et)?;
+    let token_plist = plist::Value::from_reader(Cursor::new(decrypted))
+        .context("parsing decrypted app token plist")?;
+    let tokens = token_plist
+        .as_dictionary()
+        .and_then(|d| d.get("t"))
+        .and_then(|v| v.as_dictionary())
+        .context("missing token map in app token response")?;
+    let token = tokens
+        .get(XCODE_APP)
+        .and_then(|v| v.as_dictionary())
+        .and_then(|d| d.get("token"))
         .and_then(|v| v.as_string())
-        .context("missing GsIdmsToken in decrypted spd")?
-        .to_string();
+        .context("missing Xcode app token in response")?;
 
-    let auth_type = complete.get("au").and_then(|v| v.as_string()).unwrap_or("");
-
-    if auth_type == "trustedDeviceSecondaryAuth" || auth_type == "secondaryAuth" {
-        handle_two_factor(agent, anisette, &dsid, &gs_token, &mut two_factor)?;
-    }
-
-    Ok(Session { dsid, gs_token })
+    Ok(token.to_string())
 }
 
 fn handle_two_factor(
     agent: &ureq::Agent,
     anisette: &AnisetteProvider,
     dsid: &str,
-    gs_token: &str,
+    idms_token: &str,
     two_factor: &mut impl FnMut() -> Result<String>,
 ) -> Result<()> {
-    let anisette_hdrs = anisette.headers(dsid)?;
+    // "-2" yields the machine-level OTP headers (see fetch_app_token).
+    let anisette_hdrs = anisette.headers("-2")?;
+    // These GSA endpoints authenticate with the identity token
+    // base64("<adsid>:<GsIdmsToken>"), the same scheme Xcode uses.
+    let identity_token = BASE64.encode(format!("{dsid}:{idms_token}"));
 
-    // Trigger the push to the user's trusted device.
+    // Headers shared by the trigger and validate calls. Anisette headers are
+    // appended to these.
+    let mut common: Vec<(String, String)> = vec![
+        ("Content-Type".into(), "text/x-xml-plist".into()),
+        ("User-Agent".into(), "Xcode".into()),
+        ("Accept".into(), "text/x-xml-plist".into()),
+        ("Accept-Language".into(), "en-us".into()),
+        ("X-Apple-App-Info".into(), "com.apple.gs.xcode.auth".into()),
+        ("X-Xcode-Version".into(), "11.2 (11B41)".into()),
+        ("X-Apple-Identity-Token".into(), identity_token),
+    ];
+    common.extend(anisette_hdrs);
+
+    // Trigger the push to the user's trusted devices.
     let trigger_url = format!("{AUTH_URL}/verify/trusteddevice");
-    let mut builder = agent
-        .get(&trigger_url)
-        .header("Accept", "application/json")
-        .header("X-Apple-GS-Token", gs_token)
-        .header("X-Apple-DS-ID", dsid);
-    for (k, v) in &anisette_hdrs {
+    let mut builder = agent.get(&trigger_url);
+    for (k, v) in &common {
         builder = builder.header(k, v);
     }
     builder
@@ -303,26 +451,43 @@ fn handle_two_factor(
     let code = two_factor()?;
     let code = code.trim().to_string();
 
-    let submit_url = format!("{AUTH_URL}/verify/trusteddevice/securitycode");
-    let body = serde_json::json!({ "securityCode": { "code": code } });
-
-    let mut builder = agent
-        .post(&submit_url)
-        .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .header("X-Apple-GS-Token", gs_token)
-        .header("X-Apple-DS-ID", dsid);
-    for (k, v) in &anisette_hdrs {
+    // Validate the code against GsService2/validate.
+    let validate_url = format!("{GSA_URL}/validate");
+    let mut builder = agent.get(&validate_url).header("security-code", &code);
+    for (k, v) in &common {
         builder = builder.header(k, v);
     }
     let mut resp = builder
-        .send_json(&body)
-        .map_err(|e| anyhow::anyhow!("2FA code submission failed: {e}"))?;
+        .call()
+        .map_err(|e| anyhow::anyhow!("2FA code validation failed: {e}"))?;
 
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.body_mut().read_to_string().unwrap_or_default();
-        bail!("2FA verification failed ({status}): {body}");
+    let body = resp
+        .body_mut()
+        .read_to_string()
+        .context("reading 2FA validation response")?;
+    let val = plist::Value::from_reader(Cursor::new(body.as_bytes()))
+        .with_context(|| format!("parsing 2FA validation response: {body:?}"))?;
+    let dict = val
+        .as_dictionary()
+        .context("2FA validation response is not a dict")?;
+
+    // `ec` may come back as an integer or a string; treat 0 as success.
+    let ec = dict
+        .get("ec")
+        .and_then(|v| {
+            v.as_signed_integer()
+                .or_else(|| v.as_string().and_then(|s| s.parse().ok()))
+        })
+        .unwrap_or(0);
+    if ec != 0 {
+        if ec == -21669 {
+            bail!("Incorrect verification code. Run `strudel login` to try again.");
+        }
+        let em = dict
+            .get("em")
+            .and_then(|v| v.as_string())
+            .unwrap_or("unknown error");
+        bail!("Two-factor verification failed (code {ec}): {em}");
     }
 
     Ok(())
