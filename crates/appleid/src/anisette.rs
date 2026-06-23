@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
+use chrono::{SecondsFormat, Utc};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2_foundation::{NSBundle, NSString};
@@ -79,7 +79,8 @@ impl AnisetteProvider {
                 }
             }
 
-            h.insert("X-Apple-I-Client-Time".to_string(), iso8601_now());
+            let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+            h.insert("X-Apple-I-Client-Time".to_string(), now);
             h.insert("X-Apple-I-TimeZone".to_string(), "UTC".to_string());
             h.insert("X-Apple-Locale".to_string(), "en_US".to_string());
             h.insert("X-Apple-I-Locale".to_string(), "en_US".to_string());
@@ -125,87 +126,5 @@ fn nsobj_string(obj: &AnyObject, key: &str) -> Result<String> {
         let val: Option<Retained<NSString>> = objc2::msg_send![obj, objectForKey: &*key_ns];
         val.map(|s| s.to_string())
             .with_context(|| format!("missing anisette key: {key}"))
-    }
-}
-
-fn iso8601_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let mut rem = secs;
-    let sec = rem % 60;
-    rem /= 60;
-    let min = rem % 60;
-    rem /= 60;
-    let hour = rem % 24;
-    rem /= 24;
-
-    let (year, month, day) = days_to_ymd(rem as u32);
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
-}
-
-fn days_to_ymd(mut days: u32) -> (u32, u32, u32) {
-    let mut year = 1970u32;
-    loop {
-        let in_year = if is_leap(year) { 366 } else { 365 };
-        if days < in_year {
-            break;
-        }
-        days -= in_year;
-        year += 1;
-    }
-    let month_days: [u32; 12] = if is_leap(year) {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut month = 1u32;
-    for &m in &month_days {
-        if days < m {
-            break;
-        }
-        days -= m;
-        month += 1;
-    }
-    (year, month, days + 1)
-}
-
-fn is_leap(year: u32) -> bool {
-    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn iso8601_epoch() {
-        assert_eq!(days_to_ymd(0), (1970, 1, 1));
-    }
-
-    #[test]
-    fn iso8601_known_date() {
-        let (y, m, d) = days_to_ymd(19797);
-        assert_eq!((y, m, d), (2024, 3, 15));
-    }
-
-    #[test]
-    fn iso8601_format_looks_right() {
-        let s = iso8601_now();
-        assert!(s.ends_with('Z'), "got: {s}");
-        assert_eq!(s.len(), 20, "got: {s}");
-        assert_eq!(&s[4..5], "-", "got: {s}");
-        assert_eq!(&s[7..8], "-", "got: {s}");
-        assert_eq!(&s[10..11], "T", "got: {s}");
-    }
-
-    #[test]
-    fn is_leap_years() {
-        assert!(is_leap(2000));
-        assert!(is_leap(2024));
-        assert!(!is_leap(1900));
-        assert!(!is_leap(2023));
     }
 }

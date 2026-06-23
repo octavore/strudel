@@ -24,3 +24,4 @@ uuid = { version = "1", features = ["v4"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSDictionary", "NSString"] }
 tempfile = "3"
+chrono = "0.4.45"
