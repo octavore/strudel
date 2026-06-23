@@ -128,9 +128,10 @@ impl AppleId {
     /// contains the raw `.mobileprovision` bytes, the signed certificate in
     /// DER format, and the private key in PEM format.
     ///
-    /// `cached_identity` is a previously issued `(cert_der, key_pem)` pair; it is
-    /// reused when the certificate is still valid on the portal (not expired or
-    /// revoked), avoiding a needless revoke+reissue on every profile refresh.
+    /// `cached_identity` is a previously issued `(cert_der, key_pem)` pair; it
+    /// is reused when the certificate is still valid on the portal (not
+    /// expired or revoked), avoiding a needless revoke+reissue on every
+    /// profile refresh.
     ///
     /// Free accounts allow only one development certificate, so when a new cert
     /// is needed any existing cert must be revoked first. `confirm_revoke` is

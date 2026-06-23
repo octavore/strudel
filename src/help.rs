@@ -55,7 +55,9 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                 "universal" => print_universal(),
                 "ci" => print_ci(),
                 "ios-device" | "ios_device" => print_ios_device(),
-                "ios-free-provisioning" | "ios_free_provisioning" | "free-provisioning"
+                "ios-free-provisioning"
+                | "ios_free_provisioning"
+                | "free-provisioning"
                 | "free_provisioning" => print_ios_free_provisioning(),
                 _ => {
                     if let Some(sub) = app.find_subcommand_mut(&key) {

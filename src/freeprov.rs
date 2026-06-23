@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
-
 use appleid::{AppleId, Session, Team};
+use color_print::cprintln;
 
 use crate::builder::keychain as kc;
 use crate::config::ResolvedConfig;

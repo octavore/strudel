@@ -360,9 +360,8 @@ fn resolve_connected(
 
 #[cfg(test)]
 mod tests {
-    use crate::devices::DeviceSet;
-
     use super::{DeviceResolution, resolve_connected};
+    use crate::devices::DeviceSet;
 
     fn dev(udid: &str, name: &str) -> (String, String) {
         (udid.to_string(), name.to_string())

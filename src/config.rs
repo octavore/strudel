@@ -13,7 +13,9 @@ use anyhow::{Context, Result};
 
 pub use crate::config::extension::ExtensionKind;
 pub use crate::config::global::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
-pub use crate::config::resolved::{ProvisioningBackend, ResolvedConfig, ResolvedExtension, ResolvedProject};
+pub use crate::config::resolved::{
+    ProvisioningBackend, ResolvedConfig, ResolvedExtension, ResolvedProject,
+};
 use crate::config::user::BuildConfig;
 pub use crate::config::user::{Platform, generate_initial_toml};
 

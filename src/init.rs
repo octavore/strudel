@@ -79,10 +79,13 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
     if gitignore_path.exists() {
         println!("Skipped {} (already exists)", gitignore_path.display());
     } else {
-        std::fs::write(&gitignore_path, indoc::indoc! {"
+        std::fs::write(
+            &gitignore_path,
+            indoc::indoc! {"
             .build/    # Swift package manager build artifacts
             .strudel/  # strudel cache and intermediate build outputs
-        "})?;
+        "},
+        )?;
         println!("Created {}", gitignore_path.display());
     }
 

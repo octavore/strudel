@@ -125,11 +125,18 @@ impl Builder {
         step("Looking up bundle ID on App Store Connect...");
         let bundle_id_ref =
             client.find_or_create_bundle_id(&self.cfg.bundle_id, &self.cfg.app_name)?;
-        cprintln!("<dim>  Bundle ID: {} (portal ID: {})</dim>", self.cfg.bundle_id, bundle_id_ref);
+        cprintln!(
+            "<dim>  Bundle ID: {} (portal ID: {})</dim>",
+            self.cfg.bundle_id,
+            bundle_id_ref
+        );
 
         step("Finding development certificates...");
         let certs = client.list_development_certificates()?;
-        cprintln!("<dim>  Found {} development certificate(s)</dim>", certs.len());
+        cprintln!(
+            "<dim>  Found {} development certificate(s)</dim>",
+            certs.len()
+        );
         let cert_ids: Vec<String> = certs.iter().map(|c| c.id.clone()).collect();
 
         step("Matching tracked devices to portal...");

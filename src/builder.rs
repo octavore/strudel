@@ -80,7 +80,8 @@ impl Builder {
         Ok(())
     }
 
-    /// User-facing clean: wipe the strudel output dir and run `swift package clean`.
+    /// User-facing clean: wipe the strudel output dir and run `swift package
+    /// clean`.
     pub fn clean_command(&self) -> Result<()> {
         let source = self.cfg.source_dir.to_str().unwrap();
         let build_dir = &self.paths.build_dir;

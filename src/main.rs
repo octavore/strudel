@@ -177,7 +177,10 @@ impl Cli {
                     cli.target.as_deref(),
                     Platform::Macos,
                     true,
-                    |cfg| Builder::new(cfg.clone(), dry_run, false, false, None, false).clean_command(),
+                    |cfg| {
+                        Builder::new(cfg.clone(), dry_run, false, false, None, false)
+                            .clean_command()
+                    },
                 )?;
             },
             Cmd::MakeIcns { png, icns } => {
