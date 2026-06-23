@@ -26,36 +26,21 @@ const AUTH_URL: &str = "https://gsa.apple.com/auth";
 fn build_cpd(headers: &HashMap<String, String>) -> plist::Value {
     let mut cpd = plist::Dictionary::new();
     for (k, v) in headers {
-        cpd.insert(k.clone(), plist::Value::String(v.clone()));
+        cpd.insert(k.clone(), v.clone().into());
     }
     cpd.insert(
         "AppleIDClientIdentifier".to_string(),
-        plist::Value::String("D4B7512F-E841-4AEA-A569-4F1E84738182".to_string()),
+        "D4B7512F-E841-4AEA-A569-4F1E84738182".into(),
     );
-    cpd.insert("bootstrap".to_string(), plist::Value::Boolean(true));
-    cpd.insert(
-        "capp".to_string(),
-        plist::Value::String("AppStore".to_string()),
-    );
-    cpd.insert("ckgen".to_string(), plist::Value::Boolean(true));
-    cpd.insert(
-        "dc".to_string(),
-        plist::Value::String("#d4c5b3".to_string()),
-    );
-    cpd.insert(
-        "dec".to_string(),
-        plist::Value::String("#e1e4e3".to_string()),
-    );
-    cpd.insert("loc".to_string(), plist::Value::String("en_US".to_string()));
-    cpd.insert("pbe".to_string(), plist::Value::Boolean(false));
-    cpd.insert(
-        "prtn".to_string(),
-        plist::Value::String("ME349".to_string()),
-    );
-    cpd.insert(
-        "svct".to_string(),
-        plist::Value::String("iTunes".to_string()),
-    );
+    cpd.insert("bootstrap".to_string(), true.into());
+    cpd.insert("capp".to_string(), "AppStore".into());
+    cpd.insert("ckgen".to_string(), true.into());
+    cpd.insert("dc".to_string(), "#d4c5b3".into());
+    cpd.insert("dec".to_string(), "#e1e4e3".into());
+    cpd.insert("loc".to_string(), "en_US".into());
+    cpd.insert("pbe".to_string(), false.into());
+    cpd.insert("prtn".to_string(), "ME349".into());
+    cpd.insert("svct".to_string(), "iTunes".into());
     plist::Value::Dictionary(cpd)
 }
 
@@ -67,10 +52,7 @@ fn gsa_post(
     // All GSA requests use a Header/Request envelope; responses come back under
     // Response.
     let mut header = plist::Dictionary::new();
-    header.insert(
-        "Version".to_string(),
-        plist::Value::String("1.0.1".to_string()),
-    );
+    header.insert("Version".to_string(), "1.0.1".into());
     let mut outer = plist::Dictionary::new();
     outer.insert("Header".to_string(), plist::Value::Dictionary(header));
     outer.insert("Request".to_string(), request.clone());
@@ -215,8 +197,8 @@ fn srp_exchange(
 
     // --- SRP init ---
     let mut init_dict = plist::Dictionary::new();
-    init_dict.insert("o".to_string(), plist::Value::String("init".to_string()));
-    init_dict.insert("u".to_string(), plist::Value::String(apple_id.to_string()));
+    init_dict.insert("o".to_string(), "init".into());
+    init_dict.insert("u".to_string(), apple_id.into());
     // A2k is sent zero-padded to 256 bytes. The server re-parses this as a big
     // integer and tolerates the padded form, so we keep the fixed width here.
     init_dict.insert(
@@ -225,10 +207,7 @@ fn srp_exchange(
     );
     init_dict.insert(
         "ps".to_string(),
-        plist::Value::Array(vec![
-            plist::Value::String("s2k".to_string()),
-            plist::Value::String("s2k_fo".to_string()),
-        ]),
+        plist::Value::Array(vec!["s2k".into(), "s2k_fo".into()]),
     );
     init_dict.insert("cpd".to_string(), cpd.clone());
 
@@ -296,13 +275,10 @@ fn srp_exchange(
 
     // --- SRP complete ---
     let mut complete_dict = plist::Dictionary::new();
-    complete_dict.insert(
-        "o".to_string(),
-        plist::Value::String("complete".to_string()),
-    );
-    complete_dict.insert("u".to_string(), plist::Value::String(apple_id.to_string()));
+    complete_dict.insert("o".to_string(), "complete".into());
+    complete_dict.insert("u".to_string(), apple_id.into());
     complete_dict.insert("M1".to_string(), plist::Value::Data(m1.to_vec()));
-    complete_dict.insert("c".to_string(), plist::Value::String(cookie));
+    complete_dict.insert("c".to_string(), cookie.into());
     let complete_anisette_hdrs = anisette.headers("-2")?;
     complete_dict.insert("cpd".to_string(), build_cpd(&complete_anisette_hdrs));
 
@@ -337,10 +313,7 @@ fn srp_exchange(
         .and_then(|v| v.as_string())
         .unwrap_or("")
         .to_string();
-    session.insert(
-        "auth_type_marker".to_string(),
-        plist::Value::String(auth_type),
-    );
+    session.insert("auth_type_marker".to_string(), auth_type.into());
 
     Ok(plist::Value::Dictionary(session))
 }
@@ -363,25 +336,19 @@ fn fetch_app_token(
     let anisette_hdrs = anisette.headers("-2")?;
 
     let mut req = plist::Dictionary::new();
-    req.insert("u".to_string(), plist::Value::String(dsid.to_string()));
+    req.insert("u".to_string(), dsid.into());
     req.insert(
         "app".to_string(),
-        plist::Value::Array(vec![plist::Value::String(XCODE_APP.to_string())]),
+        plist::Value::Array(vec![XCODE_APP.into()]),
     );
     req.insert("c".to_string(), plist::Value::Data(c.to_vec()));
-    req.insert(
-        "t".to_string(),
-        plist::Value::String(idms_token.to_string()),
-    );
+    req.insert("t".to_string(), idms_token.into());
     req.insert(
         "checksum".to_string(),
         plist::Value::Data(checksum.to_vec()),
     );
     req.insert("cpd".to_string(), build_cpd(&anisette_hdrs));
-    req.insert(
-        "o".to_string(),
-        plist::Value::String("apptokens".to_string()),
-    );
+    req.insert("o".to_string(), "apptokens".into());
 
     let resp = gsa_post(agent, &plist::Value::Dictionary(req), &anisette_hdrs)
         .context("GSA app-token exchange (apptokens)")?;

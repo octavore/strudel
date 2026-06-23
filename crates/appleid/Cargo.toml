@@ -18,6 +18,7 @@ cbc = { version = "0.2", features = ["alloc", "block-padding"] }
 ureq = { version = "3", features = ["json", "native-tls"] }
 plist = "1"
 serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 objc2 = "0.6"

@@ -148,7 +148,7 @@ fn build_bwsp_plist(width: u32, height: u32) -> Result<Vec<u8>> {
     d.insert("ShowTabView".into(), Value::Boolean(false));
     d.insert("ShowToolbar".into(), Value::Boolean(false));
     d.insert("SidebarWidth".into(), Value::Integer(0.into()));
-    d.insert("WindowBounds".into(), Value::String(bounds));
+    d.insert("WindowBounds".into(), bounds.into());
 
     plist_to_bytes(Value::Dictionary(d))
 }
@@ -164,7 +164,7 @@ fn build_icvp_plist(spec: &DsStoreSpec<'_>) -> Result<Vec<u8>> {
     d.insert("labelOnBottom".into(), Value::Boolean(true));
     d.insert("showIconPreview".into(), Value::Boolean(true));
     d.insert("showItemInfo".into(), Value::Boolean(false));
-    d.insert("arrangeBy".into(), Value::String("none".into()));
+    d.insert("arrangeBy".into(), "none".into());
 
     if let Some(alias_bytes) = &spec.background_alias {
         d.insert("backgroundType".into(), Value::Integer(2.into()));
