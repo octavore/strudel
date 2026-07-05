@@ -78,20 +78,15 @@ impl ResolvedProject {
             if matched.is_empty() {
                 let available: Vec<&str> = eligible.iter().map(|t| t.app_name.as_str()).collect();
                 bail!(
-                    "No {} target named {:?}. Available: {}",
+                    "No {} target named {name:?}. Available: {}",
                     platform.label(),
-                    name,
                     available.join(", ")
                 );
             }
             return Ok(matched);
         }
 
-        if allow_all {
-            return Ok(eligible);
-        }
-
-        if eligible.len() == 1 {
+        if allow_all || eligible.len() == 1 {
             return Ok(eligible);
         }
 

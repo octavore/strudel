@@ -134,6 +134,39 @@ impl BuilderCore {
             binary_path.display(),
         });
     }
+
+    /// User-facing clean: wipe the strudel output dir and run `swift package
+    /// clean`. Platform-agnostic - macOS and iOS targets both build into
+    /// `build_dir`, so the same cleanup applies to either.
+    pub fn clean_command(&self) -> Result<()> {
+        let source = self.cfg.source_dir.to_str().unwrap();
+        let build_dir = &self.paths.build_dir;
+
+        if build_dir.as_os_str().is_empty() || build_dir == Path::new("/") {
+            anyhow::bail!("build_dir is empty or root, refusing to clean");
+        }
+
+        step("Cleaning strudel output...");
+        let prefix = if self.dry_run { "[dry-run] " } else { "" };
+        cprintln!("<dim>{prefix}rm -rf {}</dim>", build_dir.display());
+        if !self.dry_run && build_dir.exists() {
+            std::fs::remove_dir_all(build_dir)?;
+        }
+
+        step("Cleaning Swift build cache...");
+        self.sh
+            .run(&["swift", "package", "clean", "--package-path", source])?;
+
+        println!();
+        cprintln!("<green>Done!</green>");
+        Ok(())
+    }
+}
+
+/// Clean a single target's build output. Platform-agnostic, so `strudel
+/// clean` can tidy macOS and iOS targets alike without picking a driver.
+pub fn clean(cfg: ResolvedConfig, dry_run: bool) -> Result<()> {
+    BuilderCore::new(cfg, dry_run, false).clean_command()
 }
 
 impl MacosBuilder {
@@ -175,32 +208,6 @@ impl MacosBuilder {
             let app_bundle = self.paths.app_bundle.to_str().unwrap();
             self.sh.run(&["open", app_bundle])?;
         }
-        Ok(())
-    }
-
-    /// User-facing clean: wipe the strudel output dir and run `swift package
-    /// clean`.
-    pub fn clean_command(&self) -> Result<()> {
-        let source = self.cfg.source_dir.to_str().unwrap();
-        let build_dir = &self.paths.build_dir;
-
-        if build_dir.as_os_str().is_empty() || build_dir == Path::new("/") {
-            anyhow::bail!("build_dir is empty or root, refusing to clean");
-        }
-
-        step("Cleaning strudel output...");
-        let prefix = if self.dry_run { "[dry-run] " } else { "" };
-        cprintln!("<dim>{prefix}rm -rf {}</dim>", build_dir.display());
-        if !self.dry_run && build_dir.exists() {
-            std::fs::remove_dir_all(build_dir)?;
-        }
-
-        step("Cleaning Swift build cache...");
-        self.sh
-            .run(&["swift", "package", "clean", "--package-path", source])?;
-
-        println!();
-        cprintln!("<green>Done!</green>");
         Ok(())
     }
 
