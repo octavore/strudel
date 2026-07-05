@@ -1,15 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use super::super::{Builder, step};
-use super::IosTarget;
-use crate::config::ResolvedTargetPlatform;
+use crate::builder::ios::IosTarget;
+use crate::builder::{IosBuilder, step};
 use crate::shell::ShellCommand;
 
-impl Builder {
+impl IosBuilder {
     /// Assemble a flat iOS `.app` bundle (no `Contents/` subdirectory).
     /// Generates `Info.plist` from `info_json_path` (if set) merged with
     /// required iOS keys. Optionally compiles the asset catalog.
@@ -19,10 +18,7 @@ impl Builder {
         app_bundle: &Path,
         target: IosTarget,
     ) -> Result<()> {
-        let ios_settings = match self.cfg.target_platform {
-            ResolvedTargetPlatform::Ios(ref ios) => ios,
-            _ => bail!("assemble_ios_bundle called for non-iOS target"),
-        };
+        let ios_settings = &self.ios;
         if !self.dry_run {
             if app_bundle.exists() {
                 fs::remove_dir_all(app_bundle)?;
@@ -106,10 +102,7 @@ impl Builder {
         target: IosTarget,
     ) -> Result<()> {
         step("Compiling asset catalog...");
-        let ios_settings = match self.cfg.target_platform {
-            ResolvedTargetPlatform::Ios(ref ios) => ios,
-            _ => bail!("assemble_ios_bundle called for non-iOS target"),
-        };
+        let ios_settings = &self.ios;
         let assets_str = assets_dir.to_str().unwrap();
         let bundle_str = app_bundle.to_str().unwrap();
         let deployment = &ios_settings.deployment_target;

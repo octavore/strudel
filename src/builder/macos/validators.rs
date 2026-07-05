@@ -7,12 +7,12 @@ use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use serde_json::Value;
 
-use super::{Builder, step};
+use crate::builder::{MacosBuilder, step};
 
-impl Builder {
+impl MacosBuilder {
     /// Describe any signing/notarization credentials that are missing or
     /// incomplete. Empty means a real `run` has everything it needs.
-    pub(super) fn credential_problems(&self) -> Vec<String> {
+    pub(in crate::builder) fn credential_problems(&self) -> Vec<String> {
         let mut problems = Vec::new();
         if self.cfg.sign_identity.is_empty() {
             problems.push("APPLE_SIGNING_IDENTITY (signing identity) is not set".to_string());
@@ -31,7 +31,7 @@ impl Builder {
     /// present. Bails early so a missing value doesn't surface deep into
     /// the pipeline (e.g. `codesign: no identity found`). In dry-run, only
     /// warns - there's nothing to sign.
-    pub(super) fn preflight_credentials(&self) -> Result<()> {
+    pub(in crate::builder) fn preflight_credentials(&self) -> Result<()> {
         let problems = self.credential_problems();
         if problems.is_empty() {
             return Ok(());
@@ -205,7 +205,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::config::{IosProvisioningBackend, ResolvedConfig, ResolvedIosSection};
+    use crate::config::{ResolvedConfig, ResolvedMacOsSection};
 
     fn empty_cfg() -> ResolvedConfig {
         ResolvedConfig {
@@ -227,16 +227,7 @@ mod tests {
             embed_libs: Vec::new(),
             provisioning_profile: None,
             extensions: Vec::new(),
-            target_platform: ResolvedIosSection {
-                simulator: "iPhone 16".into(),
-                device: None,
-                deployment_target: "18.0".into(),
-                assets_dir: None,
-                app_icon_name: "AppIcon".into(),
-                provisioning: IosProvisioningBackend::AppStoreConnect,
-                apple_id: None,
-            }
-            .into(),
+            target_platform: ResolvedMacOsSection { dmg: None }.into(),
             team_id: String::new(),
             apple_api_issuer: String::new(),
             apple_api_key: String::new(),
@@ -248,8 +239,8 @@ mod tests {
         }
     }
 
-    fn builder(cfg: ResolvedConfig) -> Builder {
-        Builder::new(cfg, true, false, false, None, false)
+    fn builder(cfg: ResolvedConfig) -> MacosBuilder {
+        MacosBuilder::new(cfg, true, false, false, None, false).unwrap()
     }
 
     #[test]

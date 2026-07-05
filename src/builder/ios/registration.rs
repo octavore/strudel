@@ -4,9 +4,9 @@ use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use serde::Deserialize;
 
-use super::super::{Builder, step};
+use crate::builder::{IosBuilder, step};
 use crate::appstore::AppStoreClient;
-use crate::config::{IosProvisioningBackend, ResolvedTargetPlatform};
+use crate::config::IosProvisioningBackend;
 use crate::devices::DeviceSet;
 use crate::paths::ensure_strudel_dir;
 
@@ -48,14 +48,11 @@ struct DevicectlDeviceProperties {
     developer_mode_status: Option<String>,
 }
 
-impl Builder {
+impl IosBuilder {
     /// Register connected iOS devices on the portal and record them in
     /// `.strudel/devices.toml`.
     pub fn device_register(&self, device_selectors: &[String]) -> Result<()> {
-        let ios_settings = match self.cfg.target_platform {
-            ResolvedTargetPlatform::Ios(ref ios) => ios,
-            _ => bail!("assemble_ios_bundle called for non-iOS target"),
-        };
+        let ios_settings = &self.ios;
 
         let connected = self.list_connected_devices()?;
 
@@ -178,10 +175,7 @@ impl Builder {
     /// auto-detected connected devices. All resolved UDIDs must be tracked in
     /// `.strudel/devices.toml`.
     pub(super) fn resolve_target_udids(&self, device_selectors: &[String]) -> Result<Vec<String>> {
-        let ios_settings = match self.cfg.target_platform {
-            ResolvedTargetPlatform::Ios(ref ios) => ios,
-            _ => bail!("assemble_ios_bundle called for non-iOS target"),
-        };
+        let ios_settings = &self.ios;
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;
 
         if !device_selectors.is_empty() {
@@ -369,7 +363,7 @@ fn resolve_connected(
 
 #[cfg(test)]
 mod tests {
-    use super::{DeviceResolution, resolve_connected};
+    use crate::builder::ios::registration::{DeviceResolution, resolve_connected};
     use crate::devices::DeviceSet;
 
     fn dev(udid: &str, name: &str) -> (String, String) {

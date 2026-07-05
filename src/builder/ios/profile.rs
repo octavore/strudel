@@ -6,13 +6,13 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 
-use super::super::{Builder, step};
+use crate::builder::{IosBuilder, step};
 use crate::appstore::AppStoreClient;
-use crate::config::{IosProvisioningBackend, ResolvedTargetPlatform};
+use crate::config::IosProvisioningBackend;
 use crate::devices::DeviceSet;
 use crate::paths::ensure_strudel_dir;
 
-impl Builder {
+impl IosBuilder {
     /// Fetch (or force-refresh) the development provisioning profile and write
     /// it to `.strudel/<bundle_id>.mobileprovision`.
     pub fn profile_fetch(&self, force: bool) -> Result<()> {
@@ -105,10 +105,7 @@ impl Builder {
     /// Fetch (or re-create) a development profile and write it to the cache.
     /// Routes through the configured provisioning backend.
     fn auto_fetch_profile(&self) -> Result<()> {
-        let ios_settings = match self.cfg.target_platform {
-            ResolvedTargetPlatform::Ios(ref ios) => ios,
-            _ => bail!("assemble_ios_bundle called for non-iOS target"),
-        };
+        let ios_settings = &self.ios;
         if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) {
             cprintln!(
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"

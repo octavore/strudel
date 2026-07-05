@@ -10,11 +10,11 @@ use base64::engine::general_purpose::STANDARD as b64;
 use color_print::cprintln;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::builder::{Builder, step};
+use crate::builder::{MacosBuilder, step};
 use crate::shell::{Shell, ShellCommand};
 
 #[allow(dead_code)]
-impl Builder {
+impl MacosBuilder {
     /// The user's current keychain search list (absolute paths).
     fn user_keychains(&self) -> Result<Vec<String>> {
         let out = self.sh.run(&["security", "list-keychains", "-d", "user"])?;

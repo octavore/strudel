@@ -4,24 +4,21 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 
-use super::super::{Builder, step};
-use super::IosTarget;
-use super::profile::decode_profile;
-use crate::config::{IosProvisioningBackend, ResolvedTargetPlatform};
+use crate::builder::ios::IosTarget;
+use crate::builder::ios::profile::decode_profile;
+use crate::builder::{IosBuilder, step};
+use crate::config::IosProvisioningBackend;
 use crate::freeprov::ensure_keychain_ready;
 use crate::shell::ShellCommand;
 
-impl Builder {
+impl IosBuilder {
     /// Build for one or more connected iOS devices, then install and launch.
     ///
     /// Requires devices to be registered via `strudel device register`. Auto-
     /// fetches and caches a development provisioning profile via the App Store
     /// Connect API when one is not already current.
     pub fn device(&self, device_selectors: &[String]) -> Result<()> {
-        let ios_settings = match self.cfg.target_platform {
-            ResolvedTargetPlatform::Ios(ref ios) => ios,
-            _ => bail!("assemble_ios_bundle called for non-iOS target"),
-        };
+        let ios_settings = &self.ios;
 
         if !self.cfg.extensions.is_empty() {
             cprintln!(

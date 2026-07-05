@@ -1,5 +1,5 @@
-//! The iOS build pipeline. The [`Builder`](super::Builder) methods are split
-//! across submodules by concern:
+//! The iOS build pipeline. The [`IosBuilder`](super::IosBuilder) methods are
+//! split across submodules by concern:
 //!
 //! - [`sim`] — Simulator builds: compile, install, and launch in Simulator.app
 //! - [`device`] — device builds, code-signing, and identity/profile checks

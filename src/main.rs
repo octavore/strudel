@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use color_print::{ceprintln, cprintln};
 
-use crate::builder::Builder;
+use crate::builder::{IosBuilder, MacosBuilder};
 use crate::config::{
     GLOBAL_CONFIG_TEMPLATE, GlobalConfig, Platform, ResolvedConfig, ResolvedProject,
     ResolvedTargetPlatform,
@@ -64,7 +64,9 @@ impl Cli {
                     cli.target.as_deref(),
                     Platform::Macos,
                     true,
-                    |cfg| Builder::new(cfg.clone(), dry_run, open, debug, None, false).bundle(),
+                    |cfg| {
+                        MacosBuilder::new(cfg.clone(), dry_run, open, debug, None, false)?.bundle()
+                    },
                 )?;
             },
             Cmd::Build {
@@ -78,7 +80,9 @@ impl Cli {
                     cli.target.as_deref(),
                     Platform::Macos,
                     true,
-                    |cfg| Builder::new(cfg.clone(), dry_run, open, debug, None, false).build(),
+                    |cfg| {
+                        MacosBuilder::new(cfg.clone(), dry_run, open, debug, None, false)?.build()
+                    },
                 )?;
             },
             Cmd::Release {
@@ -95,14 +99,14 @@ impl Cli {
                     Platform::Macos,
                     allow_all,
                     |cfg| {
-                        Builder::new(
+                        MacosBuilder::new(
                             cfg.clone(),
                             dry_run,
                             open,
                             false,
                             resume.clone(),
                             skip_notarization,
-                        )
+                        )?
                         .release()
                     },
                 )?;
@@ -118,10 +122,7 @@ impl Cli {
                     cli.target.as_deref(),
                     Platform::Ios,
                     false,
-                    |cfg| {
-                        Builder::new(cfg.clone(), dry_run, false, debug, None, false)
-                            .sim(simulator.as_deref())
-                    },
+                    |cfg| IosBuilder::new(cfg.clone(), dry_run, debug)?.sim(simulator.as_deref()),
                 )?;
             },
             Cmd::Device(DeviceArgs {
@@ -136,10 +137,7 @@ impl Cli {
                     cli.target.as_deref(),
                     Platform::Ios,
                     false,
-                    |cfg| {
-                        Builder::new(cfg.clone(), dry_run, false, debug, None, false)
-                            .device(&device)
-                    },
+                    |cfg| IosBuilder::new(cfg.clone(), dry_run, debug)?.device(&device),
                 )?;
             },
             Cmd::Device(DeviceArgs {
@@ -152,10 +150,7 @@ impl Cli {
                     cli.target.as_deref(),
                     Platform::Ios,
                     false,
-                    |cfg| {
-                        Builder::new(cfg.clone(), dry_run, false, false, None, false)
-                            .device_register(&devices)
-                    },
+                    |cfg| IosBuilder::new(cfg.clone(), dry_run, false)?.device_register(&devices),
                 )?;
             },
             Cmd::Profile { dry_run, force } => {
@@ -165,10 +160,7 @@ impl Cli {
                     cli.target.as_deref(),
                     Platform::Ios,
                     false,
-                    |cfg| {
-                        Builder::new(cfg.clone(), dry_run, false, false, None, false)
-                            .profile_fetch(force)
-                    },
+                    |cfg| IosBuilder::new(cfg.clone(), dry_run, false)?.profile_fetch(force),
                 )?;
             },
             Cmd::Clean { dry_run } => {
@@ -179,7 +171,7 @@ impl Cli {
                     Platform::Macos,
                     true,
                     |cfg| {
-                        Builder::new(cfg.clone(), dry_run, false, false, None, false)
+                        MacosBuilder::new(cfg.clone(), dry_run, false, false, None, false)?
                             .clean_command()
                     },
                 )?;

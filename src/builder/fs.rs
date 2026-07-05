@@ -7,9 +7,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use color_print::cprintln;
 
-use super::Builder;
+use crate::builder::BuilderCore;
 
-impl Builder {
+impl BuilderCore {
     /// Create a directory (and parents), logging in dry-run instead of acting.
     pub(super) fn create_dir(&self, path: &Path) -> Result<()> {
         if self.dry_run {

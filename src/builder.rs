@@ -1,37 +1,76 @@
-//! The build pipeline driver. [`Builder`] holds the resolved config, paths, and
-//! a [`Shell`], and exposes the top-level commands. The actual work is split
-//! across submodules:
+//! The build pipeline drivers. [`BuilderCore`] holds the resolved config,
+//! paths, and a [`Shell`], plus the handful of helpers shared by every
+//! platform. The two platform drivers wrap it:
 //!
-//! - [`fs`] — dry-run-aware filesystem helpers
-//! - [`steps`] — the individual pipeline stages (compile, assemble, sign, …)
+//! - [`MacosBuilder`] — the macOS pipeline (compile, assemble, sign, notarize,
+//!   package a DMG). Entry points: `bundle`, `build`, `release`.
+//! - [`IosBuilder`] — the iOS pipeline (simulator, device, provisioning).
+//!
+//! Both deref to [`BuilderCore`], so shared state (`self.cfg`, `self.sh`,
+//! `self.paths`, …) and shared helpers read the same in either driver. The
+//! work is split across submodules:
+//!
+//! - [`fs`] — dry-run-aware filesystem helpers (on [`BuilderCore`])
 //! - [`keychain`] — signing-credential preflight and certificate import
+//! - [`macos`] — the macOS pipeline stages
+//! - [`ios`] — the iOS pipeline stages
 
 mod fs;
 mod ios;
 pub(crate) mod keychain;
-mod notarize;
-mod steps;
-mod validators;
+mod macos;
 
-use std::path::Path;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use color_print::{cformat, cprintln};
 use indoc::formatdoc;
 
-use crate::config::ResolvedConfig;
+use crate::config::{
+    ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform,
+};
 use crate::paths::Paths;
 use crate::shell::Shell;
 
-pub struct Builder {
+/// State and helpers shared by every platform driver.
+pub struct BuilderCore {
     cfg: ResolvedConfig,
     paths: Paths,
     sh: Shell,
     dry_run: bool,
-    open: bool,
     debug: bool,
+}
+
+/// The macOS build pipeline. Wraps a [`BuilderCore`] and the resolved
+/// `[macos]` config section.
+pub struct MacosBuilder {
+    core: BuilderCore,
+    macos: ResolvedMacOsSection,
+    open: bool,
     resume: Option<String>,
     skip_notarization: bool,
+}
+
+/// The iOS build pipeline. Wraps a [`BuilderCore`] and the resolved `[ios]`
+/// config section.
+pub struct IosBuilder {
+    core: BuilderCore,
+    ios: ResolvedIosSection,
+}
+
+impl Deref for MacosBuilder {
+    type Target = BuilderCore;
+    fn deref(&self) -> &BuilderCore {
+        &self.core
+    }
+}
+
+impl Deref for IosBuilder {
+    type Target = BuilderCore;
+    fn deref(&self) -> &BuilderCore {
+        &self.core
+    }
 }
 
 /// Print a green progress header for a build step.
@@ -39,7 +78,65 @@ fn step(msg: &str) {
     cprintln!("\n<green>==>> {msg}</green>");
 }
 
-impl Builder {
+impl BuilderCore {
+    fn new(cfg: ResolvedConfig, dry_run: bool, debug: bool) -> Self {
+        BuilderCore {
+            paths: Paths::new(&cfg),
+            sh: Shell::new(dry_run),
+            dry_run,
+            debug,
+            cfg,
+        }
+    }
+
+    /// Locate the binary for `target_name` in the swift build output dir. In
+    /// dry-run, returns the expected path without checking the filesystem.
+    /// On a real run with the binary missing, emits a hint listing the
+    /// executables that *were* built, so users can fix `target_name`.
+    pub fn find_binary_in(&self, bin_dir: &Path, target_name: &str) -> Result<PathBuf> {
+        let binary_path = bin_dir.join(target_name);
+        if self.dry_run {
+            return Ok(binary_path);
+        }
+        if binary_path.exists() {
+            return Ok(binary_path);
+        }
+
+        // The rest of this function is only for the error message when the binary is
+        // missing on a real run.
+
+        // Collect extension-free filenames (i.e. executables) for the error hint.
+        let found: Vec<String> = std::fs::read_dir(bin_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().into_string().ok()?;
+                (e.file_type().ok()?.is_file() && !name.contains('.')).then_some(name)
+            })
+            .collect();
+        let hint = if found.is_empty() {
+            "No executables were found in the build directory.".to_string()
+        } else {
+            formatdoc! {r#"
+                Executables found in the build directory: {}.
+                If one of these is the right binary, set the matching `target_name` in your strudel.toml.
+                "#,
+                found.join(", ")
+            }
+        };
+        bail!(formatdoc! {r#"
+            Could not locate built binary at:
+            {}
+            strudel was looking for an executable named `{target_name}`.
+            {hint}
+            "#,
+            binary_path.display(),
+        });
+    }
+}
+
+impl MacosBuilder {
     pub fn new(
         cfg: ResolvedConfig,
         dry_run: bool,
@@ -47,17 +144,18 @@ impl Builder {
         debug: bool,
         resume: Option<String>,
         skip_notarization: bool,
-    ) -> Self {
-        Builder {
-            paths: Paths::new(&cfg),
-            sh: Shell::new(dry_run),
-            dry_run,
-            cfg,
+    ) -> Result<Self> {
+        let ResolvedTargetPlatform::Mac(ref macos) = cfg.target_platform else {
+            bail!("MacosBuilder constructed for a non-macOS target");
+        };
+        let macos = macos.clone();
+        Ok(MacosBuilder {
+            core: BuilderCore::new(cfg, dry_run, debug),
+            macos,
             open,
-            debug,
             resume,
             skip_notarization,
-        }
+        })
     }
 
     /// Assemble every configured app extension under
@@ -207,5 +305,18 @@ impl Builder {
 
         self.open_app()?;
         Ok(())
+    }
+}
+
+impl IosBuilder {
+    pub fn new(cfg: ResolvedConfig, dry_run: bool, debug: bool) -> Result<Self> {
+        let ResolvedTargetPlatform::Ios(ref ios) = cfg.target_platform else {
+            bail!("IosBuilder constructed for a non-iOS target");
+        };
+        let ios = ios.clone();
+        Ok(IosBuilder {
+            core: BuilderCore::new(cfg, dry_run, debug),
+            ios,
+        })
     }
 }

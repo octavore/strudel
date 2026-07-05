@@ -10,16 +10,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use dmg::DmgSpec;
-use indoc::formatdoc;
 use serde_json::{Value, json};
 
-use super::{Builder, step};
-use crate::builder::notarize::NotarizationState;
-use crate::config::{ExtensionKind, ResolvedExtension, ResolvedTargetPlatform};
+use crate::builder::macos::notarize::NotarizationState;
+use crate::builder::{MacosBuilder, step};
+use crate::config::{ExtensionKind, ResolvedExtension};
 use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;
 
-impl Builder {
+impl MacosBuilder {
     pub fn clean(&self) -> Result<()> {
         step("Cleaning previous build...");
         let build_dir = &self.paths.build_dir;
@@ -87,52 +86,6 @@ impl Builder {
             PathBuf::from(bin_dir)
         };
         Ok(bin_dir)
-    }
-
-    /// Locate the binary for `target_name` in the swift build output dir. In
-    /// dry-run, returns the expected path without checking the filesystem.
-    /// On a real run with the binary missing, emits a hint listing the
-    /// executables that *were* built, so users can fix `target_name`.
-    pub fn find_binary_in(&self, bin_dir: &Path, target_name: &str) -> Result<PathBuf> {
-        let binary_path = bin_dir.join(target_name);
-        if self.dry_run {
-            return Ok(binary_path);
-        }
-        if binary_path.exists() {
-            return Ok(binary_path);
-        }
-
-        // The rest of this function is only for the error message when the binary is
-        // missing on a real run.
-
-        // Collect extension-free filenames (i.e. executables) for the error hint.
-        let found: Vec<String> = fs::read_dir(bin_dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| {
-                let name = e.file_name().into_string().ok()?;
-                (e.file_type().ok()?.is_file() && !name.contains('.')).then_some(name)
-            })
-            .collect();
-        let hint = if found.is_empty() {
-            "No executables were found in the build directory.".to_string()
-        } else {
-            formatdoc! {r#"
-                Executables found in the build directory: {}.
-                If one of these is the right binary, set the matching `target_name` in your strudel.toml.
-                "#,
-                found.join(", ")
-            }
-        };
-        bail!(formatdoc! {r#"
-            Could not locate built binary at:
-            {}
-            strudel was looking for an executable named `{target_name}`.
-            {hint}
-            "#,
-            binary_path.display(),
-        });
     }
 
     // assemble the .app bundle by creating the bundle structure:
@@ -565,10 +518,7 @@ impl Builder {
     }
 
     pub fn package_dmg(&self) -> Result<()> {
-        let macos_settings = match self.cfg.target_platform {
-            ResolvedTargetPlatform::Mac(ref macos) => macos,
-            _ => bail!("assemble_macos_bundle called for non-macOS target"),
-        };
+        let macos_settings = &self.macos;
 
         let app_name = &self.cfg.app_name;
         let vol_name = format!("{app_name} {}", self.cfg.version);

@@ -18,7 +18,8 @@ pub use crate::config::build_config::generate_initial_toml;
 pub use crate::config::extension::ExtensionKind;
 pub use crate::config::global::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
 pub use crate::config::resolved::{
-    ResolvedConfig, ResolvedExtension, ResolvedIosSection, ResolvedProject, ResolvedTargetPlatform,
+    ResolvedConfig, ResolvedExtension, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
+    ResolvedTargetPlatform,
 };
 
 pub fn load_config(config_path: &Path) -> Result<ResolvedProject> {

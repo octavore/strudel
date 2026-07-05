@@ -4,8 +4,8 @@ use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
-use super::build_target::TargetPlatform;
-use super::resolved::ResolvedMacOsSection;
+use crate::config::build_target::TargetPlatform;
+use crate::config::resolved::ResolvedMacOsSection;
 use crate::config::ResolvedConfig;
 use crate::config::build_target::{AppSection, BuildSection, BuildTarget, DmgSection, IosSection};
 use crate::config::extension::ExtensionSection;
@@ -17,6 +17,7 @@ use crate::config::utils::{env_or_global, resolve_path, resolve_to};
 /// (`[app]`, `[build]`, `[dmg]`) and are always macOS; multiple or non-macOS
 /// targets use `[[target]]`, each tagged with its own `platform`.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum BuildConfig {
     Single(SingleBuildConfig),
     Multi(MultiBuildConfig),

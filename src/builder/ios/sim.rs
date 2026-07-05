@@ -4,9 +4,8 @@ use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use serde::Deserialize;
 
-use super::super::{Builder, step};
-use super::IosTarget;
-use crate::config::ResolvedTargetPlatform;
+use crate::builder::ios::IosTarget;
+use crate::builder::{IosBuilder, step};
 use crate::shell::ShellCommand;
 
 #[derive(Deserialize)]
@@ -22,13 +21,10 @@ struct SimctlDevice {
     is_available: bool,
 }
 
-impl Builder {
+impl IosBuilder {
     /// Build for the iOS Simulator and launch in Simulator.app.
     pub fn sim(&self, sim_override: Option<&str>) -> Result<()> {
-        let ios_settings = match self.cfg.target_platform {
-            ResolvedTargetPlatform::Ios(ref ios) => ios,
-            _ => bail!("assemble_ios_bundle called for non-iOS target"),
-        };
+        let ios_settings = &self.ios;
         if !self.cfg.extensions.is_empty() {
             cprintln!(
                 "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \

@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use color_print::{cprint, cprintln};
 use serde::{Deserialize, Serialize};
 
-use super::{Builder, step};
+use crate::builder::{MacosBuilder, step};
 use crate::paths::PendingSubmission;
 use crate::shell::ShellArg;
 
@@ -36,7 +36,7 @@ fn format_elapsed(submitted_at: u64) -> String {
     }
 }
 
-impl Builder {
+impl MacosBuilder {
     pub fn notary_auth_args(&self) -> Result<Vec<ShellArg>> {
         if let Some(auth) = self.cfg.notary_auth() {
             let mut args = vec![
