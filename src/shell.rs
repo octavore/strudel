@@ -38,6 +38,7 @@ fn exit_code_str(status: &ExitStatus) -> String {
         .unwrap_or_else(|| "signal".to_string())
 }
 
+#[derive(Clone, Copy)]
 pub struct Shell {
     pub dry_run: bool,
 }

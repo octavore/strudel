@@ -6,6 +6,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use color_print::cprintln;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -109,7 +110,7 @@ impl AppStoreClient {
         encode(&header, &claims, &key).context("Failed to sign JWT")
     }
 
-    fn get_json<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T> {
+    fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("https://api.appstoreconnect.apple.com{path}");
         let token = self.bearer_token()?;
         let mut resp = self
@@ -128,7 +129,7 @@ impl AppStoreClient {
             .context("Failed to parse API response")
     }
 
-    fn post_json<B: Serialize, T: for<'de> Deserialize<'de>>(
+    fn post_json<B: Serialize, T: DeserializeOwned>(
         &self,
         path: &str,
         body: &B,

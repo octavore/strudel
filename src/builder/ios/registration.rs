@@ -4,8 +4,8 @@ use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use serde::Deserialize;
 
-use crate::builder::{IosBuilder, step};
 use crate::appstore::AppStoreClient;
+use crate::builder::{IosBuilder, step};
 use crate::config::IosProvisioningBackend;
 use crate::devices::DeviceSet;
 use crate::paths::ensure_strudel_dir;

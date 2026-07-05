@@ -44,7 +44,7 @@ impl MacosBuilder {
     /// credentials behind - useful on a fresh CI runner. When no certificate is
     /// configured (the common local case, where the identity already lives in
     /// the login keychain), this is a no-op returning `None`.
-    pub(in crate::builder) fn import_certificate(&self) -> Result<Option<TempKeychain<'_>>> {
+    pub(in crate::builder) fn import_certificate(&self) -> Result<Option<TempKeychain>> {
         let Some((cert_b64, cert_password)) = self.cfg.signing_cert() else {
             return Ok(None);
         };
@@ -76,7 +76,7 @@ impl MacosBuilder {
                 "<dim>[dry-run]</dim> security list-keychains -d user -s {keychain} <<existing...>>"
             );
             return Ok(Some(TempKeychain {
-                sh: &self.sh,
+                sh: self.sh,
                 path: keychain,
                 original_list: Vec::new(),
                 dry_run: true,
@@ -142,7 +142,7 @@ impl MacosBuilder {
         let _ = fs::remove_file(&p12_path);
 
         Ok(Some(TempKeychain {
-            sh: &self.sh,
+            sh: self.sh,
             path: keychain,
             original_list,
             dry_run: false,
@@ -154,14 +154,14 @@ impl MacosBuilder {
 /// restores the original keychain search list and deletes the keychain, so a
 /// build never leaves credentials behind on the machine. Cleanup is
 /// best-effort: we're tearing down, so failures are ignored.
-pub(in crate::builder) struct TempKeychain<'a> {
-    sh: &'a Shell,
+pub(in crate::builder) struct TempKeychain {
+    sh: Shell,
     path: String,
     original_list: Vec<String>,
     dry_run: bool,
 }
 
-impl Drop for TempKeychain<'_> {
+impl Drop for TempKeychain {
     fn drop(&mut self) {
         if self.dry_run {
             cprintln!(

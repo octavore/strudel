@@ -4,13 +4,15 @@ use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
-use crate::config::build_target::TargetPlatform;
-use crate::config::resolved::ResolvedMacOsSection;
 use crate::config::ResolvedConfig;
-use crate::config::build_target::{AppSection, BuildSection, BuildTarget, DmgSection, IosSection};
+use crate::config::build_target::{
+    AppSection, BuildSection, BuildTarget, DmgSection, IosSection, TargetPlatform,
+};
 use crate::config::extension::ExtensionSection;
 use crate::config::global::GlobalConfig;
-use crate::config::resolved::{ResolvedDmg, ResolvedIosSection, ResolvedProject};
+use crate::config::resolved::{
+    ResolvedDmg, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
+};
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
 
 /// The on-disk `strudel.toml`. Single-target configs use the flat form
