@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use crate::config::ResolvedConfig;
+use crate::config::build_target::IosProvisioningBackend;
+use crate::config::resolved::ResolvedIosSection;
 use crate::config::user::BuildConfig;
 
 pub const FULL: &str = indoc::indoc! {r#"
@@ -54,6 +56,7 @@ pub const MULTI: &str = indoc::indoc! {r#"
   app.bundle_id = "com.example.myapp"
   app.version = "1.2.3"
   app.build_number = "42"
+  ios.provisioning = "app_store_connect"
 "#};
 
 pub static RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
@@ -77,20 +80,22 @@ pub static RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig 
     extensions: Vec::new(),
     resources_dir: None,
     resources: Vec::new(),
-    dmg: None,
-    ios_simulator: "iPhone 16".into(),
-    ios_device: None,
-    ios_deployment_target: "18.0".into(),
-    ios_assets_dir: None,
-    ios_app_icon_name: "AppIcon".into(),
+    target_platform: ResolvedIosSection {
+        simulator: "iPhone 16".into(),
+        device: None,
+        deployment_target: "18.0".into(),
+        assets_dir: None,
+        app_icon_name: "AppIcon".into(),
+        provisioning: IosProvisioningBackend::AppStoreConnect,
+        apple_id: None,
+    }
+    .into(),
     team_id: String::new(),
     apple_api_issuer: String::new(),
     apple_api_key: String::new(),
     apple_api_key_path: None,
     apple_certificate: String::new().into(),
     apple_certificate_password: String::new().into(),
-    ios_provisioning: crate::config::resolved::ProvisioningBackend::AppStoreConnect,
-    ios_apple_id: None,
 });
 
 pub fn parse_build_config(s: &str) -> Result<BuildConfig, toml::de::Error> {

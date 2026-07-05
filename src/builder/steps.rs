@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use super::{Builder, step};
 use crate::builder::notarize::NotarizationState;
-use crate::config::{ExtensionKind, ResolvedExtension};
+use crate::config::{ExtensionKind, ResolvedExtension, ResolvedTargetPlatform};
 use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;
 
@@ -565,6 +565,11 @@ impl Builder {
     }
 
     pub fn package_dmg(&self) -> Result<()> {
+        let macos_settings = match self.cfg.target_platform {
+            ResolvedTargetPlatform::Mac(ref macos) => macos,
+            _ => bail!("assemble_macos_bundle called for non-macOS target"),
+        };
+
         let app_name = &self.cfg.app_name;
         let vol_name = format!("{app_name} {}", self.cfg.version);
         let temp_dmg = &self.paths.strudel_temp_dmg;
@@ -572,7 +577,7 @@ impl Builder {
 
         step("Creating DMG...");
 
-        if let Some(dmg_cfg) = &self.cfg.dmg {
+        if let Some(dmg_cfg) = &macos_settings.dmg {
             if self.dry_run {
                 cprintln!(
                     "<dim>[dry-run]</dim> hdiutil create -volname {:?} -format UDZO {}",

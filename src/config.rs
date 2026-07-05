@@ -1,3 +1,4 @@
+mod build_target;
 mod extension;
 mod global;
 mod resolved;
@@ -10,14 +11,15 @@ mod fixtures;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+pub use build_target::{IosProvisioningBackend, Platform};
 
 pub use crate::config::extension::ExtensionKind;
 pub use crate::config::global::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
 pub use crate::config::resolved::{
-    ProvisioningBackend, ResolvedConfig, ResolvedExtension, ResolvedProject,
+    ResolvedConfig, ResolvedExtension, ResolvedIosSection, ResolvedProject, ResolvedTargetPlatform,
 };
 use crate::config::user::BuildConfig;
-pub use crate::config::user::{Platform, generate_initial_toml};
+pub use crate::config::user::generate_initial_toml;
 
 pub fn load_config(config_path: &Path) -> Result<ResolvedProject> {
     let global = GlobalConfig::load()?;

@@ -8,7 +8,7 @@ use color_print::cprintln;
 
 use super::super::{Builder, step};
 use crate::appstore::AppStoreClient;
-use crate::config::ProvisioningBackend;
+use crate::config::{IosProvisioningBackend, ResolvedTargetPlatform};
 use crate::devices::DeviceSet;
 use crate::paths::ensure_strudel_dir;
 
@@ -105,7 +105,11 @@ impl Builder {
     /// Fetch (or re-create) a development profile and write it to the cache.
     /// Routes through the configured provisioning backend.
     fn auto_fetch_profile(&self) -> Result<()> {
-        if self.cfg.ios_provisioning == ProvisioningBackend::Free {
+        let ios_settings = match self.cfg.target_platform {
+            ResolvedTargetPlatform::Ios(ref ios) => ios,
+            _ => bail!("assemble_ios_bundle called for non-iOS target"),
+        };
+        if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) {
             cprintln!(
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
             );

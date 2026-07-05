@@ -23,6 +23,7 @@
 [ios]
 simulator         = "iPhone 16"
 deployment_target = "18.0"
+provisioning      = "app_store_connect"
 
 # macOS target
 [[target]]

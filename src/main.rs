@@ -19,6 +19,7 @@ use color_print::{ceprintln, cprintln};
 use crate::builder::Builder;
 use crate::config::{
     GLOBAL_CONFIG_TEMPLATE, GlobalConfig, Platform, ResolvedConfig, ResolvedProject,
+    ResolvedTargetPlatform,
 };
 
 #[derive(Parser)]
@@ -190,10 +191,12 @@ impl Cli {
                 // If no --apple-id flag, try reading it from [ios] apple_id in
                 // strudel.toml (best-effort; not required for login to work).
                 let from_config = if apple_id.is_none() {
-                    config::load_config(&cli.config)
-                        .ok()
-                        .and_then(|p| p.targets.into_iter().next())
-                        .and_then(|c| c.ios_apple_id)
+                    config::load_config(&cli.config).ok().and_then(|p| {
+                        p.targets.into_iter().find_map(|t| match t.target_platform {
+                            ResolvedTargetPlatform::Ios(ref ios) => ios.apple_id.clone(),
+                            _ => None,
+                        })
+                    })
                 } else {
                     None
                 };

@@ -4,20 +4,9 @@ use std::path::PathBuf;
 use anyhow::{Result, bail};
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::config::build_target::{IosProvisioningBackend, Platform};
 use crate::config::extension::ExtensionKind;
-use crate::config::user::{NotaryAuth, Platform};
-
-/// Which backend to use for iOS device provisioning.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum ProvisioningBackend {
-    /// App Store Connect API (paid account). Default.
-    #[default]
-    AppStoreConnect,
-
-    /// Free Apple ID provisioning via Xcode developer-services protocol.
-    /// Produces 7-day profiles; max 3 devices and 10 App IDs per team.
-    Free,
-}
+use crate::config::user::NotaryAuth;
 
 /// Resolved `[dmg]` customization. `None` in `ResolvedConfig` only when the
 /// user explicitly sets `plain = true` in their `[dmg]` section; the plain UDZO
@@ -144,20 +133,7 @@ pub struct ResolvedConfig {
     /// Individual files to copy into `Contents/Resources/`.
     pub resources: Vec<PathBuf>,
 
-    /// DMG customization. `Some` with defaults when `[dmg]` is absent; `None`
-    /// only when the user opts out with `plain = true`.
-    pub dmg: Option<ResolvedDmg>,
-
-    // iOS simulator and device settings.
-    pub ios_simulator: String,
-    pub ios_device: Option<String>,
-    pub ios_deployment_target: String,
-    pub ios_assets_dir: Option<PathBuf>,
-    pub ios_app_icon_name: String,
-    pub ios_provisioning: ProvisioningBackend,
-    /// Apple ID email for the free provisioning path. Pre-fills the login
-    /// prompt when `strudel login` is invoked without `--apple-id`.
-    pub ios_apple_id: Option<String>,
+    pub target_platform: ResolvedTargetPlatform,
 
     // Notarization identifiers (from strudel.toml or the environment).
     pub team_id: String,
@@ -225,11 +201,46 @@ pub struct ResolvedExtension {
     pub extension_point_identifier: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub enum ResolvedTargetPlatform {
+    Mac(ResolvedMacOsSection),
+    Ios(ResolvedIosSection),
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedMacOsSection {
+    pub dmg: Option<ResolvedDmg>,
+}
+
+impl From<ResolvedMacOsSection> for ResolvedTargetPlatform {
+    fn from(macos: ResolvedMacOsSection) -> Self {
+        ResolvedTargetPlatform::Mac(macos)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedIosSection {
+    pub simulator: String,
+    pub device: Option<String>,
+    pub deployment_target: String,
+    pub assets_dir: Option<PathBuf>,
+    pub app_icon_name: String,
+    pub provisioning: IosProvisioningBackend,
+    pub apple_id: Option<String>,
+}
+
+impl From<ResolvedIosSection> for ResolvedTargetPlatform {
+    fn from(ios: ResolvedIosSection) -> Self {
+        ResolvedTargetPlatform::Ios(ios)
+    }
+}
+
 #[cfg(test)]
 mod select_tests {
+    use crate::config::build_target::Platform;
     use crate::config::fixtures::MULTI;
     use crate::config::resolved::ResolvedProject;
-    use crate::config::user::{BuildConfig, Platform};
+    use crate::config::user::BuildConfig;
 
     fn two_target_project() -> ResolvedProject {
         use std::path::Path;

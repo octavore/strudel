@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use super::super::{Builder, step};
 use super::IosTarget;
+use crate::config::ResolvedTargetPlatform;
 use crate::shell::ShellCommand;
 
 #[derive(Deserialize)]
@@ -24,16 +25,20 @@ struct SimctlDevice {
 impl Builder {
     /// Build for the iOS Simulator and launch in Simulator.app.
     pub fn sim(&self, sim_override: Option<&str>) -> Result<()> {
+        let ios_settings = match self.cfg.target_platform {
+            ResolvedTargetPlatform::Ios(ref ios) => ios,
+            _ => bail!("assemble_ios_bundle called for non-iOS target"),
+        };
         if !self.cfg.extensions.is_empty() {
             cprintln!(
                 "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
                  [[extensions]] in this target will be ignored."
             );
         }
-        let sim_name = sim_override.unwrap_or(&self.cfg.ios_simulator);
+        let sim_name = sim_override.unwrap_or(&ios_settings.simulator);
         let target = &self.cfg.target_name;
         let config_flag = if self.debug { "debug" } else { "release" };
-        let deployment = &self.cfg.ios_deployment_target;
+        let deployment = &ios_settings.deployment_target;
 
         let host_arch = match std::env::consts::ARCH {
             "aarch64" => "arm64",

@@ -7,7 +7,8 @@ use color_print::cprintln;
 use super::super::{Builder, step};
 use super::IosTarget;
 use super::profile::decode_profile;
-use crate::config::ProvisioningBackend;
+use crate::config::{IosProvisioningBackend, ResolvedTargetPlatform};
+use crate::freeprov::ensure_keychain_ready;
 use crate::shell::ShellCommand;
 
 impl Builder {
@@ -17,6 +18,11 @@ impl Builder {
     /// fetches and caches a development provisioning profile via the App Store
     /// Connect API when one is not already current.
     pub fn device(&self, device_selectors: &[String]) -> Result<()> {
+        let ios_settings = match self.cfg.target_platform {
+            ResolvedTargetPlatform::Ios(ref ios) => ios,
+            _ => bail!("assemble_ios_bundle called for non-iOS target"),
+        };
+
         if !self.cfg.extensions.is_empty() {
             cprintln!(
                 "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
@@ -25,7 +31,7 @@ impl Builder {
         }
         let target = &self.cfg.target_name;
         let config_flag = if self.debug { "debug" } else { "release" };
-        let deployment = &self.cfg.ios_deployment_target;
+        let deployment = &ios_settings.deployment_target;
         let triple = format!("arm64-apple-ios{deployment}");
 
         let sdk_path = self
@@ -83,8 +89,8 @@ impl Builder {
         // name: the login keychain may still hold older/revoked "Apple
         // Development" certs that would otherwise be picked instead.
         let mut dev_fp = None;
-        if self.cfg.ios_provisioning == ProvisioningBackend::Free && !self.dry_run {
-            crate::freeprov::ensure_keychain_ready()?;
+        if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) && !self.dry_run {
+            ensure_keychain_ready()?;
             if self.cfg.sign_identity.is_empty() {
                 dev_fp = crate::freeprov::dev_cert_sha1()?;
             }

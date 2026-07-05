@@ -1,11 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::super::{Builder, step};
 use super::IosTarget;
+use crate::config::ResolvedTargetPlatform;
 use crate::shell::ShellCommand;
 
 impl Builder {
@@ -18,6 +19,10 @@ impl Builder {
         app_bundle: &Path,
         target: IosTarget,
     ) -> Result<()> {
+        let ios_settings = match self.cfg.target_platform {
+            ResolvedTargetPlatform::Ios(ref ios) => ios,
+            _ => bail!("assemble_ios_bundle called for non-iOS target"),
+        };
         if !self.dry_run {
             if app_bundle.exists() {
                 fs::remove_dir_all(app_bundle)?;
@@ -54,7 +59,7 @@ impl Builder {
         obj.entry("UIDeviceFamily").or_insert_with(|| json!([1]));
         obj.insert(
             "MinimumOSVersion".into(),
-            json!(&self.cfg.ios_deployment_target),
+            json!(&ios_settings.deployment_target),
         );
 
         match target {
@@ -87,7 +92,7 @@ impl Builder {
             &json_bytes,
         )?;
 
-        if let Some(assets_dir) = &self.cfg.ios_assets_dir {
+        if let Some(assets_dir) = &ios_settings.assets_dir {
             self.compile_ios_assets(assets_dir, app_bundle, target)?;
         }
 
@@ -101,10 +106,14 @@ impl Builder {
         target: IosTarget,
     ) -> Result<()> {
         step("Compiling asset catalog...");
+        let ios_settings = match self.cfg.target_platform {
+            ResolvedTargetPlatform::Ios(ref ios) => ios,
+            _ => bail!("assemble_ios_bundle called for non-iOS target"),
+        };
         let assets_str = assets_dir.to_str().unwrap();
         let bundle_str = app_bundle.to_str().unwrap();
-        let deployment = &self.cfg.ios_deployment_target;
-        let icon_name = &self.cfg.ios_app_icon_name;
+        let deployment = &ios_settings.deployment_target;
+        let icon_name = &ios_settings.app_icon_name;
 
         let platform = match target {
             IosTarget::Simulator => "iphonesimulator",

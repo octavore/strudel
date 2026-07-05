@@ -139,8 +139,8 @@ fn print_targets() {
         api_key      = "2X9R4HXF34"
         api_key_path = "AuthKey_2X9R4HXF34.p8"
 
-        # Optional top-level [ios] acts as a fallback for iOS targets.
-        # A per-target [ios] section overrides the whole top-level section.
+        # Optional top-level [ios] supplies defaults for iOS targets.
+        # A per-target ios.* field wins over the matching top-level field.
         [ios]
         simulator = "iPhone 16"
 
@@ -173,8 +173,8 @@ fn print_targets() {
           never both. Mixing them is an error.
         - `platform` is required on every [[target]] block. Must be `"macos"` or `"ios"`.
         - `[signing]` and `[notarize]` are always shared (top-level only).
-        - `[ios]` at the top level is a fallback; a per-target `ios.*` block overrides
-          the entire top-level section (not individual fields).
+        - `[ios]` at the top level supplies defaults for iOS targets; a per-target
+          `ios.*` field wins over the matching top-level field, field by field.
 
         ## Selecting targets at runtime
 
@@ -280,6 +280,10 @@ fn print_config() {
         See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
 
         ## [ios] — optional
+
+        Only valid inside an iOS [[target]] block, or as a top-level fallback for
+        iOS targets in a multi-target config - the flat single-app form above is
+        always macOS. See: {ANSI_BLUE}strudel help targets{ANSI_RESET}
         {ANSI_PURPLE}
         [ios]
         simulator         = "iPhone 16"  # default; override with --simulator
@@ -288,11 +292,11 @@ fn print_config() {
         assets_dir        = "Sources/App/Assets.xcassets"  # xcassets for actool
         app_icon_name     = "AppIcon"    # icon set name inside assets_dir
 
-        # Provisioning backend. Default: "app_store_connect" (requires paid account +
-        # App Store Connect API key). Use "free" for a plain Apple ID (7-day profiles,
-        # max 3 devices). Run `strudel login` first with the free path.
-        provisioning = "app_store_connect"
-        apple_id     = "you@example.com"  # pre-fills the login prompt (free path only)
+        # Provisioning backend — required for device builds. Choose one:
+        #   "app_store_connect"  paid account + App Store Connect API key; 1-year profiles
+        #   "free"               any Apple ID, no paid account; 7-day profiles, max 3 devices
+        provisioning = "app_store_connect"  # or "free"
+        apple_id     = "you@example.com"    # pre-fills the login prompt (free path only)
         {ANSI_RESET}
         See {ANSI_BLUE}strudel help ios-device{ANSI_RESET} and {ANSI_BLUE}strudel help ios-free-provisioning{ANSI_RESET}.
 
@@ -604,18 +608,18 @@ fn print_ios_device() {
 
         strudel supports two provisioning backends:
 
-          "app_store_connect"  Default. Requires a paid Apple Developer account and an
-                               App Store Connect API key (Admin role). Produces 1-year
-                               profiles. See "Credentials required" below.
+          "app_store_connect"  Requires a paid Apple Developer account and an App Store
+                               Connect API key (Admin role). Produces 1-year profiles.
+                               See "Credentials required" below.
 
           "free"               Sign in with any Apple ID (no paid account). Produces
                                7-day profiles; max 3 devices and 10 App IDs per team.
                                Run `strudel login` first, then the normal device workflow.
 
-        Select the backend in strudel.toml:
+        Set the backend in strudel.toml (required):
         {ANSI_PURPLE}
           [ios]
-          provisioning = "free"   # or "app_store_connect" (default)
+          provisioning = "app_store_connect"  # or "free"
         {ANSI_RESET}
         For the free path, see: {ANSI_BLUE}strudel help ios-free-provisioning{ANSI_RESET}
 

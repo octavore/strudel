@@ -210,7 +210,12 @@ PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 
 ### `[ios]` (optional, experimental)
 
-For iOS apps, this contains settings for `strudel sim` and `strudel device`. iOS support is experimental. All fields are optional.
+For iOS apps, this contains settings for `strudel sim` and `strudel device`. iOS support is experimental. All fields are optional except `provisioning`, which is required for device builds.
+
+> [!NOTE]
+> The flat, single-target form (a top-level `[app]`, as shown above) is always
+> macOS, so `[ios]` only applies inside an iOS `[[target]]` block, or as a
+> top-level fallback for iOS targets - see [Multiple targets](#multiple-targets).
 
 > [!TIP]
 > strudel can auto-manage device registration and development provisioning
@@ -219,13 +224,15 @@ For iOS apps, this contains settings for `strudel sim` and `strudel device`. iOS
 > [iOS device builds](#ios-device-builds) for the full workflow, or set
 > `provisioning_profile` in `[build]` to manage the profile yourself.
 
-| Key                 | Type   | Default       | Description                                                        |
-| ------------------- | ------ | ------------- | ------------------------------------------------------------------ |
-| `simulator`         | string | `"iPhone 16"` | Simulator name for `strudel sim`; override with `--simulator`      |
-| `device`            | string | *(auto)*      | Device name or UDID for `strudel device`; auto-detected if unset   |
-| `deployment_target` | string | `"18.0"`      | iOS deployment target, e.g. `"17.0"`                               |
-| `assets_dir`        | string | *(none)*      | `.xcassets` directory compiled into the bundle with `xcrun actool` |
-| `app_icon_name`     | string | `"AppIcon"`   | Icon set name inside `assets_dir`                                  |
+| Key                 | Type   | Default          | Description                                                                                              |
+| ------------------- | ------ | ---------------- | -------------------------------------------------------------------------------------------------------- |
+| `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles) |
+| `apple_id`          | string | *(none)*         | Apple ID email; pre-fills the login prompt for the `"free"` path                                        |
+| `simulator`         | string | `"iPhone 16"`    | Simulator name for `strudel sim`; override with `--simulator`                                           |
+| `device`            | string | *(auto)*         | Device name or UDID for `strudel device`; auto-detected if unset                                        |
+| `deployment_target` | string | `"18.0"`         | iOS deployment target, e.g. `"17.0"`                                                                    |
+| `assets_dir`        | string | *(none)*         | `.xcassets` directory compiled into the bundle with `xcrun actool`                                      |
+| `app_icon_name`     | string | `"AppIcon"`      | Icon set name inside `assets_dir`                                                                        |
 
 ### `[[extensions]]` (optional)
 
@@ -340,8 +347,9 @@ notarization credentials.
 
 - `platform` is required on every `[[target]]`, either `macos` or `ios`.
 - `[signing]` and `[notarize]` are always shared (top-level only).
-- A top-level `[ios]` is a fallback; a per-target `ios.*` block overrides the
-  entire top-level section (not individual fields).
+- A top-level `[ios]` supplies defaults for iOS targets; a per-target `ios.*`
+  field wins over the matching top-level field, field by field (not
+  whole-section replacement).
 
 
 ```toml

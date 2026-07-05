@@ -152,7 +152,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::config::ProvisioningBackend;
+    use crate::config::{IosProvisioningBackend, ResolvedIosSection};
 
     fn cfg(build_dir: &str, app_name: &str, version: &str) -> ResolvedConfig {
         ResolvedConfig {
@@ -174,13 +174,16 @@ mod tests {
             embed_libs: Vec::new(),
             provisioning_profile: None,
             extensions: Vec::new(),
-            ios_simulator: "iPhone 16".into(),
-            ios_device: None,
-            ios_deployment_target: "18.0".into(),
-            ios_assets_dir: None,
-            ios_app_icon_name: "AppIcon".into(),
-            ios_provisioning: ProvisioningBackend::AppStoreConnect,
-            ios_apple_id: None,
+            target_platform: ResolvedIosSection {
+                simulator: "iPhone 16".into(),
+                device: None,
+                deployment_target: "18.0".into(),
+                assets_dir: None,
+                app_icon_name: "AppIcon".into(),
+                provisioning: IosProvisioningBackend::AppStoreConnect,
+                apple_id: None,
+            }
+            .into(),
             team_id: String::new(),
             apple_api_issuer: String::new(),
             apple_api_key: String::new(),
@@ -189,7 +192,6 @@ mod tests {
             apple_certificate_password: String::new().into(),
             resources_dir: None,
             resources: Vec::new(),
-            dmg: None,
         }
     }
 

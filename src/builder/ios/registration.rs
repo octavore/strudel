@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use super::super::{Builder, step};
 use crate::appstore::AppStoreClient;
-use crate::config::ProvisioningBackend;
+use crate::config::{IosProvisioningBackend, ResolvedTargetPlatform};
 use crate::devices::DeviceSet;
 use crate::paths::ensure_strudel_dir;
 
@@ -52,6 +52,11 @@ impl Builder {
     /// Register connected iOS devices on the portal and record them in
     /// `.strudel/devices.toml`.
     pub fn device_register(&self, device_selectors: &[String]) -> Result<()> {
+        let ios_settings = match self.cfg.target_platform {
+            ResolvedTargetPlatform::Ios(ref ios) => ios,
+            _ => bail!("assemble_ios_bundle called for non-iOS target"),
+        };
+
         let connected = self.list_connected_devices()?;
 
         if connected.is_empty() {
@@ -108,7 +113,7 @@ impl Builder {
 
         let mut device_set = DeviceSet::load(&self.paths.devices_toml)?;
 
-        if self.cfg.ios_provisioning == ProvisioningBackend::Free {
+        if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) {
             cprintln!(
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
             );
@@ -173,6 +178,10 @@ impl Builder {
     /// auto-detected connected devices. All resolved UDIDs must be tracked in
     /// `.strudel/devices.toml`.
     pub(super) fn resolve_target_udids(&self, device_selectors: &[String]) -> Result<Vec<String>> {
+        let ios_settings = match self.cfg.target_platform {
+            ResolvedTargetPlatform::Ios(ref ios) => ios,
+            _ => bail!("assemble_ios_bundle called for non-iOS target"),
+        };
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;
 
         if !device_selectors.is_empty() {
@@ -190,7 +199,7 @@ impl Builder {
             return Ok(udids);
         }
 
-        if let Some(ref selector) = self.cfg.ios_device {
+        if let Some(ref selector) = ios_settings.device {
             return match device_set.resolve(selector) {
                 Some(udid) => Ok(vec![udid.to_string()]),
                 None => bail!(
