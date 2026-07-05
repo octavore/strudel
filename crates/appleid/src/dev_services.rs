@@ -200,8 +200,12 @@ impl<'a> DevServicesClient<'a> {
     }
 
     pub fn list_devices(&self, team_id: &str) -> Result<Vec<Device>> {
-        let resp: ListDevicesResponse =
-            parse(self.post("ios/listDevices", TeamIdBody { team_id: team_id.into() })?)?;
+        let resp: ListDevicesResponse = parse(self.post(
+            "ios/listDevices",
+            TeamIdBody {
+                team_id: team_id.into(),
+            },
+        )?)?;
         Ok(resp
             .devices
             .into_iter()
@@ -228,8 +232,12 @@ impl<'a> DevServicesClient<'a> {
     }
 
     pub fn ensure_app_id(&self, team_id: &str, bundle_id: &str, name: &str) -> Result<String> {
-        let resp: ListAppIdsResponse =
-            parse(self.post("ios/listAppIds", TeamIdBody { team_id: team_id.into() })?)?;
+        let resp: ListAppIdsResponse = parse(self.post(
+            "ios/listAppIds",
+            TeamIdBody {
+                team_id: team_id.into(),
+            },
+        )?)?;
 
         if let Some(existing) = resp.app_ids.iter().find(|a| a.identifier == bundle_id) {
             return Ok(existing.app_id_id.clone());
@@ -330,8 +338,12 @@ impl<'a> DevServicesClient<'a> {
     /// `submitDevelopmentCSR` only returns metadata, so the actual
     /// `certContent` must be fetched here.
     fn download_development_cert(&self, team_id: &str, certificate_id: &str) -> Result<Vec<u8>> {
-        let resp: ListCertsResponse =
-            parse(self.post("ios/listAllDevelopmentCerts", TeamIdBody { team_id: team_id.into() })?)?;
+        let resp: ListCertsResponse = parse(self.post(
+            "ios/listAllDevelopmentCerts",
+            TeamIdBody {
+                team_id: team_id.into(),
+            },
+        )?)?;
 
         let cert = resp
             .certificates
@@ -354,8 +366,12 @@ impl<'a> DevServicesClient<'a> {
         if !cert_not_expiring(cert_der)? {
             return Ok(false);
         }
-        let resp: ListCertsResponse =
-            parse(self.post("ios/listAllDevelopmentCerts", TeamIdBody { team_id: team_id.into() })?)?;
+        let resp: ListCertsResponse = parse(self.post(
+            "ios/listAllDevelopmentCerts",
+            TeamIdBody {
+                team_id: team_id.into(),
+            },
+        )?)?;
         let present = resp
             .certificates
             .iter()
@@ -368,8 +384,12 @@ impl<'a> DevServicesClient<'a> {
         team_id: &str,
         confirm_revoke: &mut impl FnMut(&[String]) -> Result<bool>,
     ) -> Result<()> {
-        let resp: ListCertsResponse =
-            parse(self.post("ios/listAllDevelopmentCerts", TeamIdBody { team_id: team_id.into() })?)?;
+        let resp: ListCertsResponse = parse(self.post(
+            "ios/listAllDevelopmentCerts",
+            TeamIdBody {
+                team_id: team_id.into(),
+            },
+        )?)?;
 
         if resp.certificates.is_empty() {
             return Ok(());
