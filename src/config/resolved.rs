@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use anyhow::{Result, bail};
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::config::build_config::NotaryAuth;
 use crate::config::build_target::{IosProvisioningBackend, Platform};
 use crate::config::extension::ExtensionKind;
-use crate::config::user::NotaryAuth;
 
 /// Resolved `[dmg]` customization. `None` in `ResolvedConfig` only when the
 /// user explicitly sets `plain = true` in their `[dmg]` section; the plain UDZO
@@ -237,10 +237,10 @@ impl From<ResolvedIosSection> for ResolvedTargetPlatform {
 
 #[cfg(test)]
 mod select_tests {
+    use crate::config::build_config::BuildConfig;
     use crate::config::build_target::Platform;
     use crate::config::fixtures::MULTI;
     use crate::config::resolved::ResolvedProject;
-    use crate::config::user::BuildConfig;
 
     fn two_target_project() -> ResolvedProject {
         use std::path::Path;

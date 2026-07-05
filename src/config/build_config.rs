@@ -16,19 +16,13 @@ use crate::config::utils::{env_or_global, resolve_path, resolve_to};
 /// The on-disk `strudel.toml`. Single-target configs use the flat form
 /// (`[app]`, `[build]`, `[dmg]`) and are always macOS; multiple or non-macOS
 /// targets use `[[target]]`, each tagged with its own `platform`.
-///
-/// Deserialized by hand rather than via `#[serde(untagged)]`: an untagged
-/// enum buffers the input and, if every variant fails, collapses all of
-/// their errors into one generic "data did not match any variant" message —
-/// discarding specific causes like a missing required field deep in an
-/// extension. Branching on the presence of the `target` key up front lets a
-/// bad config parse straight into the right variant and keep its real error.
 #[derive(Debug, Clone)]
 pub enum BuildConfig {
     Single(SingleBuildConfig),
     Multi(MultiBuildConfig),
 }
 
+// Custom deserializer so we can provide better error messages.
 impl<'de> Deserialize<'de> for BuildConfig {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -77,7 +71,7 @@ pub struct MultiBuildConfig {
     pub target: Vec<BuildTarget>,
 
     /// Shared iOS defaults inherited by targets that don't set their own
-    /// `[ios]` field; a per-target field always wins over this one.
+    /// `[ios]` field; per-target fields take precedence over this.
     pub ios: Option<IosSection>,
 
     #[serde(default)]

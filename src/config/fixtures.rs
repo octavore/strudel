@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use crate::config::ResolvedConfig;
+use crate::config::build_config::BuildConfig;
 use crate::config::build_target::IosProvisioningBackend;
 use crate::config::resolved::ResolvedIosSection;
-use crate::config::user::BuildConfig;
 
 pub const FULL: &str = indoc::indoc! {r#"
   [app]
