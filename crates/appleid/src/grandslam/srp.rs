@@ -157,13 +157,9 @@ pub(super) fn app_tokens_checksum(sk: &[u8], adsid: &str, apps: &[&str]) -> [u8;
 // additional authenticated data:
 //   [ "XYZ" (3) ][ iv (16) ][ ciphertext ][ tag (16) ]   aad = "XYZ", key = sk
 pub(super) fn decrypt_app_token(sk: &[u8], blob: &[u8]) -> Result<Vec<u8>> {
-    // aes-gcm 0.10 re-exports generic-array 0.14, whose GenericArray is
-    // deprecated in favour of 1.x; the API is still the supported one here.
     use aes_gcm::AesGcm;
     use aes_gcm::aead::consts::U16;
-    #[allow(deprecated)]
-    use aes_gcm::aead::generic_array::GenericArray;
-    use aes_gcm::aead::{Aead, KeyInit, Payload};
+    use aes_gcm::aead::{Aead, KeyInit, Nonce, Payload};
     use aes_gcm::aes::Aes256;
 
     // AES-256-GCM with a 16-byte nonce (the default Aes256Gcm uses 12).
@@ -178,13 +174,13 @@ pub(super) fn decrypt_app_token(sk: &[u8], blob: &[u8]) -> Result<Vec<u8>> {
 
     let cipher = Aes256Gcm16::new_from_slice(sk)
         .map_err(|_| anyhow::anyhow!("invalid GCM session key length ({} bytes)", sk.len()))?;
-    #[allow(deprecated)]
-    let nonce = GenericArray::from_slice(&blob[3..19]);
+    let nonce = Nonce::<Aes256Gcm16>::try_from(&blob[3..19])
+        .map_err(|_| anyhow::anyhow!("invalid GCM nonce length"))?;
     // aes-gcm expects the tag appended to the ciphertext, matching the layout.
     let ct_and_tag = &blob[19..];
     cipher
         .decrypt(
-            nonce,
+            &nonce,
             Payload {
                 msg: ct_and_tag,
                 aad: &blob[..3],
