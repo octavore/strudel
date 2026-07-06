@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
+use indoc::formatdoc;
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
-use crate::config::ResolvedConfig;
 use crate::config::build_target::{
     AppSection, BuildSection, BuildTarget, DmgSection, IosSection, TargetPlatform,
 };
@@ -14,6 +14,7 @@ use crate::config::resolved::{
     ResolvedDmg, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
 };
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
+use crate::config::{IosProvisioningBackend, ResolvedConfig};
 
 /// The on-disk `strudel.toml`. Single-target configs use the flat form
 /// (`[app]`, `[build]`, `[dmg]`) and are always macOS; multiple or non-macOS
@@ -116,9 +117,7 @@ impl BuildConfig {
                 let MultiBuildConfig { target, ios, apple } = multi;
                 target
                     .into_iter()
-                    .map(|t| {
-                        resolve_target(t, &apple, ios.as_ref(), false, config_dir, global)
-                    })
+                    .map(|t| resolve_target(t, &apple, ios.as_ref(), false, config_dir, global))
                     .collect::<Result<Vec<_>>>()?
             },
         };
@@ -328,8 +327,9 @@ pub fn generate_initial_toml(
     version: &str,
     build_number: &str,
 ) -> String {
-    indoc::formatdoc! {r#"
+    formatdoc! {r#"
         # strudel build configuration
+        # See `strudel help config` for the full list of options.
 
         [app]
         name         = "{app_name}"
@@ -339,52 +339,85 @@ pub fn generate_initial_toml(
 
         # Paths are relative to this file's directory unless absolute.
         # [build]
-        # source_dir             = "."                  # Swift package directory
-        # build_dir              = ".build/dist"        # artifacts (relative to source_dir)
-        # info_json_path         = "info.json"          # optional; empty object if unset
-        # entitlements_json_path = "entitlements.json"
-        # icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"  # optional; no icon if unset
-        # archs                  = ["arm64", "x86_64"]  # default: host arch only
-        # target_name            = "{app_name}"         # Swift target, if it differs from the app name
+        # source_dir             = "."                  # default: current dir
+        # entitlements_json_path = "entitlements.json"  # default: none
+        # icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"
 
-        # Dynamic C FFI libraries to embed in Contents/Frameworks and sign.
-        # Paths are relative to this file's directory unless absolute.
-        # embed_libs             = ["path/to/libFoo.dylib"]
-
-        # Resources copied into Contents/Resources/ during bundle assembly.
-        # resources_dir = "Resources"               # directory; contents merged into Contents/Resources/
-        # resources     = ["Assets/logo.png"]       # individual files copied by name
-
-        # Provisioning profile embedded as Contents/embedded.provisionprofile.
-        # Required for certain entitlements (e.g. push notifications, iCloud).
-        # provisioning_profile   = "{app_name}.provisionprofile"
-
-        # Apple developer identifiers, used for signing, notarization, and
-        # provisioning-profile management. Can also be set via env vars.
+        # Apple developer identifiers, used for signing and notarization.
+        # Can also be set via env vars.
         # [apple]
-        # identity         = "Developer ID Application: Your Name (XXXXXXXXXX)"
-        # team_id          = "XXXXXXXXXX"
-        # api_issuer       = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        # api_key          = "2X9R4HXF34"
-        # api_key_path     = "AuthKey_2X9R4HXF34.p8"
-        # notarize_timeout = 600
+        # identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+        # team_id      = "XXXXXXXXXX"
+        # api_key      = "2X9R4HXF34"
+        # api_key_path = "AuthKey_2X9R4HXF34.p8"
 
-        # This is the single-target (macOS-only) form. For iOS, or for more than
-        # one target, switch to `[[target]]` blocks — see the README.
-
-        # DMG window configuration for `strudel release`.
-        # A styled Finder window is applied by default. Override specific fields here,
-        # or set plain = true for a plain unstyled DMG.
+        # A DMG with a styled Finder window is created by default for `strudel release`.
+        # See help for customizing the DMG window.
+        # Set plain = true for a plain unstyled DMG instead.
         # [dmg]
-        # plain             = true                          # skip the styled window
-        # background        = "assets/dmg-background.png"  # PNG/JPEG background image
-        # window_width      = 660                           # default shown
-        # window_height     = 400                           # default shown
-        # icon_size         = 128                           # default shown
-        # app_x             = 192                           # .app icon X position
-        # app_y             = 192                           # .app icon Y position
-        # applications_x    = 468                           # Applications symlink X position
-        # applications_y    = 192                           # Applications symlink Y position
+        # plain = true
+    "#}
+}
+
+pub fn generate_initial_toml_with_ios(
+    app_name: &str,
+    bundle_id: &str,
+    version: &str,
+    build_number: &str,
+    include_macos: bool,
+    ios_provisioning: IosProvisioningBackend,
+) -> String {
+    let provisioning = match ios_provisioning {
+        IosProvisioningBackend::Free => "free",
+        IosProvisioningBackend::AppStoreConnect => "app_store_connect",
+    };
+    let macos_target = if include_macos {
+        formatdoc! {r#"
+
+            [[target]]
+            platform         = "macos"
+            app.name         = "{app_name}"
+            app.bundle_id    = "{bundle_id}"
+            app.version      = "{version}"
+            app.build_number = "{build_number}"
+
+            # build.entitlements_json_path = "entitlements.json"
+            # build.icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"
+            # dmg.plain                    = true
+        "#}
+    } else {
+        String::new()
+    };
+
+    formatdoc! {r#"
+        # strudel build configuration
+        # See `strudel help config` for the full list of options.
+
+        # Apple developer identifiers, used for signing and notarization.
+        # Can also be set via env vars.
+        # [apple]
+        # identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+        # team_id      = "XXXXXXXXXX"
+        # api_key      = "2X9R4HXF34"
+        # api_key_path = "AuthKey_2X9R4HXF34.p8"
+
+        [ios]
+        # Provisioning backend - required for device builds. Choose one:
+        #   "app_store_connect"  paid account + App Store Connect API key; 1-year profiles
+        #   "free"               any Apple ID; 7-day profiles, no paid account needed
+        provisioning = "{provisioning}"
+
+        {macos_target}
+        [[target]]
+        platform         = "ios"
+        app.name         = "{app_name}"
+        app.bundle_id    = "{bundle_id}"
+        app.version      = "{version}"
+        app.build_number = "{build_number}"
+
+        # ios.simulator          = "iPhone 16"
+        # ios.deployment_target  = "18.0"
+        # ios.assets_dir         = "Sources/App/Assets.xcassets"
     "#}
 }
 
@@ -426,6 +459,53 @@ mod tests {
         assert_eq!(r.app_name, "MyApp");
         assert_eq!(r.target_name, "MyApp"); // default = app.name
         assert_eq!(r.notarize_timeout, 600); // default
+    }
+
+    #[test]
+    fn generated_macos_ios_toml_resolves_both_targets() {
+        let t = generate_initial_toml_with_ios(
+            "MyApp",
+            "com.example.myapp",
+            "1.0",
+            "1",
+            true,
+            IosProvisioningBackend::AppStoreConnect,
+        );
+        let cfg: BuildConfig = toml::from_str(&t).expect("scaffolded TOML must parse");
+        let project = cfg
+            .resolve_project(Path::new("/cfg"), None)
+            .expect("scaffolded multi-target TOML must resolve");
+        assert_eq!(project.targets.len(), 2);
+
+        assert_matches!(
+            project.targets[0].target_platform,
+            ResolvedTargetPlatform::Mac(_)
+        );
+        assert_matches!(
+            project.targets[1].target_platform,
+            ResolvedTargetPlatform::Ios(_)
+        );
+    }
+
+    #[test]
+    fn generated_ios_only_toml_resolves_single_target() {
+        let t = generate_initial_toml_with_ios(
+            "MyApp",
+            "com.example.myapp",
+            "1.0",
+            "1",
+            false,
+            IosProvisioningBackend::Free,
+        );
+        let cfg: BuildConfig = toml::from_str(&t).expect("scaffolded TOML must parse");
+        let project = cfg
+            .resolve_project(Path::new("/cfg"), None)
+            .expect("scaffolded iOS-only TOML must resolve");
+        assert_eq!(project.targets.len(), 1);
+        assert_matches!(
+            project.targets[0].target_platform,
+            ResolvedTargetPlatform::Ios(_)
+        );
     }
 
     #[test]

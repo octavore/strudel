@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 pub use build_target::{IosProvisioningBackend, Platform};
 
 use crate::config::build_config::BuildConfig;
-pub use crate::config::build_config::generate_initial_toml;
+pub use crate::config::build_config::{generate_initial_toml, generate_initial_toml_with_ios};
 pub use crate::config::extension::ExtensionKind;
 pub use crate::config::global::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
 pub use crate::config::resolved::{

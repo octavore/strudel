@@ -2,8 +2,13 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 use anyhow::{Result, bail};
+use color_print::cprintln;
 
-use crate::config::generate_initial_toml;
+use crate::apple::provisioning;
+use crate::config::{
+    IosProvisioningBackend, generate_initial_toml, generate_initial_toml_with_ios,
+};
+use crate::paths::StrudelData;
 
 fn prompt(question: &str, default: Option<&str>) -> Result<String> {
     match default {
@@ -59,25 +64,72 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
     let default_id = format!("com.example.{}", app_name.to_lowercase());
     let bundle_id = prompt("Bundle ID", Some(&default_id))?;
     let version = prompt("Version", Some("0.1.0"))?;
-    let build_number = prompt("Build number", Some("1"))?;
+    let build_number = "1";
 
-    let content = generate_initial_toml(&app_name, &bundle_id, &version, &build_number);
+    let platforms = inquire::Select::new("Platforms:", vec!["macOS", "iOS", "both"]).prompt()?;
+    let include_macos = platforms != "iOS";
+    let include_ios = platforms != "macOS";
+
+    let content = if include_ios {
+        let provisioning = inquire::Select::new(
+            "iOS provisioning:",
+            vec![
+                "app_store_connect (1-year profiles; requires paid Apple developer membership and App Store Connect API key)",
+                "free (7-day profiles; any Apple ID)",
+            ],
+        )
+        .prompt()?;
+        let provisioning = if provisioning.starts_with("free") {
+            IosProvisioningBackend::Free
+        } else {
+            IosProvisioningBackend::AppStoreConnect
+        };
+
+        let already_signed_in = StrudelData::locate()
+            .map(|data| data.session_json.exists())
+            .unwrap_or(false);
+        if matches!(provisioning, IosProvisioningBackend::Free) && !already_signed_in {
+            let sign_in_now = inquire::Confirm::new("Sign in with your Apple ID now?")
+                .with_default(true)
+                .with_help_message("You can also run `strudel login` later")
+                .prompt()?;
+            if sign_in_now {
+                if let Err(e) = provisioning::login(None) {
+                    eprintln!("Sign-in failed: {e:#}\nYou can run `strudel login` later.");
+                }
+            }
+        }
+
+        generate_initial_toml_with_ios(
+            &app_name,
+            &bundle_id,
+            &version,
+            build_number,
+            include_macos,
+            provisioning,
+        )
+    } else {
+        generate_initial_toml(&app_name, &bundle_id, &version, &build_number)
+    };
     std::fs::create_dir_all(output_dir)?;
     std::fs::write(&out_path, &content)?;
-    println!("\nCreated {}", out_path.display());
+    cprintln!("\nCreated <dim>{}</dim>", out_path.display());
 
     let pkg_path = output_dir.join("Package.swift");
     if pkg_path.exists() {
-        println!("Skipped {} (already exists)", pkg_path.display());
+        cprintln!("Skipped <dim>{}</dim> (already exists)", pkg_path.display());
     } else {
         let pkg_content = generate_package_swift(&app_name);
         std::fs::write(&pkg_path, &pkg_content)?;
-        println!("Created {}", pkg_path.display());
+        cprintln!("Created <dim>{}</dim>", pkg_path.display());
     }
 
     let gitignore_path = output_dir.join(".gitignore");
     if gitignore_path.exists() {
-        println!("Skipped {} (already exists)", gitignore_path.display());
+        cprintln!(
+            "Skipped <dim>{}</dim> (already exists)",
+            gitignore_path.display()
+        );
     } else {
         std::fs::write(
             &gitignore_path,
@@ -86,13 +138,26 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
             .strudel/  # strudel cache and intermediate build outputs
         "},
         )?;
-        println!("Created {}", gitignore_path.display());
+        cprintln!("Created <dim>{}</dim>", gitignore_path.display());
     }
 
     println!("\nNext steps:");
-    println!("  strudel bundle   # build app bundle (unsigned)");
-    println!("  strudel build    # build + sign for local dev (ad-hoc if no identity)");
-    println!("  strudel release  # full release (sign, notarize, DMG)");
+    if include_macos {
+        cprintln!("  <blue>strudel bundle</blue>   # build app bundle (unsigned)");
+        cprintln!(
+            "  <blue>strudel build</blue>    # build + sign for local dev (ad-hoc if no identity)"
+        );
+        cprintln!("  <blue>strudel release</blue>  # full release (sign, notarize, DMG)");
+    }
+    if include_ios {
+        cprintln!("  <blue>strudel sim</blue>              # build and run in the iOS Simulator");
+        cprintln!(
+            "  <blue>strudel device add</blue>       # register a device and fetch a provisioning profile"
+        );
+        cprintln!(
+            "  <blue>strudel device</blue>           # build, install, and launch on a device"
+        );
+    }
 
     Ok(())
 }
