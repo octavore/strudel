@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use color_print::cprintln;
+use indoc::indoc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -65,13 +66,14 @@ fn api_error(code: u16, body: &str) -> anyhow::Error {
 
 impl AppStoreClient {
     pub fn from_config(cfg: &ResolvedConfig) -> Result<Self> {
-        let key_path = cfg.apple_api_key_path.as_ref().context(
-            "App Store Connect API credentials required for provisioning profile management.\n\
-             Set APPLE_API_KEY_PATH (path to your .p8 file), APPLE_API_KEY (key ID), \
-             and APPLE_API_ISSUER in your environment or strudel.toml.\n\
-             Alternatively, set [ios] provisioning = \"free\" in strudel.toml to use a \
-             plain Apple ID instead (no paid account needed).",
-        )?;
+        let key_path = cfg.apple_api_key_path.as_ref().context(indoc! {"
+            App Store Connect API credentials required for `app_store_connect` provisioning profile management.
+            Please set your API key id, API key path, and API issuer in your environment or strudel.toml.
+
+            Alternatively, set [ios] provisioning = \"free\" in strudel.toml and run `strudel login`
+            to use a plain Apple ID without a paid developer account.
+         ",
+        })?;
         if cfg.apple_api_key.is_empty() {
             bail!("APPLE_API_KEY (key ID) is required but not set.");
         }

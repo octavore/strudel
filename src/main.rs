@@ -174,7 +174,12 @@ impl Cli {
                     },
                 )?;
             },
-            Cmd::Profile { dry_run, force } => {
+            Cmd::Profile(ProfileArgs { command: None }) => {
+                status::profile_info(&cli.config, cli.target.as_deref())?;
+            },
+            Cmd::Profile(ProfileArgs {
+                command: Some(ProfileCmd::Fetch { dry_run, force }),
+            }) => {
                 let project = config::load_config(&cli.config)?;
                 for_each_selected(
                     &project,
@@ -216,13 +221,16 @@ impl Cli {
                 command: Some(LoginCmd::Status),
                 ..
             }) => {
-                status::run(&cli.config, cli.target.as_deref())?;
+                status::login_status()?;
             },
             Cmd::Login(LoginArgs {
                 command: Some(LoginCmd::Clear),
                 ..
             }) => {
                 provisioning::logout()?;
+            },
+            Cmd::Status => {
+                status::run(&cli.config, cli.target.as_deref())?;
             },
             Cmd::Config { command } => match command {
                 ConfigCmd::Edit => {
@@ -307,16 +315,11 @@ enum Cmd {
     /// Run `strudel device add` first to register your device(s).
     #[command(args_conflicts_with_subcommands = true)]
     Device(DeviceArgs),
-    /// Fetch (or refresh) the development provisioning profile for iOS device
-    /// builds
-    Profile {
-        /// Print commands without executing them
-        #[arg(long)]
-        dry_run: bool,
-        /// Recreate the profile even if the cached one is already current
-        #[arg(long)]
-        force: bool,
-    },
+    /// Show provisioning-profile status for each target. iOS profiles are
+    /// auto-managed; run `strudel profile fetch` to fetch or refresh one.
+    /// macOS has no auto-fetch: set `build.provisioning_profile` to pin one.
+    #[command(args_conflicts_with_subcommands = true)]
+    Profile(ProfileArgs),
     /// Remove the strudel output directory and run `swift package clean`
     Clean {
         /// Print commands without executing them
@@ -347,6 +350,10 @@ enum Cmd {
         #[command(subcommand)]
         command: ConfigCmd,
     },
+    /// Show the full picture: local toolchain versions, global config, the
+    /// saved Apple ID session, cached dev credentials, and per-target
+    /// provisioning state
+    Status,
 }
 
 #[derive(clap::Args)]
@@ -361,9 +368,8 @@ pub struct LoginArgs {
 
 #[derive(Subcommand)]
 enum LoginCmd {
-    /// Show the current login and provisioning state: global config, the
-    /// saved Apple ID session, cached dev credentials, and per-target
-    /// provisioning
+    /// Show just the Apple ID session: signed-in state, apple id, and dsid.
+    /// Run `strudel status` for the full picture (config, project, etc.)
     Status,
     /// Sign out and clear the saved Apple ID session and cached dev
     /// credentials
@@ -414,6 +420,26 @@ enum DeviceCmd {
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(clap::Args)]
+pub struct ProfileArgs {
+    #[command(subcommand)]
+    command: Option<ProfileCmd>,
+}
+
+#[derive(Subcommand)]
+enum ProfileCmd {
+    /// Fetch (or refresh) the development provisioning profile for iOS device
+    /// builds
+    Fetch {
+        /// Print commands without executing them
+        #[arg(long)]
+        dry_run: bool,
+        /// Recreate the profile even if the cached one is already current
+        #[arg(long)]
+        force: bool,
     },
 }
 

@@ -1,7 +1,9 @@
-//! `strudel login status` prints out global config, the Apple ID session stored
-//! `~/.local/share/strudel/`, and the per-project `.strudel/` provisioning
-//! artifacts.
+//! `strudel status` prints the environment, global config, the Apple ID
+//! session stored under `~/.local/share/strudel/`, and the per-project
+//! `.strudel/` provisioning artifacts. `strudel login status` prints just the
+//! Apple ID session block.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -9,24 +11,85 @@ use appleid::Session;
 use color_print::cprintln;
 
 use crate::config::{
-    GlobalConfig, IosProvisioningBackend, ResolvedConfig, ResolvedTargetPlatform, load_config,
+    GlobalConfig, IosProvisioningBackend, ResolvedConfig, ResolvedIosSection,
+    ResolvedTargetPlatform, load_config,
 };
 use crate::devices::DeviceSet;
 use crate::paths::{Paths, StrudelData};
 
-/// Print the global config, Apple ID session, and per-project provisioning
-/// state. `config_path`/`target` mirror the other commands; the project
-/// section is best-effort and omitted when no config loads.
+/// `strudel status`: print the environment, global config, Apple ID session,
+/// and per-project provisioning state. `config_path`/`target` mirror the other
+/// commands; the project section is best-effort and omitted when no config
+/// loads.
 pub fn run(config_path: &Path, target: Option<&str>) -> Result<()> {
+    environment_section();
+    println!();
     global_config_section()?;
+    println!();
+    let session = apple_id_section()?;
+    println!();
+    project_section(config_path, target, session.as_ref());
+    Ok(())
+}
+
+/// `strudel login status`: print just the Apple ID session block (no global
+/// config or project state).
+pub fn login_status() -> Result<()> {
     apple_id_section()?;
-    project_section(config_path, target);
+    Ok(())
+}
+
+/// Best-effort local toolchain versions; useful context when diagnosing a
+/// failed build without requiring the caller to run `swift --version` etc.
+/// themselves.
+fn environment_section() {
+    header("Environment", None);
+    field("strudel version", env!("CARGO_PKG_VERSION").to_string());
+    field("swift", tool_version("swift", &["--version"]));
+    field("xcodebuild", tool_version("xcodebuild", &["-version"]));
+}
+
+fn tool_version(cmd: &str, args: &[&str]) -> String {
+    std::process::Command::new(cmd)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.lines().next().map(str::to_string))
+        .unwrap_or_else(|| "not found".to_string())
+}
+
+/// `strudel profile` (no subcommand): print the current provisioning-profile
+/// status for each selected target, without fetching or refreshing anything.
+pub fn profile_info(config_path: &Path, target: Option<&str>) -> Result<()> {
+    let project = load_config(config_path)?;
+    let session = StrudelData::locate()
+        .ok()
+        .and_then(|d| read_session(&d.session_json));
+
+    for cfg in &project.targets {
+        if let Some(name) = target
+            && cfg.app_name != name
+        {
+            continue;
+        }
+        cprintln!(
+            "<bold,cyan>{}</bold,cyan>  <dim>{}</dim>",
+            cfg.app_name,
+            cfg.bundle_id
+        );
+        match &cfg.target_platform {
+            ResolvedTargetPlatform::Ios(ios) => ios_provisioning_block(cfg, ios, session.as_ref()),
+            ResolvedTargetPlatform::Mac(_) => macos_profile_block(cfg),
+        }
+    }
     Ok(())
 }
 
 fn global_config_section() -> Result<()> {
     let path = GlobalConfig::xdg_path()?;
-    header("Global config", &path);
+    header("Global config", Some(&path));
     if !path.exists() {
         cprintln!("  <dim>not found (using defaults; run `strudel config edit` to create)</dim>");
         return Ok(());
@@ -40,16 +103,18 @@ fn global_config_section() -> Result<()> {
     Ok(())
 }
 
-fn apple_id_section() -> Result<()> {
+fn apple_id_section() -> Result<Option<Session>> {
     let data = StrudelData::locate()?;
     let dir = data.session_json.parent().unwrap_or(Path::new("~"));
-    header("Apple ID session", dir);
+    header("Apple ID session", Some(dir));
 
-    match read_session(&data.session_json) {
+    let session = read_session(&data.session_json);
+    match &session {
         Some(session) => {
             cprintln!("  <green>●</green> signed in");
-            field("apple id", session.apple_id);
+            field("apple id", session.apple_id.clone());
             field("dsid", mask(&session.dsid));
+            account_lines(session);
         },
         None => {
             cprintln!("  <dim>○ not signed in (run `strudel login` for free provisioning)</dim>");
@@ -63,53 +128,139 @@ fn apple_id_section() -> Result<()> {
     field("dev cert", describe_cert(&data.cert_der));
     field("dev key", present(&data.key_pem));
     field("dev keychain", present(&data.keychain_db));
-    Ok(())
+    Ok(session)
 }
 
-fn project_section(config_path: &Path, target: Option<&str>) {
+/// Fetch and print developer teams + their registered devices from Apple's
+/// developer-services portal. Best-effort: any network/auth failure is
+/// reported inline rather than failing the whole `status` command, since
+/// everything else it prints is purely local.
+fn account_lines(session: &Session) {
+    let details = (|| -> anyhow::Result<Vec<(appleid::Team, Vec<appleid::Device>)>> {
+        let apple_id = appleid::AppleId::new()?;
+        let teams = apple_id.list_teams(session)?;
+        teams
+            .into_iter()
+            .map(|t| {
+                let devices = apple_id.list_devices(session, &t.id)?;
+                Ok((t, devices))
+            })
+            .collect()
+    })();
+
+    match details {
+        Ok(teams) if teams.is_empty() => {
+            field2("developer teams", "none found on this account".to_string());
+        },
+        Ok(teams) => {
+            for (team, devices) in teams {
+                field2(
+                    "team",
+                    format!("{} ({}) [{}]", team.name, team.id, team.status),
+                );
+                if devices.is_empty() {
+                    subfield("devices", "none registered on the portal".to_string());
+                    continue;
+                }
+                subfield("devices", devices.len().to_string());
+                for d in devices {
+                    subfield(
+                        "-",
+                        format!("{} ({}) - {} {}", d.name, d.udid, d.model, d.platform),
+                    );
+                }
+            }
+        },
+        Err(e) => {
+            cprintln!("  <yellow>could not reach Apple: {}</yellow>", e);
+        },
+    }
+}
+
+fn project_section(config_path: &Path, target: Option<&str>, session: Option<&Session>) {
     let project = match load_config(config_path) {
         Ok(p) => p,
         Err(_) => {
             // No usable strudel.toml here; the login state above is still
             // meaningful, so this is not an error.
-            header("Project", config_path);
+            header("Project", Some(config_path));
             cprintln!("  <dim>no strudel.toml found in this directory</dim>");
             return;
         },
     };
 
-    header("Project", config_path);
+    header("Project", Some(config_path));
     for cfg in &project.targets {
         if let Some(name) = target
             && cfg.app_name != name
         {
             continue;
         }
-        target_block(cfg);
+        target_block(cfg, session);
     }
 }
 
-fn target_block(cfg: &ResolvedConfig) {
+fn target_block(cfg: &ResolvedConfig, session: Option<&Session>) {
     let platform = match &cfg.target_platform {
         ResolvedTargetPlatform::Mac(_) => "macos",
         ResolvedTargetPlatform::Ios(_) => "ios",
     };
     cprintln!(
-        "\n  <bold,cyan>-- {} ({}) --</bold,cyan>",
+        "  target: <bold,cyan>{}</bold,cyan> <dim>{}</dim>",
         cfg.app_name,
-        platform
+        cfg.bundle_id
     );
-    field2("bundle id", cfg.bundle_id.clone());
 
-    let ResolvedTargetPlatform::Ios(ios) = &cfg.target_platform else {
-        // macOS provisioning is signing-identity based; report what will sign.
+    field2("platform", platform.to_string());
+    match &cfg.target_platform {
+        ResolvedTargetPlatform::Mac(_) => {
+            field2(
+                "sign identity",
+                if_empty(&cfg.sign_identity, "ad-hoc / none configured"),
+            );
+            macos_profile_block(cfg);
+        },
+        ResolvedTargetPlatform::Ios(ios) => {
+            ios_provisioning_block(cfg, ios, session);
+        },
+    }
+}
+
+/// Print the manually-pinned provisioning profile for a macOS target, if any.
+/// Unlike iOS, macOS has no auto-fetch backend: a profile is only needed for
+/// certain entitlements, and must be supplied via `build.provisioning_profile`
+/// in strudel.toml.
+fn macos_profile_block(cfg: &ResolvedConfig) {
+    let Some(path) = &cfg.provisioning_profile else {
         field2(
-            "sign identity",
-            if_empty(&cfg.sign_identity, "ad-hoc / none configured"),
+            "provisioning profile",
+            "not configured (only required for some entitlements)".to_string(),
         );
         return;
     };
+    if !path.exists() {
+        field2(
+            "provisioning profile",
+            format!("{} (missing)", shorten(path)),
+        );
+        return;
+    }
+    field2("provisioning profile", shorten(path));
+    match crate::builder::decode_profile(path) {
+        Ok(value) => print_profile_details(value.as_dictionary(), None),
+        Err(e) => cprintln!("      <yellow>could not decode: {}</yellow>", e),
+    }
+}
 
+/// Print provisioning backend, cached profile, and tracked-device info for
+/// one iOS target. Shared by `strudel login status` (as part of the full
+/// project dump) and `strudel profile` (on its own), so the two commands
+/// don't drift out of sync.
+fn ios_provisioning_block(
+    cfg: &ResolvedConfig,
+    ios: &ResolvedIosSection,
+    session: Option<&Session>,
+) {
     let backend = match ios.provisioning {
         IosProvisioningBackend::Free => "free (Apple ID, 7-day profiles)",
         IosProvisioningBackend::AppStoreConnect => "app_store_connect",
@@ -117,12 +268,19 @@ fn target_block(cfg: &ResolvedConfig) {
     field2("provisioning", backend.to_string());
     field2("apple id", opt(&ios.apple_id));
 
+    // Free profiles are tied to whichever Apple ID requested them; only that
+    // check makes sense for the free backend, and only when signed in.
+    let expected_owner = matches!(ios.provisioning, IosProvisioningBackend::Free)
+        .then_some(session)
+        .flatten()
+        .map(|s| s.apple_id.as_str());
+
     let paths = Paths::new(cfg);
-    profile_lines(&paths, cfg);
+    profile_lines(&paths, cfg, expected_owner);
     device_lines(&paths);
 }
 
-fn profile_lines(paths: &Paths, cfg: &ResolvedConfig) {
+fn profile_lines(paths: &Paths, cfg: &ResolvedConfig, expected_owner: Option<&str>) {
     // Prefer the explicitly pinned profile; otherwise the cached one.
     let (label, path) = match &cfg.provisioning_profile {
         Some(p) => ("profile (pinned)", p.clone()),
@@ -134,12 +292,12 @@ fn profile_lines(paths: &Paths, cfg: &ResolvedConfig) {
     }
     field2(label, shorten(&path));
     match crate::builder::decode_profile(&path) {
-        Ok(value) => print_profile_details(value.as_dictionary()),
+        Ok(value) => print_profile_details(value.as_dictionary(), expected_owner),
         Err(e) => cprintln!("      <yellow>could not decode: {}</yellow>", e),
     }
 }
 
-fn print_profile_details(dict: Option<&plist::Dictionary>) {
+fn print_profile_details(dict: Option<&plist::Dictionary>, expected_owner: Option<&str>) {
     let Some(dict) = dict else {
         cprintln!("      <yellow>unexpected profile format</yellow>");
         return;
@@ -164,6 +322,46 @@ fn print_profile_details(dict: Option<&plist::Dictionary>) {
     {
         subfield("app id", app_id.to_string());
     }
+    if let Some(expected) = expected_owner {
+        print_owner_check(dict, expected);
+    }
+}
+
+/// For free provisioning, verify the profile's embedded developer
+/// certificate(s) belong to the currently signed-in Apple ID. A stale profile
+/// from a previously signed-in account still decodes and looks "current"
+/// otherwise, but Apple will reject it (or the wrong identity) at install
+/// time, so surface the mismatch here instead.
+fn print_owner_check(dict: &plist::Dictionary, expected: &str) {
+    let certs = dict.get("DeveloperCertificates").and_then(|v| v.as_array());
+    let Some(certs) = certs else {
+        subfield(
+            "owner",
+            "unknown (profile has no embedded certificate)".to_string(),
+        );
+        return;
+    };
+
+    let emails: Vec<String> = certs
+        .iter()
+        .filter_map(|v| v.as_data())
+        .filter_map(email_from_der_bytes)
+        .collect();
+
+    if emails.iter().any(|e| e.eq_ignore_ascii_case(expected)) {
+        subfield("owner", emails.join(", "));
+    } else if emails.is_empty() {
+        subfield(
+            "owner",
+            "unknown (could not read embedded certificate)".to_string(),
+        );
+    } else {
+        cprintln!(
+            "      <yellow>owner mismatch: profile belongs to {}, signed in as {}</yellow>",
+            emails.join(", "),
+            expected
+        );
+    }
 }
 
 fn device_lines(paths: &Paths) {
@@ -174,7 +372,7 @@ fn device_lines(paths: &Paths) {
     if set.device.is_empty() {
         field2(
             "tracked devices",
-            "none (run `strudel device register`)".to_string(),
+            "none (run `strudel device add`)".to_string(),
         );
         return;
     }
@@ -187,12 +385,15 @@ fn device_lines(paths: &Paths) {
     }
 }
 
-fn header(title: &str, path: &Path) {
-    cprintln!(
-        "\n<bold,cyan>{}</bold,cyan>  <dim>{}</dim>",
-        title,
-        shorten(path)
-    );
+fn header(title: &str, path: Option<&Path>) {
+    match path {
+        Some(p) => cprintln!(
+            "<bold,cyan>{}</bold,cyan>  <dim>{}</dim>",
+            title,
+            shorten(p)
+        ),
+        None => cprintln!("<bold,cyan>{}</bold,cyan>", title),
+    }
 }
 
 fn field(label: &str, value: String) {
@@ -219,14 +420,30 @@ fn apple_id_from_cert(cert_der: &Path) -> Option<String> {
     if !cert_der.exists() {
         return None;
     }
+    email_from_der_bytes(&std::fs::read(cert_der).ok()?)
+}
+
+/// Extract the Apple ID email from a DER-encoded certificate's subject CN,
+/// e.g. `CN=iPhone Developer: you@example.com (XXXXXXXXXX)`.
+fn email_from_der_bytes(cert_der: &[u8]) -> Option<String> {
     // `sep_multiline` prints one RDN per line, so a comma inside the org name
     // can't be mistaken for an RDN separator when we pick out the CN.
-    let out = std::process::Command::new("openssl")
-        .args(["x509", "-inform", "DER", "-in"])
-        .arg(cert_der)
-        .args(["-noout", "-subject", "-nameopt", "sep_multiline"])
-        .output()
+    let mut child = std::process::Command::new("openssl")
+        .args([
+            "x509",
+            "-inform",
+            "DER",
+            "-noout",
+            "-subject",
+            "-nameopt",
+            "sep_multiline",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
         .ok()?;
+    child.stdin.take()?.write_all(cert_der).ok()?;
+    let out = child.wait_with_output().ok()?;
     if !out.status.success() {
         return None;
     }
