@@ -38,17 +38,17 @@ build_number = "1"
 # [build_env]
 # PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 
-# Signing identifiers. Can also be set via APPLE_SIGNING_IDENTITY / APPLE_TEAM_ID.
-# [signing]
-# identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
-# team_id  = "XXXXXXXXXX"
-
-# Notarization identifiers. Can also be set via APPLE_API_ISSUER / APPLE_API_KEY / APPLE_API_KEY_PATH.
-# [notarize]
-# api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-# api_key      = "2X9R4HXF34"
-# api_key_path = "AuthKey_2X9R4HXF34.p8"
-# timeout      = 600
+# Apple developer identifiers, used for signing, notarization, and
+# provisioning-profile management. Can also be set via env vars
+# (APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID, APPLE_API_ISSUER, APPLE_API_KEY,
+# APPLE_API_KEY_PATH).
+# [apple]
+# identity         = "Developer ID Application: Your Name (XXXXXXXXXX)"
+# team_id          = "XXXXXXXXXX"
+# api_issuer       = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+# api_key          = "2X9R4HXF34"
+# api_key_path     = "AuthKey_2X9R4HXF34.p8"
+# notarize_timeout = 600
 
 # DMG window configuration for `strudel release`.
 # A styled Finder window is applied by default. Uncomment [dmg] to override specific

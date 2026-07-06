@@ -21,15 +21,13 @@ pub const FULL: &str = indoc::indoc! {r#"
   archs = ["arm64", "x86_64"]
   target_name = "MyAppBin"
 
-  [signing]
+  [apple]
   identity = "Developer ID Application: Me (TEAM123456)"
   team_id = "TEAM123456"
-
-  [notarize]
   api_issuer = "issuer-uuid"
   api_key = "KEYID123"
   api_key_path = "AuthKey.p8"
-  timeout = 1200
+  notarize_timeout = 1200
 
   [dmg]
   background = "dmg-bg.png"

@@ -31,7 +31,9 @@ pub struct IosSection {
     pub app_icon_name: Option<String>,
 
     /// Provisioning backend: `"free"` (Apple ID, 7-day profiles) or
-    /// `"app_store_connect"` (paid account, default).
+    /// `"app_store_connect"` (paid account, default). The
+    /// `"app_store_connect"` backend authenticates with the `[apple]` API key
+    /// (`api_issuer`/`api_key`/`api_key_path`).
     pub provisioning: Option<IosProvisioningBackend>,
 
     /// Apple ID email for `provisioning = "free"`. Pre-fills the login prompt.

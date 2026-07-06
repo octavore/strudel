@@ -48,11 +48,11 @@ impl GlobalConfig {
         // relative paths are resolved relative to the config file's directory
         let dir = path.parent().unwrap_or(Path::new("."));
         Ok(Self {
-            signing_identity: file.signing.identity,
-            signing_team_id: file.signing.team_id,
-            notarize_api_issuer: file.notarize.api_issuer,
-            notarize_api_key: file.notarize.api_key,
-            notarize_api_key_path: file.notarize.api_key_path.map(|p| resolve_to(dir, p)),
+            signing_identity: file.apple.identity,
+            signing_team_id: file.apple.team_id,
+            notarize_api_issuer: file.apple.api_issuer,
+            notarize_api_key: file.apple.api_key,
+            notarize_api_key_path: file.apple.api_key_path.map(|p| resolve_to(dir, p)),
         })
     }
 }
@@ -63,13 +63,12 @@ pub const GLOBAL_CONFIG_TEMPLATE: &str = indoc::indoc! {r#"
     # Values here apply to every project on this machine. Each can be overridden
     # per-project in strudel.toml, or via the matching environment variable.
     #
-    # Signing identifiers — or set via APPLE_SIGNING_IDENTITY / APPLE_TEAM_ID.
-    [signing]
-    # identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
-    # team_id  = "XXXXXXXXXX"
-
-    # Notarization identifiers — or set via APPLE_API_*.
-    [notarize]
+    # Apple developer identifiers, shared by signing, notarization, and
+    # provisioning-profile management — or set via the matching env var
+    # (APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID, APPLE_API_*).
+    [apple]
+    # identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+    # team_id      = "XXXXXXXXXX"
     # api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     # api_key      = "YYYYYYYY"
     # api_key_path = "/Users/you/.private_keys/AuthKey_YYYYYYYY.p8"
@@ -81,21 +80,14 @@ pub const GLOBAL_CONFIG_TEMPLATE: &str = indoc::indoc! {r#"
 #[serde(deny_unknown_fields)]
 struct GlobalConfigFile {
     #[serde(default)]
-    signing: GlobalSigningSection,
-    #[serde(default)]
-    notarize: GlobalNotarizeSection,
+    apple: GlobalAppleSection,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct GlobalSigningSection {
+struct GlobalAppleSection {
     identity: Option<String>,
     team_id: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct GlobalNotarizeSection {
     api_issuer: Option<String>,
     api_key: Option<String>,
     api_key_path: Option<PathBuf>,
@@ -131,11 +123,9 @@ mod tests {
     #[test]
     fn parses_signing_and_notarize() {
         let (_dir, path) = write_temp(indoc::indoc! {r#"
-            [signing]
-            identity = "Developer ID Application: Me (ABC123)"
-            team_id  = "ABC123"
-
-            [notarize]
+            [apple]
+            identity     = "Developer ID Application: Me (ABC123)"
+            team_id      = "ABC123"
             api_issuer   = "iss-uuid"
             api_key      = "KEY123"
             api_key_path = "/abs/AuthKey.p8"
@@ -157,7 +147,7 @@ mod tests {
     #[test]
     fn relative_api_key_path_resolved_to_config_dir() {
         let (_dir, path) = write_temp(indoc::indoc! {r#"
-            [notarize]
+            [apple]
             api_key_path = "AuthKey.p8"
         "#});
         let g = GlobalConfig::load_from(&path).unwrap();
@@ -168,7 +158,7 @@ mod tests {
     #[test]
     fn tilde_in_api_key_path_is_expanded() {
         let (_dir, path) = write_temp(indoc::indoc! {r#"
-            [notarize]
+            [apple]
             api_key_path = "~/my_keys/AuthKey.p8"
         "#});
         let g = GlobalConfig::load_from(&path).unwrap();
@@ -183,7 +173,7 @@ mod tests {
     #[test]
     fn unknown_key_is_rejected() {
         let (_dir, path) = write_temp(indoc::indoc! {r#"
-            [signing]
+            [apple]
             typo_key = "oops"
         "#});
         assert!(GlobalConfig::load_from(&path).is_err());

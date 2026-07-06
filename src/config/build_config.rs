@@ -61,10 +61,7 @@ pub struct SingleBuildConfig {
     pub dmg: Option<DmgSection>,
 
     #[serde(default)]
-    pub signing: SigningSection,
-
-    #[serde(default)]
-    pub notarize: NotarizeSection,
+    pub apple: AppleSection,
 }
 
 /// Multi-target form: one `[[target]]` per app/platform pair.
@@ -78,10 +75,7 @@ pub struct MultiBuildConfig {
     pub ios: Option<IosSection>,
 
     #[serde(default)]
-    pub signing: SigningSection,
-
-    #[serde(default)]
-    pub notarize: NotarizeSection,
+    pub apple: AppleSection,
 }
 
 impl BuildConfig {
@@ -106,8 +100,7 @@ impl BuildConfig {
                     build,
                     extensions,
                     dmg,
-                    signing,
-                    notarize,
+                    apple,
                 } = single;
                 let target = BuildTarget {
                     app,
@@ -116,28 +109,15 @@ impl BuildConfig {
                     platform: TargetPlatform::Macos { dmg },
                 };
                 vec![resolve_target(
-                    target, &signing, &notarize, None, true, config_dir, global,
+                    target, &apple, None, true, config_dir, global,
                 )?]
             },
             BuildConfig::Multi(multi) => {
-                let MultiBuildConfig {
-                    target,
-                    ios,
-                    signing,
-                    notarize,
-                } = multi;
+                let MultiBuildConfig { target, ios, apple } = multi;
                 target
                     .into_iter()
                     .map(|t| {
-                        resolve_target(
-                            t,
-                            &signing,
-                            &notarize,
-                            ios.as_ref(),
-                            false,
-                            config_dir,
-                            global,
-                        )
+                        resolve_target(t, &apple, ios.as_ref(), false, config_dir, global)
                     })
                     .collect::<Result<Vec<_>>>()?
             },
@@ -158,8 +138,7 @@ impl BuildConfig {
 
 fn resolve_target(
     target: BuildTarget,
-    signing: &SigningSection,
-    notarize: &NotarizeSection,
+    apple: &AppleSection,
     shared_ios: Option<&IosSection>,
     is_single: bool,
     config_dir: &Path,
@@ -252,22 +231,22 @@ fn resolve_target(
         }),
         // Identifiers: env var > strudel.toml > global config.
         sign_identity: env_or_global(
-            signing.identity.clone(),
+            apple.identity.clone(),
             global.signing_identity.clone(),
             "APPLE_SIGNING_IDENTITY",
         ),
         team_id: env_or_global(
-            signing.team_id.clone(),
+            apple.team_id.clone(),
             global.signing_team_id.clone(),
             "APPLE_TEAM_ID",
         ),
         apple_api_issuer: env_or_global(
-            notarize.api_issuer.clone(),
+            apple.api_issuer.clone(),
             global.notarize_api_issuer.clone(),
             "APPLE_API_ISSUER",
         ),
         apple_api_key: env_or_global(
-            notarize.api_key.clone(),
+            apple.api_key.clone(),
             global.notarize_api_key.clone(),
             "APPLE_API_KEY",
         ),
@@ -276,7 +255,7 @@ fn resolve_target(
         apple_api_key_path: std::env::var("APPLE_API_KEY_PATH")
             .ok()
             .map(PathBuf::from)
-            .or_else(|| notarize.api_key_path.clone())
+            .or_else(|| apple.api_key_path.clone())
             .map(|p| resolve_to(config_dir, p))
             .or_else(|| global.notarize_api_key_path.clone()),
         // Secrets: environment only. These are never deserialized from the file.
@@ -286,7 +265,7 @@ fn resolve_target(
         apple_certificate_password: std::env::var("APPLE_CERTIFICATE_PASSWORD")
             .unwrap_or_default()
             .into(),
-        notarize_timeout: notarize.timeout.unwrap_or(600),
+        notarize_timeout: apple.notarize_timeout.unwrap_or(600),
         build_env: build.build_env.unwrap_or_default(),
         embed_libs: build
             .embed_libs
@@ -316,27 +295,22 @@ fn resolve_target(
     })
 }
 
-/// `[signing]` Non-secret signing identifiers. Each may also come from the
-/// matching env var (`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`); the env var
-/// takes precedence when both are set.
+/// `[apple]` Non-secret Apple developer identifiers, shared by signing,
+/// notarization, and provisioning-profile management (the App Store Connect
+/// API key authenticates all three). Each may also come from the matching
+/// env var (`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`, `APPLE_API_ISSUER`,
+/// `APPLE_API_KEY`, `APPLE_API_KEY_PATH`); the env var takes precedence when
+/// both are set. Secrets (`APPLE_CERTIFICATE*`) are read from the
+/// environment only.
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct SigningSection {
+pub struct AppleSection {
     pub identity: Option<String>,
     pub team_id: Option<String>,
-}
-
-/// `[notarize]` Non-secret notarization identifiers. Each may also come from
-/// the matching env var (`APPLE_API_ISSUER`, `APPLE_API_KEY`,
-/// `APPLE_API_KEY_PATH`); the env var takes precedence when both are set.
-/// Secrets (`APPLE_CERTIFICATE*`) are read from the environment only.
-#[derive(Debug, Default, Deserialize, Clone)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct NotarizeSection {
     pub api_issuer: Option<String>,
     pub api_key: Option<String>,
     pub api_key_path: Option<PathBuf>,
-    pub timeout: Option<u64>,
+    pub notarize_timeout: Option<u64>,
 }
 
 /// App Store Connect API key credentials for `notarytool`.
@@ -385,17 +359,15 @@ pub fn generate_initial_toml(
         # Required for certain entitlements (e.g. push notifications, iCloud).
         # provisioning_profile   = "{app_name}.provisionprofile"
 
-        # Signing identifiers, can also be set via env vars.
-        # [signing]
-        # identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
-        # team_id  = "XXXXXXXXXX"
-
-        # Notarization identifiers, can also be set via env vars.
-        # [notarize]
-        # api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        # api_key      = "2X9R4HXF34"
-        # api_key_path = "AuthKey_2X9R4HXF34.p8"
-        # timeout      = 600
+        # Apple developer identifiers, used for signing, notarization, and
+        # provisioning-profile management. Can also be set via env vars.
+        # [apple]
+        # identity         = "Developer ID Application: Your Name (XXXXXXXXXX)"
+        # team_id          = "XXXXXXXXXX"
+        # api_issuer       = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        # api_key          = "2X9R4HXF34"
+        # api_key_path     = "AuthKey_2X9R4HXF34.p8"
+        # notarize_timeout = 600
 
         # This is the single-target (macOS-only) form. For iOS, or for more than
         # one target, switch to `[[target]]` blocks — see the README.
@@ -469,11 +441,11 @@ mod tests {
             Some(&["arm64".into(), "x86_64".into()][..])
         );
         assert_eq!(
-            single.signing.identity.as_deref(),
+            single.apple.identity.as_deref(),
             Some("Developer ID Application: Me (TEAM123456)")
         );
-        assert_eq!(single.notarize.api_key.as_deref(), Some("KEYID123"));
-        assert_eq!(single.notarize.timeout, Some(1200));
+        assert_eq!(single.apple.api_key.as_deref(), Some("KEYID123"));
+        assert_eq!(single.apple.notarize_timeout, Some(1200));
         let dmg = single.dmg.as_ref().expect("FULL fixture includes [dmg]");
         assert_eq!(dmg.window_width, Some(800));
         assert_eq!(dmg.icon_size, Some(100));
@@ -493,8 +465,8 @@ mod tests {
             panic!("expected single-target config");
         };
         assert!(single.build.source_dir.is_none());
-        assert!(single.signing.identity.is_none());
-        assert!(single.notarize.timeout.is_none());
+        assert!(single.apple.identity.is_none());
+        assert!(single.apple.notarize_timeout.is_none());
     }
 
     #[test]
@@ -517,7 +489,7 @@ mod tests {
             version = "1"
             build_number = "1"
 
-            [signing]
+            [apple]
             sign_identity = "z"
         "#});
         assert!(err.is_err(), "typo'd key should be rejected");
@@ -556,7 +528,7 @@ mod tests {
             [build]
             entitlements_json_path = "~/my/ent.json"
 
-            [notarize]
+            [apple]
             api_key_path = "~/my/AuthKey.p8"
         "#})
         .unwrap();
@@ -911,7 +883,7 @@ mod tests {
     #[test]
     fn neither_app_nor_target_is_error() {
         let err = parse_build_config(indoc! { r#"
-            [signing]
+            [apple]
             identity = "x"
         "#});
         assert!(

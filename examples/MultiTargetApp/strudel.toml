@@ -4,17 +4,15 @@
 #   - macOS: `strudel bundle / build / release`
 #   - iOS:   `strudel sim / device`
 #
-# [signing] and [notarize] are shared across all targets. Per-target settings
-# live inside each [[target]] block.
+# [apple] is shared across all targets. Per-target settings live inside each
+# [[target]] block.
 #
-# Signing & notarization — identifiers here or in the environment;
-# secrets (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD) in the environment only.
-
-[signing]
-# identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
-# team_id  = "XXXXXXXXXX"
-
-[notarize]
+# Apple developer identifiers — used for signing, notarization, and
+# provisioning-profile management. Set here or in the environment; secrets
+# (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD) in the environment only.
+[apple]
+# identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+# team_id      = "XXXXXXXXXX"
 # api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 # api_key      = "2X9R4HXF34"
 # api_key_path = "AuthKey_2X9R4HXF34.p8"
