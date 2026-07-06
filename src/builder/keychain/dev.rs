@@ -1,7 +1,7 @@
 //! Persistent keychain for a free-provisioning development identity. Unlike the
 //! ephemeral [`super::temp`] keychain, this one is kept across builds (and left
 //! in the user search list) so the self-generated cert can be reused until it
-//! expires. Only [`crate::freeprov`] calls into here.
+//! expires. Only [`crate::apple::provisioning`] calls into here.
 
 use std::fs;
 use std::path::Path;

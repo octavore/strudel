@@ -1,8 +1,7 @@
-mod appstore;
+mod apple;
 mod builder;
 mod config;
 mod devices;
-mod freeprov;
 mod help;
 mod icns;
 mod init;
@@ -17,6 +16,7 @@ use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 use color_print::{ceprintln, cprintln};
 
+use crate::apple::provisioning;
 use crate::builder::{IosBuilder, MacosBuilder};
 use crate::config::{
     GLOBAL_CONFIG_TEMPLATE, GlobalConfig, Platform, ResolvedConfig, ResolvedProject,
@@ -190,7 +190,7 @@ impl Cli {
                         })
                     }),
                 };
-                freeprov::login(apple_id_email)?;
+                provisioning::login(apple_id_email)?;
             },
             Cmd::Login(LoginArgs {
                 command: Some(LoginCmd::Status),
@@ -202,7 +202,7 @@ impl Cli {
                 command: Some(LoginCmd::Clear),
                 ..
             }) => {
-                freeprov::logout()?;
+                provisioning::logout()?;
             },
             Cmd::Config { command } => match command {
                 ConfigCmd::Edit => {

@@ -6,7 +6,8 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 
-use crate::appstore::AppStoreClient;
+use crate::apple::appstore::AppStoreClient;
+use crate::apple::provisioning;
 use crate::builder::{IosBuilder, step};
 use crate::config::IosProvisioningBackend;
 use crate::devices::DeviceSet;
@@ -110,7 +111,7 @@ impl IosBuilder {
             cprintln!(
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
             );
-            return crate::freeprov::auto_fetch_profile(&self.cfg, &self.paths);
+            return provisioning::auto_fetch_profile(&self.cfg, &self.paths);
         }
 
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;

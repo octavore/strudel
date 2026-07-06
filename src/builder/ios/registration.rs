@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use serde::Deserialize;
 
-use crate::appstore::AppStoreClient;
+use crate::apple::appstore::AppStoreClient;
 use crate::builder::{IosBuilder, step};
 use crate::config::IosProvisioningBackend;
 use crate::devices::DeviceSet;
@@ -116,7 +116,7 @@ impl IosBuilder {
             );
             for (udid, name) in &to_register {
                 step(&format!("Registering {name} ({udid}) via Apple ID..."));
-                crate::freeprov::register_device(&self.cfg, name, udid)?;
+                crate::provisioning::register_device(&self.cfg, name, udid)?;
                 device_set.upsert(name.clone(), udid.clone());
             }
         } else {

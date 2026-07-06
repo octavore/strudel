@@ -4,11 +4,11 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 
+use crate::apple::provisioning::{self, ensure_keychain_ready};
 use crate::builder::ios::IosTarget;
 use crate::builder::ios::profile::decode_profile;
 use crate::builder::{IosBuilder, step};
 use crate::config::IosProvisioningBackend;
-use crate::freeprov::ensure_keychain_ready;
 use crate::shell::ShellCommand;
 
 impl IosBuilder {
@@ -89,7 +89,7 @@ impl IosBuilder {
         if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) && !self.dry_run {
             ensure_keychain_ready()?;
             if self.cfg.sign_identity.is_empty() {
-                dev_fp = crate::freeprov::dev_cert_sha1()?;
+                dev_fp = provisioning::dev_cert_sha1()?;
             }
         }
 
