@@ -61,7 +61,7 @@ pub(super) fn derive_x(password: &str, salt: &[u8], iterations: u32, method: &st
     let pw_input: Vec<u8> = if method == "s2k_fo" {
         pw_hash
             .iter()
-            .map(|b| format!("{b:02X}"))
+            .map(|b| format!("{b:02x}"))
             .collect::<String>()
             .into_bytes()
     } else {
