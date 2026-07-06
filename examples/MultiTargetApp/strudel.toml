@@ -51,4 +51,3 @@ build.entitlements_json_path = "entitlements-ios.json"
 build.info_json_path         = "info-ios.json"
 
 ios.deployment_target = "18.0"
-ios.assets_dir        = "Sources/MultiTargetAppMobile/Assets.xcassets"
