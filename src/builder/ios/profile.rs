@@ -41,16 +41,6 @@ impl IosBuilder {
         }
 
         self.auto_fetch_profile()?;
-
-        println!();
-        cprintln!(
-            "<green>Done!</green> Profile written to {}",
-            cached.display()
-        );
-        cprintln!(
-            "<dim>Tip: to pin this profile explicitly, add to strudel.toml:\n  [build]\n  provisioning_profile = \"{}\"</dim>",
-            cached.display()
-        );
         Ok(())
     }
 
