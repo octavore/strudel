@@ -77,16 +77,20 @@ pub fn import_dev_cert(cert_der: &[u8], key_pem: &[u8], keychain_db: &Path) -> R
         .output()
         .ok();
 
-    let status = std::process::Command::new("security")
+    // Only surface stderr only on failure.
+    let out = std::process::Command::new("security")
         .args(["unlock-keychain", "-p", DEV_KC_PASSWORD, kc_str])
-        .status()
+        .output()
         .context("unlocking dev keychain")?;
-    if !status.success() {
-        bail!("security unlock-keychain failed for {kc_str}");
+    if !out.status.success() {
+        bail!(
+            "security unlock-keychain failed for {kc_str}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
 
     let p12_str = p12_path.to_str().unwrap();
-    let status = std::process::Command::new("security")
+    let out = std::process::Command::new("security")
         .args([
             "import",
             p12_str,
@@ -100,14 +104,17 @@ pub fn import_dev_cert(cert_der: &[u8], key_pem: &[u8], keychain_db: &Path) -> R
             "-k",
             kc_str,
         ])
-        .status()
+        .output()
         .context("importing PKCS#12 into dev keychain")?;
-    if !status.success() {
-        bail!("security import failed");
+    if !out.status.success() {
+        bail!(
+            "security import failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
 
     // Allow codesign to use the key without an interactive prompt.
-    std::process::Command::new("security")
+    let out = std::process::Command::new("security")
         .args([
             "set-key-partition-list",
             "-S",
@@ -117,8 +124,14 @@ pub fn import_dev_cert(cert_der: &[u8], key_pem: &[u8], keychain_db: &Path) -> R
             DEV_KC_PASSWORD,
             kc_str,
         ])
-        .status()
+        .output()
         .context("setting key partition list on dev keychain")?;
+    if !out.status.success() {
+        bail!(
+            "security set-key-partition-list failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
 
     Ok(())
 }
@@ -142,9 +155,15 @@ pub fn ensure_keychain_in_search_list(keychain_db: &Path) -> Result<()> {
         .collect();
     let mut args = vec!["list-keychains", "-d", "user", "-s", kc_str];
     args.extend(existing_keychains);
-    std::process::Command::new("security")
+    let out = std::process::Command::new("security")
         .args(&args)
-        .status()
+        .output()
         .context("adding dev keychain to search list")?;
+    if !out.status.success() {
+        bail!(
+            "security list-keychains failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
     Ok(())
 }
