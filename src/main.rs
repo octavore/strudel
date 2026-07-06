@@ -142,7 +142,7 @@ impl Cli {
                 )?;
             },
             Cmd::Device(DeviceArgs {
-                command: Some(DeviceCmd::Register { devices, dry_run }),
+                command: Some(DeviceCmd::Add { devices, dry_run }),
                 ..
             }) => {
                 let project = config::load_config(&cli.config)?;
@@ -151,7 +151,27 @@ impl Cli {
                     cli.target.as_deref(),
                     Platform::Ios,
                     false,
-                    |cfg| IosBuilder::new(cfg.clone(), dry_run, false)?.device_register(&devices),
+                    |cfg| IosBuilder::new(cfg.clone(), dry_run, false)?.device_add(&devices),
+                )?;
+            },
+            Cmd::Device(DeviceArgs {
+                command:
+                    Some(DeviceCmd::Register {
+                        udid,
+                        name,
+                        dry_run,
+                    }),
+                ..
+            }) => {
+                let project = config::load_config(&cli.config)?;
+                for_each_selected(
+                    &project,
+                    cli.target.as_deref(),
+                    Platform::Ios,
+                    false,
+                    |cfg| {
+                        IosBuilder::new(cfg.clone(), dry_run, false)?.device_register(&name, &udid)
+                    },
                 )?;
             },
             Cmd::Profile { dry_run, force } => {
@@ -284,7 +304,7 @@ enum Cmd {
         simulator: Option<String>,
     },
     /// Build for a connected iOS device, then install and launch.
-    /// Run `strudel device register` first to register your device(s).
+    /// Run `strudel device add` first to register your device(s).
     #[command(args_conflicts_with_subcommands = true)]
     Device(DeviceArgs),
     /// Fetch (or refresh) the development provisioning profile for iOS device
@@ -369,13 +389,28 @@ pub struct DeviceArgs {
 
 #[derive(Subcommand)]
 enum DeviceCmd {
-    /// Register connected iOS devices on the App Store Connect portal and
-    /// track them in .strudel/devices.toml
-    Register {
-        /// Device name or UDID to register (may be repeated; default: all
+    /// Register connected iOS devices on the portal (if not already) and
+    /// track them in .strudel/devices.toml. This is the common workflow for
+    /// adding a device you have plugged in.
+    Add {
+        /// Device name or UDID to add (may be repeated; default: all
         /// connected devices)
         #[arg(long = "device")]
         devices: Vec<String>,
+        /// Print commands without executing them
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Register a single device on the portal by UDID, without tracking it in
+    /// .strudel/devices.toml. Use this to register a device you don't have
+    /// connected (e.g. a teammate's); use `device add` otherwise.
+    Register {
+        /// Device UDID
+        #[arg(long)]
+        udid: String,
+        /// Device name
+        #[arg(long)]
+        name: String,
         /// Print commands without executing them
         #[arg(long)]
         dry_run: bool,

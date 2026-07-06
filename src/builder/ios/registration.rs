@@ -49,11 +49,9 @@ struct DevicectlDeviceProperties {
 }
 
 impl IosBuilder {
-    /// Register connected iOS devices on the portal and record them in
-    /// `.strudel/devices.toml`.
-    pub fn device_register(&self, device_selectors: &[String]) -> Result<()> {
-        let ios_settings = &self.ios;
-
+    /// Register connected iOS devices on the portal (if not already) and
+    /// record them in `.strudel/devices.toml`.
+    pub fn device_add(&self, device_selectors: &[String]) -> Result<()> {
         let connected = self.list_connected_devices()?;
 
         if connected.is_empty() {
@@ -93,7 +91,7 @@ impl IosBuilder {
             if filtered.is_empty() {
                 bail!(
                     "None of the connected devices match the given selectors.\n\
-                     Run `strudel device register` without `--device` to register \
+                     Run `strudel device add` without `--device` to register \
                      all connected devices."
                 );
             }
@@ -108,52 +106,12 @@ impl IosBuilder {
             return Ok(());
         }
 
+        self.register_on_portal(&to_register)?;
+
         let mut device_set = DeviceSet::load(&self.paths.devices_toml)?;
-
-        if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) {
-            cprintln!(
-                "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
-            );
-            for (udid, name) in &to_register {
-                step(&format!("Registering {name} ({udid}) via Apple ID..."));
-                crate::provisioning::register_device(&self.cfg, name, udid)?;
-                device_set.upsert(name.clone(), udid.clone());
-            }
-        } else {
-            let client = AppStoreClient::from_config(&self.cfg)?;
-            let portal_devices = client.list_devices()?;
-
-            for (udid, name) in &to_register {
-                let already_on_portal = portal_devices.iter().any(|d| d.udid == *udid);
-                if already_on_portal {
-                    cprintln!("<dim>Already registered on portal:</dim> {name} ({udid})");
-                } else {
-                    step(&format!("Registering {name} ({udid}) on portal..."));
-                    match client.register_device(name, udid) {
-                        Ok(_) => {},
-                        Err(e) => {
-                            // A 409 means the device is already on the portal; treat as success.
-                            if !format!("{e}").contains("409") {
-                                if format!("{e}").contains("403") {
-                                    cprintln!(
-                                        "<red>error:</red> Insufficient permissions to register device {name} ({udid}). \
-                                         Admin role is required to be able to register devices on the App Store Connect portal."
-                                    );
-                                } else {
-                                    cprintln!(
-                                        "<red>error:</red> Failed to register device {name} ({udid}): {e}"
-                                    );
-                                }
-                                return Err(e);
-                            }
-                            cprintln!("<dim>Already registered (portal conflict):</dim> {name}");
-                        },
-                    }
-                }
-                device_set.upsert(name.clone(), udid.clone());
-            }
+        for (udid, name) in &to_register {
+            device_set.upsert(name.clone(), udid.clone());
         }
-
         ensure_strudel_dir(&self.paths.strudel_dir)?;
         device_set.save(&self.paths.devices_toml)?;
 
@@ -166,6 +124,72 @@ impl IosBuilder {
              Run `strudel device` to build and install.",
             to_register.len()
         );
+        Ok(())
+    }
+
+    /// Register a single device on the portal by UDID/name, without tracking
+    /// it in `.strudel/devices.toml`. For registering a device you don't have
+    /// connected locally (e.g. a teammate's).
+    pub fn device_register(&self, name: &str, udid: &str) -> Result<()> {
+        if self.dry_run {
+            cprintln!("<dim>[dry-run]</dim> Would register {name} ({udid}) on portal");
+            return Ok(());
+        }
+
+        self.register_on_portal(&[(udid.to_string(), name.to_string())])?;
+
+        cprintln!("\n<green>Done!</green> Registered {name} ({udid}) on the portal.");
+        Ok(())
+    }
+
+    /// Register `(udid, name)` pairs on the portal (App Store Connect API or
+    /// Apple ID, per `[ios] provisioning`), tolerating devices already
+    /// registered there.
+    fn register_on_portal(&self, devices: &[(String, String)]) -> Result<()> {
+        let ios_settings = &self.ios;
+
+        if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) {
+            cprintln!(
+                "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
+            );
+            for (udid, name) in devices {
+                step(&format!("Registering {name} ({udid}) via Apple ID..."));
+                crate::apple::provisioning::register_device(&self.cfg, name, udid)?;
+            }
+        } else {
+            let client = AppStoreClient::from_config(&self.cfg)?;
+            let portal_devices = client.list_devices()?;
+
+            for (udid, name) in devices {
+                let already_on_portal = portal_devices.iter().any(|d| d.udid == *udid);
+                if already_on_portal {
+                    cprintln!("<dim>Already registered on portal:</dim> {name} ({udid})");
+                    continue;
+                }
+                step(&format!("Registering {name} ({udid}) on portal..."));
+                match client.register_device(name, udid) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        // A 409 means the device is already on the portal; treat as success.
+                        if !format!("{e}").contains("409") {
+                            if format!("{e}").contains("403") {
+                                cprintln!(
+                                    "<red>error:</red> Insufficient permissions to register device {name} ({udid}). \
+                                     Admin role is required to be able to register devices on the App Store Connect portal."
+                                );
+                            } else {
+                                cprintln!(
+                                    "<red>error:</red> Failed to register device {name} ({udid}): {e}"
+                                );
+                            }
+                            return Err(e);
+                        }
+                        cprintln!("<dim>Already registered (portal conflict):</dim> {name}");
+                    },
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -185,7 +209,7 @@ impl IosBuilder {
                     Some(udid) => udids.push(udid.to_string()),
                     None => bail!(
                         "Device {:?} is not tracked in .strudel/devices.toml.\n\
-                         Run `strudel device register` to register your device(s).",
+                         Run `strudel device add` to register your device(s).",
                         selector
                     ),
                 }
@@ -198,7 +222,7 @@ impl IosBuilder {
                 Some(udid) => Ok(vec![udid.to_string()]),
                 None => bail!(
                     "Device {:?} (from [ios] config) is not tracked in .strudel/devices.toml.\n\
-                     Run `strudel device register` to register your device(s).",
+                     Run `strudel device add` to register your device(s).",
                     selector
                 ),
             };
@@ -226,7 +250,7 @@ impl IosBuilder {
         for (udid, name) in &unregistered {
             cprintln!(
                 "<dim>Skipping untracked device {name} ({udid}) — run \
-                 `strudel device register` to add it.</dim>"
+                 `strudel device add` to add it.</dim>"
             );
         }
 
@@ -349,7 +373,7 @@ fn resolve_connected(
     let resolution = match registered.len() {
         0 => bail!(
             "No connected devices are tracked in .strudel/devices.toml.\n\
-             Run `strudel device register` to register your device(s)."
+             Run `strudel device add` to register your device(s)."
         ),
         1 => {
             let (udid, name) = registered.into_iter().next().unwrap();

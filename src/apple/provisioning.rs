@@ -103,7 +103,7 @@ pub fn auto_fetch_profile(cfg: &ResolvedConfig, paths: &Paths) -> Result<()> {
     if device_set.device.is_empty() {
         bail!(
             "No devices tracked in .strudel/devices.toml.\n\
-             Run `strudel device register` to register your device(s)."
+             Run `strudel device add` to register your device(s)."
         );
     }
     let udids: Vec<&str> = device_set.device.iter().map(|d| d.udid.as_str()).collect();

@@ -118,7 +118,7 @@ impl IosBuilder {
         if device_set.device.is_empty() {
             bail!(
                 "No devices are tracked in .strudel/devices.toml.\n\
-                 Run `strudel device register` first to register your device(s)."
+                 Run `strudel device add` first to register your device(s)."
             );
         }
 
@@ -155,7 +155,7 @@ impl IosBuilder {
                 None => bail!(
                     "Device {} ({}) is in .strudel/devices.toml but not found on the \
                      App Store Connect portal.\n\
-                     Run `strudel device register` to re-register your devices.",
+                     Run `strudel device add` to re-register your devices.",
                     tracked.name,
                     tracked.udid
                 ),
