@@ -34,9 +34,14 @@ impl AnisetteProvider {
                     "AOSUtilities does not respond to +retrieveOTPHeadersForDSID: on this macOS version"
                 );
             }
+            // AOSKit sometimes returns a partial OTP dict (missing X-Apple-MD) on
+            // the first call right after the frameworks are loaded. We might need to retry
+            // a few times if we see this causing an error (i.e. if sending GSA a request
+            // with an incomplete identity is rejected)
             let otp_result: Option<Retained<AnyObject>> =
                 objc2::msg_send![aos_cls, retrieveOTPHeadersForDSID: &*dsid_ns];
             let otp_dict = otp_result.context("retrieveOTPHeadersForDSID: returned nil")?;
+
             // OTP headers: only available when the account is registered with
             // AOSKit (i.e. signed in via System Settings > Apple Account).
             // Omit them silently rather than failing — Apple may accept the
