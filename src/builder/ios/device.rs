@@ -81,22 +81,24 @@ impl IosBuilder {
         step("Embedding provisioning profile...");
         self.copy_file(&profile_path, &app_bundle.join("embedded.mobileprovision"))?;
 
-        // For free provisioning, sign with the exact certificate we issued,
-        // identified by SHA-1, rather than the ambiguous "Apple Development"
-        // name: the login keychain may still hold older/revoked "Apple
-        // Development" certs that would otherwise be picked instead.
+        // For free provisioning, always sign with the exact certificate we
+        // issued, identified by SHA-1, ignoring any configured
+        // `sign_identity`: free provisioning mints and manages its own
+        // certificate, so a `sign_identity` set for other purposes (e.g. a
+        // macOS Developer ID default inherited from the global config) does
+        // not apply here and would otherwise be picked instead, only to be
+        // rejected by the profile.
         let mut dev_fp = None;
         if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) && !self.dry_run {
             ensure_keychain_ready()?;
-            if self.cfg.sign_identity.is_empty() {
-                dev_fp = provisioning::dev_cert_sha1()?;
-            }
+            dev_fp = provisioning::dev_cert_sha1()?;
         }
 
         step("Signing device bundle...");
+        let is_free = matches!(ios_settings.provisioning, IosProvisioningBackend::Free);
         let identity = if let Some(fp) = &dev_fp {
             fp.as_str()
-        } else if self.cfg.sign_identity.is_empty() {
+        } else if is_free || self.cfg.sign_identity.is_empty() {
             "Apple Development"
         } else {
             &self.cfg.sign_identity
