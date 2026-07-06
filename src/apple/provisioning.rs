@@ -41,7 +41,32 @@ pub fn login(apple_id_email: Option<String>) -> Result<()> {
         "<dim>Free provisioning: 7-day profiles, max 3 devices, max 10 App IDs.\n\
          For unlimited, use a paid account + App Store Connect.</dim>"
     );
+    nudge_device_registration(&apple_id, &session);
     Ok(())
+}
+
+/// After a successful sign-in, check whether the account's team has any
+/// devices registered on the Apple developer portal, and if not, point at
+/// `strudel device add`. Best-effort: a network/auth error here
+/// shouldn't fail `login` itself, since sign-in already succeeded.
+fn nudge_device_registration(apple_id: &AppleId, session: &Session) {
+    let result = pick_team(apple_id, session).and_then(|team| {
+        apple_id
+            .list_devices(session, &team.id)
+            .with_context(|| format!("listing devices for team {}", team.name))
+    });
+    match result {
+        Ok(devices) if devices.is_empty() => {
+            cprintln!(
+                "<dim>No devices registered on this account yet. Run \
+                 `strudel device add` to register your device(s).</dim>"
+            );
+        },
+        Ok(_) => {},
+        Err(e) => {
+            cprintln!("<yellow>Could not check registered devices: {e}</yellow>");
+        },
+    }
 }
 
 /// Clear the persisted session and cached credentials.
@@ -140,7 +165,12 @@ pub fn auto_fetch_profile(cfg: &ResolvedConfig, paths: &Paths) -> Result<()> {
                     .context("reading revoke confirmation")
             },
         )
-        .context("Failed to fetch development profile")?;
+        .with_context(|| {
+            format!(
+                "Failed to fetch development profile for team \"{}\" ({})",
+                team.name, team.id
+            )
+        })?;
 
     ensure_strudel_dir(&paths.strudel_dir)?;
     std::fs::write(&paths.cached_profile, &profile.mobileprovision)
