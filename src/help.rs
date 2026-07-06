@@ -920,7 +920,8 @@ fn print_ios_free_provisioning() {
         {ANSI_BLUE}
         strudel login                        # interactive sign-in
         strudel login --apple-id you@ex.com  # pre-fill the email
-        strudel logout                       # clear session and cached credentials
+        strudel login clear                  # clear session and cached credentials
+        strudel login status                 # show login + provisioning state
         {ANSI_RESET}
         The session token expires. If a `strudel device` run fails with an auth
         error, re-run `strudel login`.

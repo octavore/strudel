@@ -169,7 +169,11 @@ pub fn login(
             .context("missing c in decrypted spd")?;
         let gs_token = fetch_app_token(agent, anisette, &dsid, &idms_token, sk, c)?;
 
-        return Ok(Session { dsid, gs_token });
+        return Ok(Session {
+            apple_id: apple_id.to_string(),
+            dsid,
+            gs_token,
+        });
     }
     unreachable!("login loop always returns or bails within 2 attempts")
 }
@@ -486,10 +490,12 @@ mod tests {
         let s = Session {
             dsid: "12345678".to_string(),
             gs_token: "tok_abc123".to_string(),
+            apple_id: "me@example.com".to_string(),
         };
         let json = serde_json::to_string(&s).unwrap();
         let s2: Session = serde_json::from_str(&json).unwrap();
         assert_eq!(s2.dsid, s.dsid);
         assert_eq!(s2.gs_token, s.gs_token);
+        assert_eq!(s2.apple_id, s.apple_id);
     }
 }

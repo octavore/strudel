@@ -129,11 +129,7 @@ impl AppStoreClient {
             .context("Failed to parse API response")
     }
 
-    fn post_json<B: Serialize, T: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> Result<T> {
+    fn post_json<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T> {
         let url = format!("https://api.appstoreconnect.apple.com{path}");
         let token = self.bearer_token()?;
         let mut resp = self

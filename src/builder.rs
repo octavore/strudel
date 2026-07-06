@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use color_print::{cformat, cprintln};
 use indoc::formatdoc;
+pub(crate) use ios::decode_profile;
 
 use crate::config::{
     ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform,

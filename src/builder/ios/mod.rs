@@ -13,6 +13,8 @@ mod profile;
 mod registration;
 mod sim;
 
+pub use profile::decode_profile;
+
 /// Simulator or device target — selects the SDK, triple suffix, and
 /// platform keys that go into the iOS `Info.plist`.
 enum IosTarget {

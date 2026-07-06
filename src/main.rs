@@ -8,6 +8,7 @@ mod icns;
 mod init;
 mod paths;
 mod shell;
+mod status;
 
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -174,23 +175,33 @@ impl Cli {
             Cmd::MakeIcns { png, icns } => {
                 icns::make_icns(&png, &icns, false)?;
             },
-            Cmd::Login { apple_id } => {
+            Cmd::Login(LoginArgs {
+                command: None,
+                apple_id,
+            }) => {
                 // If no --apple-id flag, try reading it from [ios] apple_id in
                 // strudel.toml (best-effort; not required for login to work).
-                let from_config = if apple_id.is_none() {
-                    config::load_config(&cli.config).ok().and_then(|p| {
+                let apple_id_email = match apple_id.as_deref() {
+                    Some(id) => Some(id.to_string()),
+                    None => config::load_config(&cli.config).ok().and_then(|p| {
                         p.targets.into_iter().find_map(|t| match t.target_platform {
                             ResolvedTargetPlatform::Ios(ref ios) => ios.apple_id.clone(),
                             _ => None,
                         })
-                    })
-                } else {
-                    None
+                    }),
                 };
-                let hint = apple_id.as_deref().or(from_config.as_deref());
-                freeprov::login(hint)?;
+                freeprov::login(apple_id_email)?;
             },
-            Cmd::Logout => {
+            Cmd::Login(LoginArgs {
+                command: Some(LoginCmd::Status),
+                ..
+            }) => {
+                status::run(&cli.config, cli.target.as_deref())?;
+            },
+            Cmd::Login(LoginArgs {
+                command: Some(LoginCmd::Clear),
+                ..
+            }) => {
                 freeprov::logout()?;
             },
             Cmd::Config { command } => match command {
@@ -309,18 +320,34 @@ enum Cmd {
     /// Sign in with an Apple ID for free iOS provisioning (7-day profiles,
     /// max 3 devices). Saves the session to ~/.local/share/strudel/.
     /// Set [ios] provisioning = "free" in strudel.toml to enable.
-    Login {
-        /// Apple ID email address (prompted if omitted)
-        #[arg(long)]
-        apple_id: Option<String>,
-    },
-    /// Sign out and clear the saved Apple ID session and cached dev credentials
-    Logout,
+    #[command(args_conflicts_with_subcommands = true)]
+    Login(LoginArgs),
     /// Manage global strudel config (~/.config/strudel/config.toml)
     Config {
         #[command(subcommand)]
         command: ConfigCmd,
     },
+}
+
+#[derive(clap::Args)]
+pub struct LoginArgs {
+    #[command(subcommand)]
+    command: Option<LoginCmd>,
+
+    /// Apple ID email address (prompted if omitted)
+    #[arg(long)]
+    apple_id: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum LoginCmd {
+    /// Show the current login and provisioning state: global config, the
+    /// saved Apple ID session, cached dev credentials, and per-target
+    /// provisioning
+    Status,
+    /// Sign out and clear the saved Apple ID session and cached dev
+    /// credentials
+    Clear,
 }
 
 #[derive(clap::Args)]

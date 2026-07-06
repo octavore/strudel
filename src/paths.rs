@@ -107,13 +107,13 @@ impl Paths {
 /// (defaults to `~/.local/share/strudel/`). These files are global to the
 /// machine, not tied to any project directory.
 pub struct StrudelData {
-    /// `session.json` — persisted GSA token/DSID. Password is never stored.
+    /// `session.json`, persisted GSA token/DSID. Password is never stored.
     pub session_json: PathBuf,
-    /// `dev-cert.der` — cached DER-encoded developer certificate.
+    /// `dev-cert.der`, cached DER-encoded developer certificate.
     pub cert_der: PathBuf,
-    /// `dev-key.pem` — cached private key PEM (permission 0600).
+    /// `dev-key.pem`, cached private key PEM (permission 0600).
     pub key_pem: PathBuf,
-    /// `strudel-dev.keychain-db` — persistent keychain holding the dev
+    /// `strudel-dev.keychain-db`, persistent keychain holding the dev
     /// identity.
     pub keychain_db: PathBuf,
 }

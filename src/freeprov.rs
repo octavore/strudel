@@ -9,11 +9,11 @@ use crate::paths::{Paths, StrudelData, ensure_strudel_dir};
 
 /// Interactive sign-in. Prompts for Apple ID + password + 2FA and persists
 /// the resulting session under `~/.local/share/strudel/session.json`.
-pub fn login(apple_id_hint: Option<&str>) -> Result<()> {
+pub fn login(apple_id_email: Option<String>) -> Result<()> {
     let data = StrudelData::locate()?;
     let apple_id = get_apple_id(&data)?;
 
-    let email = match apple_id_hint {
+    let email = match apple_id_email {
         Some(e) => e.to_string(),
         None => inquire::Text::new("Apple ID:")
             .with_help_message("Enter your Apple ID email address")
@@ -47,14 +47,32 @@ pub fn login(apple_id_hint: Option<&str>) -> Result<()> {
 /// Clear the persisted session and cached credentials.
 pub fn logout() -> Result<()> {
     let data = StrudelData::locate()?;
-    if data.session_json.exists() {
-        std::fs::remove_file(&data.session_json).context("removing session file")?;
+    let targets: Vec<&std::path::Path> = [&data.session_json, &data.cert_der, &data.key_pem]
+        .into_iter()
+        .filter(|p| p.exists())
+        .map(|p| p.as_path())
+        .collect();
+
+    if targets.is_empty() {
+        cprintln!("<dim>Nothing to clear; no session or cached credentials found.</dim>");
+        return Ok(());
     }
-    if data.cert_der.exists() {
-        std::fs::remove_file(&data.cert_der).ok();
+
+    cprintln!("This will remove:");
+    for path in &targets {
+        cprintln!("  <dim>{}</dim>", path.display());
     }
-    if data.key_pem.exists() {
-        std::fs::remove_file(&data.key_pem).ok();
+    let confirmed = inquire::Confirm::new("Continue?")
+        .with_default(false)
+        .prompt()
+        .context("reading confirmation")?;
+    if !confirmed {
+        cprintln!("<dim>Aborted; nothing was cleared.</dim>");
+        return Ok(());
+    }
+
+    for path in &targets {
+        std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
     }
     cprintln!("<green>✔</green> Logged out. Session and cached credentials cleared.");
     Ok(())

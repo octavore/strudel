@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// re-authentication. Password is never stored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
+    pub apple_id: String,
     pub dsid: String,
     pub gs_token: String,
 }
