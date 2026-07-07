@@ -252,6 +252,18 @@ impl Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Scaffold a strudel.toml in the given directory
+    Init {
+        /// Directory to create strudel.toml in (defaults to current directory)
+        output_dir: Option<PathBuf>,
+    },
+
+    /// Sign in with an Apple ID for free iOS provisioning (7-day profiles,
+    /// max 3 devices). Saves the session to ~/.local/share/strudel/.
+    /// Set [ios] provisioning = "free" in strudel.toml to enable.
+    #[command(args_conflicts_with_subcommands = true)]
+    Login(LoginArgs),
+
     /// Build the app bundle only (no signing/notarization)
     Bundle {
         /// Print commands without executing them
@@ -293,11 +305,7 @@ enum Cmd {
         #[arg(long)]
         skip_notarization: bool,
     },
-    /// Scaffold a strudel.toml in the given directory
-    Init {
-        /// Directory to create strudel.toml in (defaults to current directory)
-        output_dir: Option<PathBuf>,
-    },
+
     /// Build for the iOS Simulator and launch in Simulator.app
     Sim {
         /// Print commands without executing them
@@ -320,6 +328,7 @@ enum Cmd {
     /// macOS has no auto-fetch: set `build.provisioning_profile` to pin one.
     #[command(args_conflicts_with_subcommands = true)]
     Profile(ProfileArgs),
+
     /// Remove the strudel output directory and run `swift package clean`
     Clean {
         /// Print commands without executing them
@@ -333,18 +342,7 @@ enum Cmd {
         /// Destination .icns path
         icns: PathBuf,
     },
-    /// Show documentation for a topic (config, targets, global-config,
-    /// signing, notarize, entitlements, extensions, dylibs, universal, ci,
-    /// ios-device). Run with no argument to list topics.
-    Help {
-        /// Topic to show docs for
-        topic: Option<String>,
-    },
-    /// Sign in with an Apple ID for free iOS provisioning (7-day profiles,
-    /// max 3 devices). Saves the session to ~/.local/share/strudel/.
-    /// Set [ios] provisioning = "free" in strudel.toml to enable.
-    #[command(args_conflicts_with_subcommands = true)]
-    Login(LoginArgs),
+
     /// Manage global strudel config (~/.config/strudel/config.toml)
     Config {
         #[command(subcommand)]
@@ -354,6 +352,13 @@ enum Cmd {
     /// saved Apple ID session, cached dev credentials, and per-target
     /// provisioning state
     Status,
+    /// Show documentation for a topic (config, targets, global-config,
+    /// signing, notarize, entitlements, extensions, dylibs, universal, ci,
+    /// ios-device). Run with no argument to list topics.
+    Help {
+        /// Topic to show docs for
+        topic: Option<String>,
+    },
 }
 
 #[derive(clap::Args)]
