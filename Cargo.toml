@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools::build-utils"]
 
 [workspace]
 resolver = "2"
-members = [".", "crates/dmg", "crates/appleid"]
+members = [".", "crates/dmg", "crates/appleid", "crates/icon"]
 
 [[bin]]
 name = "strudel"

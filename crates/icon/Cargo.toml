@@ -1,0 +1,12 @@
+[package]
+name = "icon"
+version = "0.1.0"
+edition = "2024"
+description = "Composite macOS-style squircle app icons from foreground artwork"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
