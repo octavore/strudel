@@ -10,6 +10,7 @@ use anyhow::Result;
 use appleid::Session;
 use color_print::cprintln;
 
+use crate::builder;
 use crate::config::{
     GlobalConfig, IosProvisioningBackend, ResolvedConfig, ResolvedIosSection,
     ResolvedTargetPlatform, load_config,
@@ -270,7 +271,7 @@ fn macos_profile_block(cfg: &ResolvedConfig) {
         return;
     }
     field2("provisioning profile", shorten(path));
-    match crate::builder::decode_profile(path) {
+    match builder::decode_profile(path) {
         Ok(value) => print_profile_details(value.as_dictionary(), None),
         Err(e) => cprintln!("      <yellow>could not decode: {}</yellow>", e),
     }
@@ -315,7 +316,7 @@ fn profile_lines(paths: &Paths, cfg: &ResolvedConfig, expected_owner: Option<&st
         return;
     }
     field2(label, shorten(&path));
-    match crate::builder::decode_profile(&path) {
+    match builder::decode_profile(&path) {
         Ok(value) => print_profile_details(value.as_dictionary(), expected_owner),
         Err(e) => cprintln!("      <yellow>could not decode: {}</yellow>", e),
     }

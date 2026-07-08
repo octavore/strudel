@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::cli::helpers::{all_or_named, run_for_targets};
-use crate::config;
+use crate::{builder, config};
 
 #[derive(clap::Args)]
 pub(crate) struct CleanCmd {
@@ -23,8 +23,6 @@ impl CleanCmd {
         // cache), so it acts on every target rather than going through the
         // platform-scoped `select`.
         let targets = all_or_named(&project, self.target.as_deref())?;
-        run_for_targets(targets, |cfg| {
-            crate::builder::clean(cfg.clone(), self.dry_run)
-        })
+        run_for_targets(targets, |cfg| builder::clean(cfg.clone(), self.dry_run))
     }
 }

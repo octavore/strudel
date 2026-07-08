@@ -5,6 +5,7 @@ use color_print::cprintln;
 use serde::Deserialize;
 
 use crate::apple::appstore::AppStoreClient;
+use crate::apple::provisioning;
 use crate::builder::{IosBuilder, step};
 use crate::config::IosProvisioningBackend;
 use crate::devices::DeviceSet;
@@ -154,7 +155,7 @@ impl IosBuilder {
             );
             for (udid, name) in devices {
                 step(&format!("Registering {name} ({udid}) via Apple ID..."));
-                crate::apple::provisioning::register_device(&self.cfg, name, udid)?;
+                provisioning::register_device(&self.cfg, name, udid)?;
             }
         } else {
             let client = AppStoreClient::from_config(&self.cfg)?;
