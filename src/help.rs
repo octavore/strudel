@@ -208,7 +208,7 @@ fn print_targets() {
 }
 
 fn print_config() {
-    print_help(&formatdoc! {r#"
+    print_help(&formatdoc! {r##"
         # strudel.toml reference
 
         Relative paths are resolved relative to the config file's directory.
@@ -230,7 +230,6 @@ fn print_config() {
 
         info_json_path         = "info.json"               # JSON merged into Info.plist
         entitlements_json_path = "entitlements.json"       # JSON entitlements
-        icon_path              = "AppIcon.icns"            # path to .icns or .png app icon
         archs                  = ["arm64", "x86_64"]       # default: host arch only
         target_name            = "MyApp"                   # Swift executableTarget; default: app.name
         embed_libs             = ["path/to/libFoo.dylib"]  # dylibs copied into Contents/Frameworks
@@ -238,6 +237,15 @@ fn print_config() {
 
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
         resources              = ["Assets/logo.png"]       # individual files to copy into Contents/Resources/
+        {ANSI_RESET}
+        ## [build.icon] optional; no icon if unset
+        # Either a png or icns file copied in unmodified (set icon.path), or
+        # generate an icon from a png at build time. For iOS targets, ios.assets_dir
+        # takes precedence if both are set.
+        {ANSI_PURPLE}
+        icon.src        = "art.png"
+        icon.scale      = 1.2               # optional
+        icon.background = "#fefefe"       # optional; hex, defaults to white
         {ANSI_RESET}
         ## [build_env] optional
 
@@ -284,7 +292,7 @@ fn print_config() {
         simulator         = "iPhone 16"  # default; override with --simulator
         device            = "My iPhone"  # name or UDID; auto-detected if unset
         deployment_target = "18.0"       # iOS deployment target
-        assets_dir        = "Sources/App/Assets.xcassets"  # xcassets for actool
+        assets_dir        = "Sources/App/Assets.xcassets"  # xcassets for actool; takes precedence over [build.icon]
         app_icon_name     = "AppIcon"    # icon set name inside assets_dir
 
         # Provisioning backend, required for device builds. Choose one:
@@ -324,7 +332,7 @@ fn print_config() {
 
         {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}           base64-encoded Developer ID .p12 (CI use)
         {ANSI_GREEN}APPLE_CERTIFICATE_PASSWORD{ANSI_RESET}  export password for the .p12
-    "#});
+    "##});
 }
 
 fn print_signing() {

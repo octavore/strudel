@@ -67,7 +67,7 @@ pub static RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig 
     build_dir: PathBuf::from("/x"),
     info_json_path: None,
     entitlements_json_path: None,
-    icon_path: None,
+    icon: None,
     archs: vec!["arm64".into()],
     target_name: "A".into(),
     sign_identity: String::new(),

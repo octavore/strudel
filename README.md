@@ -78,7 +78,6 @@ Commands:
   devices    Manage tracked iOS devices; bare command lists them
   profile    Show provisioning-profile status; `profile fetch` fetches/refreshes it
   clean      Remove the strudel output directory and run `swift package clean`
-  make-icns  Convert a PNG to .icns using sips + iconutil
   config     Manage global strudel config (~/.config/strudel/config.toml)
   status     Show overall status: toolchain, config, session, and per-target state
   help       Show documentation for a topic (run `strudel help` to list topics)
@@ -214,13 +213,49 @@ is user-facing, and it may have multiple unique internal tracking build numbers 
 | `build_dir`              | string   | `.build/dist`       | Output directory for artifacts (relative to `source_dir`)                                                                                                  |
 | `info_json_path`         | string   | *(none)*            | JSON describing `Info.plist` keys; converted to `Info.plist` via `plutil`. If omitted, strudel starts from an empty object and injects only the keys below |
 | `entitlements_json_path` | string   | *(none)*            | JSON entitlements; converted to a plist and passed to `codesign`                                                                                           |
-| `icon_path`              | string   | *(none)*            | `.icns` icon copied into the bundle. If unset, the bundle has no icon; if set, the file must exist                                                         |
+| `icon`                   | table    | *(none)*            | Bundle icon; see below. If unset, the bundle has no icon                                                                                                   |
 | `archs`                  | string[] | host architecture   | Architectures passed to `swift build --arch`. Set multiple for a universal binary, e.g. `["arm64", "x86_64"]`                                              |
 | `target_name`            | string   | value of `app.name` | Swift executable target name, if it differs from the app name                                                                                              |
 | `embed_libs`             | string[] | *(none)*            | Dynamic C FFI libraries to embed in `Contents/Frameworks` and sign. Paths relative to config file                                                          |
 | `resources_dir`          | string   | *(none)*            | Directory whose contents are copied wholesale into `Contents/Resources/`                                                                                   |
 | `resources`              | string[] | *(none)*            | Individual files to copy into `Contents/Resources/` by filename                                                                                            |
 | `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements                                                      |
+
+#### `[build.icon]` (optional)
+
+The bundle icon, specified one of two ways:
+
+```toml
+# a png or icns file, copied into the bundle unmodified
+[build.icon]
+path = "AppIcon.icns"
+```
+
+```toml
+# generate an icon from a source image
+[build.icon]
+src = "art.png"
+scale = 1.2               # optional
+background = "#fefefe"    # optional; hex, defaults to white
+```
+
+By default, the icon is copied as-is (`path`) or as a single
+composited PNG (`src`). Set `icns = true` (either form) to instead convert it into a real
+multi-resolution `.icns` via `sips`/`iconutil`, which gives cleaner results at
+small sizes (Finder list view, menu bar) at the cost of an extra build step:
+
+```toml
+[build.icon]
+src  = "art.png"
+icns = true
+```
+
+`[build.icon]` also applies to iOS targets (`icns` is ignored there). The
+icon is wrapped in a minimal `.appiconset`/`.xcassets` and compiled with `xcrun actool
+--include-all-app-icons`, which derives every required size/idiom from that
+one image. If `path` points to an Icon Composer `.icon` bundle instead of a
+raster image, it's handed to `actool` directly. If `ios.assets_dir` (below) is
+also set, it takes precedence over `[build.icon]` for that target.
 
 ### `[build_env]` (optional)
 
@@ -255,7 +290,7 @@ For iOS apps, this contains settings for `strudel run --sim` and `strudel run --
 | `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                              |
 | `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                            |
 | `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                             |
-| `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`                               |
+| `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`. Takes precedence over `[build.icon]` if both are set |
 | `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                |
 
 ### `[[extensions]]` (optional)

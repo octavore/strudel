@@ -16,9 +16,14 @@ build_number = "1"
 # build_dir              = ".build/dist"        # artifacts (relative to source_dir)
 # info_json_path         = "info.json"          # optional; empty object if unset
 # entitlements_json_path = "entitlements.json"
-# icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"  # optional; no icon if unset
 # archs                  = ["arm64", "x86_64"]  # default: host arch only
 # target_name            = "MyApp"              # Swift target, if it differs from the app name
+
+# Bundle icon; optional, no icon if unset. Either a png or icns file copied in
+# unmodified (set icon.path), or generate an icon from a png at build time:
+# icon.src               = "art.png"
+# icon.scale             = 1.2         # optional
+# icon.background        = "#fefefe" # optional; hex, defaults to white
 
 # Dynamic C FFI libraries to embed in Contents/Frameworks and sign.
 # Paths are relative to this file's directory unless absolute.

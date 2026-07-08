@@ -14,7 +14,9 @@ use serde_json::{Value, json};
 
 use crate::builder::macos::notarize::NotarizationState;
 use crate::builder::{MacosBuilder, step};
-use crate::config::{ExtensionKind, ResolvedExtension};
+use crate::config::{ExtensionKind, ResolvedExtension, ResolvedIcon};
+use crate::icon::icns;
+use crate::icon::render::render_to_png;
 use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;
 
@@ -117,11 +119,11 @@ impl MacosBuilder {
             ]),
         )?;
 
-        // set CFBundleIconFile if bundle icon_path is provided
+        // set CFBundleIconFile if a bundle icon is configured
         // todo: also support CFBundleIconName, the newer format.
         // see https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-        if let Some(icon_path) = &self.cfg.icon_path {
-            self.copy_file(icon_path, &app_bundle_resources_dir.join("AppIcon.icns"))?;
+        if let Some(icon) = &self.cfg.icon {
+            self.write_icon(icon, &app_bundle_resources_dir.join("AppIcon.icns"))?;
             info_json.insert("CFBundleIconFile".to_string(), json!("AppIcon.icns"));
         }
 
@@ -175,6 +177,63 @@ impl MacosBuilder {
         }
 
         Ok(app_bundle.clone())
+    }
+
+    /// Produce the bundle's `AppIcon.icns` at `dest`. For
+    /// [`ResolvedIcon::Path`], copied unmodified unless `icns` is set, in
+    /// which case it's converted via [`icns::make_icns`]. For
+    /// [`ResolvedIcon::Generated`], composited from source artwork into a
+    /// squircle via the `icon` crate and written out as a single PNG,
+    /// unless `icns` is set, in which case the composited image is
+    /// converted into a real multi-resolution `.icns`.
+    fn write_icon(&self, icon: &ResolvedIcon, dest: &Path) -> Result<()> {
+        match icon {
+            ResolvedIcon::Path {
+                path,
+                icns: to_icns,
+            } => {
+                if !to_icns {
+                    return self.copy_file(path, dest);
+                }
+                if self.dry_run {
+                    cprintln!(
+                        "<dim>[dry-run]</dim> convert icon <blue>{}</blue> -> <blue>{}</blue> (.icns)",
+                        path.display(),
+                        dest.display()
+                    );
+                    return Ok(());
+                }
+                step("Converting app icon to .icns...");
+                icns::make_icns(path, dest)
+            },
+            ResolvedIcon::Generated {
+                src, icns: to_icns, ..
+            } => {
+                if self.dry_run {
+                    cprintln!(
+                        "<dim>[dry-run]</dim> generate icon <blue>{}</blue> -> <blue>{}</blue>",
+                        src.display(),
+                        dest.display()
+                    );
+                    return Ok(());
+                }
+
+                step("Generating app icon...");
+
+                if !to_icns {
+                    return render_to_png(icon, dest);
+                }
+
+                let tmp_png = dest
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .join("AppIcon-generated.png");
+                render_to_png(icon, &tmp_png)?;
+                let result = icns::make_icns(&tmp_png, dest);
+                let _ = fs::remove_file(&tmp_png);
+                result
+            },
+        }
     }
 
     /// Embed dynamic libraries into `Contents/Frameworks`, fix their install

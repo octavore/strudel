@@ -6,7 +6,6 @@ mod help;
 mod helpers;
 mod init;
 mod login;
-mod make_icns;
 mod profile;
 mod release;
 mod run;
@@ -24,7 +23,6 @@ use crate::cli::devices::DevicesCmd;
 use crate::cli::help::HelpCmd;
 use crate::cli::init::InitCmd;
 use crate::cli::login::LoginCmd;
-use crate::cli::make_icns::MakeIcnsCmd;
 use crate::cli::profile::ProfileCmd;
 use crate::cli::release::ReleaseCmd;
 use crate::cli::run::RunCmd;
@@ -85,8 +83,6 @@ enum Cmd {
     /* helper commands */
     /// Remove the strudel output directory and run `swift package clean`
     Clean(CleanCmd),
-    /// Convert a PNG to .icns using sips + iconutil
-    MakeIcns(MakeIcnsCmd),
 
     /// Manage global strudel config (~/.config/strudel/config.toml)
     Config(ConfigCmd),
@@ -115,7 +111,6 @@ impl Cli {
             Cmd::Devices(c) => c.execute(&config),
             Cmd::Profile(c) => c.execute(&config),
             Cmd::Clean(c) => c.execute(&config),
-            Cmd::MakeIcns(c) => c.execute(),
             Cmd::Config(c) => c.execute(),
             Cmd::Status(c) => c.execute(&config),
             Cmd::Help(c) => c.execute(),

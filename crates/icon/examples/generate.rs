@@ -8,7 +8,7 @@ fn main() {
     let (Some(foreground_path), Some(background_hex), Some(output_path)) =
         (args.next(), args.next(), args.next())
     else {
-        eprintln!("usage: generate <foreground.png> <#RRGGBB[AA]> <output.png> [foreground_scale]");
+        eprintln!("usage: generate <foreground.png> <#RRGGBB> <output.png> [foreground_scale]");
         process::exit(1);
     };
     let foreground_scale = args.next();

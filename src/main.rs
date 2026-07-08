@@ -4,7 +4,7 @@ mod cli;
 mod config;
 mod devices;
 mod help;
-mod icns;
+mod icon;
 mod init;
 mod paths;
 mod shell;

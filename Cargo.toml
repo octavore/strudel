@@ -26,6 +26,8 @@ clap = {version = "4", features = ["derive"]}
 color-print = "0.3.7"
 appleid = {path = "crates/appleid"}
 dmg = {path = "crates/dmg"}
+icon = {path = "crates/icon"}
+image = {version = "0.25", default-features = false, features = ["png"]}
 indoc = "2"
 inquire = "0.9"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }

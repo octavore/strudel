@@ -2,11 +2,12 @@ mod build_config;
 mod build_target;
 mod extension;
 mod global;
+mod icon_section;
 mod resolved;
 mod utils;
 
 #[cfg(test)]
-mod fixtures;
+pub(crate) mod fixtures;
 
 use std::path::Path;
 
@@ -18,8 +19,8 @@ pub use crate::config::build_config::{generate_initial_toml, generate_initial_to
 pub use crate::config::extension::ExtensionKind;
 pub use crate::config::global::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
 pub use crate::config::resolved::{
-    ResolvedConfig, ResolvedExtension, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
-    ResolvedTargetPlatform,
+    ResolvedConfig, ResolvedExtension, ResolvedIcon, ResolvedIosSection, ResolvedMacOsSection,
+    ResolvedProject, ResolvedTargetPlatform,
 };
 
 pub fn load_config(config_path: &Path) -> Result<ResolvedProject> {

@@ -10,8 +10,6 @@ pub use crate::color::parse_hex_color;
 
 #[derive(Debug, Error)]
 pub enum IconError {
-    #[error("foreground image must be square, got {width}x{height}")]
-    NotSquare { width: u32, height: u32 },
     #[error("invalid color {0:?}: expected #RRGGBB")]
     InvalidColor(String),
 }
@@ -56,13 +54,6 @@ impl Default for IconOptions {
 /// Composites `foreground` onto a squircle of `options.background`, with a
 /// drop shadow and a top gloss highlight, centered on a transparent canvas.
 pub fn generate(foreground: &RgbaImage, options: &IconOptions) -> Result<RgbaImage, IconError> {
-    if foreground.width() != foreground.height() {
-        return Err(IconError::NotSquare {
-            width: foreground.width(),
-            height: foreground.height(),
-        });
-    }
-
     let squircle_size = (options.canvas_size as f32 * options.squircle_scale) as u32;
     let mask = mask::build_squircle_mask(squircle_size, options.corner_radius_ratio);
 
@@ -171,21 +162,30 @@ fn paint_foreground(
     foreground: &RgbaImage,
     options: &IconOptions,
 ) {
-    let art_size = ((squircle_size as f32 * options.foreground_scale) as u32).max(1);
+    let art_box = ((squircle_size as f32 * options.foreground_scale) as u32).max(1);
+
+    // Fit `foreground` inside the `art_box` x `art_box` area, preserving its
+    // aspect ratio ("contain") rather than requiring square input and
+    // stretching it. The shorter axis ends up with less coverage, centered.
+    let (fw, fh) = (foreground.width() as f32, foreground.height() as f32);
+    let fit_scale = (art_box as f32 / fw).min(art_box as f32 / fh);
+    let art_w = ((fw * fit_scale).round() as u32).max(1);
+    let art_h = ((fh * fit_scale).round() as u32).max(1);
     let art = image::imageops::resize(
         foreground,
-        art_size,
-        art_size,
+        art_w,
+        art_h,
         image::imageops::FilterType::Lanczos3,
     );
     // Signed: foreground_scale > 1.0 means the art overscans the squircle
     // (bleeds off the edge, cropped by the mask) rather than being inset.
-    let margin = (squircle_size as i64 - art_size as i64) / 2;
+    let margin_x = (squircle_size as i64 - art_w as i64) / 2;
+    let margin_y = (squircle_size as i64 - art_h as i64) / 2;
 
-    for y in 0..art_size {
-        for x in 0..art_size {
-            let mx = margin + x as i64;
-            let my = margin + y as i64;
+    for y in 0..art_h {
+        for x in 0..art_w {
+            let mx = margin_x + x as i64;
+            let my = margin_y + y as i64;
             if mx < 0 || my < 0 || mx >= squircle_size as i64 || my >= squircle_size as i64 {
                 continue;
             }
@@ -219,5 +219,33 @@ fn paint_gloss(canvas: &mut RgbaImage, mask: &[f32], size: u32, inset: u32, opti
             let px = canvas.get_pixel_mut(x + inset, y + inset);
             *px = blend(*px, [255, 255, 255], gloss * coverage);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_accepts_non_square_foreground() {
+        // A wide, non-square foreground should be fit inside the artwork
+        // area (letterboxed) rather than rejected or stretched.
+        let foreground = RgbaImage::from_pixel(200, 80, Rgba([10, 20, 30, 255]));
+        let canvas = generate(&foreground, &IconOptions::default())
+            .expect("non-square foreground should be accepted");
+        assert_eq!(canvas.width(), IconOptions::default().canvas_size);
+        assert_eq!(canvas.height(), IconOptions::default().canvas_size);
+        // Some pixel near the center should have picked up the foreground color,
+        // confirming the art was actually painted (not skipped/cropped away).
+        let center = canvas.get_pixel(canvas.width() / 2, canvas.height() / 2);
+        assert_eq!([center[0], center[1], center[2]], [10, 20, 30]);
+    }
+
+    #[test]
+    fn generate_accepts_square_foreground() {
+        let foreground = RgbaImage::from_pixel(100, 100, Rgba([200, 100, 50, 255]));
+        let canvas = generate(&foreground, &IconOptions::default())
+            .expect("square foreground should be accepted");
+        assert_eq!(canvas.width(), IconOptions::default().canvas_size);
     }
 }

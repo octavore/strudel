@@ -39,6 +39,23 @@ impl Default for ResolvedDmg {
     }
 }
 
+/// Resolved `[build.icon]`. See [`crate::config::icon_section::IconSection`]
+/// for the two on-disk forms this collapses.
+#[derive(Debug, Clone)]
+pub enum ResolvedIcon {
+    Path {
+        path: PathBuf,
+        icns: bool,
+    },
+
+    Generated {
+        src: PathBuf,
+        scale: f32,
+        background: Option<String>,
+        icns: bool,
+    },
+}
+
 /// All resolved targets from a `strudel.toml`. Single-target configs produce
 /// exactly one entry; `[[target]]` configs produce one per block.
 #[derive(Debug)]
@@ -110,7 +127,7 @@ pub struct ResolvedConfig {
     pub build_dir: PathBuf,
     pub info_json_path: Option<PathBuf>,
     pub entitlements_json_path: Option<PathBuf>,
-    pub icon_path: Option<PathBuf>,
+    pub icon: Option<ResolvedIcon>,
     pub archs: Vec<String>,
     pub target_name: String,
     pub sign_identity: String,

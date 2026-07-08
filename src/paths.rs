@@ -165,7 +165,7 @@ mod tests {
             build_dir: PathBuf::from(build_dir),
             info_json_path: None,
             entitlements_json_path: None,
-            icon_path: None,
+            icon: None,
             archs: vec!["arm64".into()],
             target_name: app_name.into(),
             sign_identity: String::new(),

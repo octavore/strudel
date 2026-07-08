@@ -215,12 +215,12 @@ fn resolve_target(
         platform: Some(platform),
         // User-supplied input paths are resolved relative to the config file's
         // directory (the one fixed anchor the user reasons about), independent of
-        // `source_dir`. info_json_path and icon_path are optional with no default.
+        // `source_dir`. info_json_path and icon are optional with no default.
         info_json_path: build.info_json_path.map(|p| resolve_path(config_dir, p)),
         entitlements_json_path: build
             .entitlements_json_path
             .map(|p| resolve_path(config_dir, p)),
-        icon_path: build.icon_path.map(|p| resolve_path(config_dir, p)),
+        icon: build.icon.map(|icon| icon.resolve(config_dir)),
         archs: build.archs.unwrap_or_else(|| {
             let arch = match std::env::consts::ARCH {
                 "aarch64" => "arm64",
@@ -327,7 +327,7 @@ pub fn generate_initial_toml(
     version: &str,
     build_number: &str,
 ) -> String {
-    formatdoc! {r#"
+    formatdoc! {r##"
         # strudel build configuration
         # See `strudel help config` for the full list of options.
 
@@ -341,7 +341,11 @@ pub fn generate_initial_toml(
         # [build]
         # source_dir             = "."                  # default: current dir
         # entitlements_json_path = "entitlements.json"  # default: none
-        # icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"
+        # Bundle icon; either a png or icns file copied in unmodified (set icon.path),
+        # or generate an icon from a png at build time:
+        # icon.src               = "art.png"
+        # icon.scale             = 1.2         # optional
+        # icon.background        = "#fefefe" # optional; hex, defaults to white
 
         # Apple developer identifiers, used for signing and notarization.
         # Can also be set via env vars.
@@ -356,7 +360,7 @@ pub fn generate_initial_toml(
         # Set plain = true for a plain unstyled DMG instead.
         # [dmg]
         # plain = true
-    "#}
+    "##}
 }
 
 pub fn generate_initial_toml_with_ios(
@@ -382,7 +386,7 @@ pub fn generate_initial_toml_with_ios(
             app.build_number = "{build_number}"
 
             # build.entitlements_json_path = "entitlements.json"
-            # build.icon_path              = "Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon.icns"
+            # build.icon.src               = "art.png"  # or build.icon.path = "AppIcon.icns"
             # dmg.plain                    = true
         "#}
     } else {
@@ -430,7 +434,7 @@ mod tests {
 
     use super::*;
     use crate::config::fixtures::*;
-    use crate::config::resolved::ResolvedTargetPlatform;
+    use crate::config::resolved::{ResolvedIcon, ResolvedTargetPlatform};
     use crate::config::{BuildConfig, Platform};
 
     #[test]
@@ -661,7 +665,7 @@ mod tests {
         assert_eq!(r.notarize_timeout, 600);
         assert_eq!(r.archs.len(), 1); // host arch
         assert!(r.info_json_path.is_none());
-        assert!(r.icon_path.is_none());
+        assert!(r.icon.is_none());
     }
 
     #[test]
@@ -1042,5 +1046,159 @@ mod tests {
         .unwrap();
         let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(r.build_dir, PathBuf::from("/cfg/.build/dist"));
+    }
+
+    #[test]
+    fn icon_path_form_resolves_to_path_variant() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [build]
+            icon.path = "AppIcon.icns"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        match r.icon {
+            Some(ResolvedIcon::Path { path, icns }) => {
+                assert_eq!(path, PathBuf::from("/cfg/AppIcon.icns"));
+                assert!(!icns, "icns conversion should default to false");
+            },
+            other => panic!("expected ResolvedIcon::Path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icon_path_form_can_opt_into_icns_conversion() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [build.icon]
+            path = "art.png"
+            icns = true
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        match r.icon {
+            Some(ResolvedIcon::Path { icns, .. }) => assert!(icns),
+            other => panic!("expected ResolvedIcon::Path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icon_generated_form_resolves_with_defaults() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [build.icon]
+            src = "art.png"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        match r.icon {
+            Some(ResolvedIcon::Generated {
+                src,
+                scale,
+                background,
+                icns,
+            }) => {
+                assert_eq!(src, PathBuf::from("/cfg/art.png"));
+                assert_eq!(scale, 1.0);
+                assert!(background.is_none());
+                assert!(!icns, "icns conversion should default to false");
+            },
+            other => panic!("expected ResolvedIcon::Generated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icon_generated_form_can_opt_into_icns_conversion() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [build.icon]
+            src = "art.png"
+            icns = true
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        match r.icon {
+            Some(ResolvedIcon::Generated { icns, .. }) => assert!(icns),
+            other => panic!("expected ResolvedIcon::Generated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icon_generated_form_parses_scale_and_background() {
+        let cfg = parse_build_config(indoc! { r##"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [build.icon]
+            src = "art.png"
+            scale = 1.2
+            background = "#fefefe"
+        "##})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        match r.icon {
+            Some(ResolvedIcon::Generated {
+                scale, background, ..
+            }) => {
+                assert_eq!(scale, 1.2);
+                assert_eq!(background.as_deref(), Some("#fefefe"));
+            },
+            other => panic!("expected ResolvedIcon::Generated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icon_mixing_path_and_src_is_rejected() {
+        let err = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [build.icon]
+            path = "AppIcon.icns"
+            src = "art.png"
+        "#});
+        assert!(err.is_err(), "icon can't be both a path and generated");
+    }
+
+    #[test]
+    fn icon_unknown_field_is_rejected() {
+        let err = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [build.icon]
+            path = "AppIcon.icns"
+            scale = 1.2
+        "#});
+        assert!(err.is_err(), "typo'd icon key should be rejected");
     }
 }

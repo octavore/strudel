@@ -1,20 +1,22 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
-use anyhow::{Result, bail};
-
-use crate::shell::Shell;
+use anyhow::{Context, Result, bail};
 
 const SIZES: &[u32] = &[16, 32, 64, 128, 256, 512];
 
-/// Convert a PNG to an .icns file using macOS built-in tools (sips + iconutil).
-/// The source PNG should be at least 1024x1024.
-pub fn make_icns(png_path: &Path, icns_path: &Path, dry_run: bool) -> Result<()> {
+/// Convert a PNG to an .icns file using macOS's built-in tools (`sips` +
+/// `iconutil`). The source PNG should be at least 1024x1024.
+///
+/// Callers are expected to check dry-run themselves before calling this -
+/// there's no way to "dry run" a real `.icns` conversion meaningfully, so
+/// this always does the real work.
+pub fn make_icns(png_path: &Path, icns_path: &Path) -> Result<()> {
     if !png_path.exists() {
         bail!("Source PNG not found: {}", png_path.display());
     }
 
-    let sh = Shell::new(dry_run);
     let png = png_path.to_str().unwrap();
     let icns = icns_path.to_str().unwrap();
 
@@ -32,20 +34,31 @@ pub fn make_icns(png_path: &Path, icns_path: &Path, dry_run: bool) -> Result<()>
             let s2 = (size * 2).to_string();
             let out1 = format!("{iconset}/icon_{size}x{size}.png");
             let out2 = format!("{iconset}/icon_{size}x{size}@2x.png");
-            sh.run(&["sips", "-z", &s, &s, png, "--out", &out1])?;
-            sh.run(&["sips", "-z", &s2, &s2, png, "--out", &out2])?;
+            run(&["sips", "-z", &s, &s, png, "--out", &out1])?;
+            run(&["sips", "-z", &s2, &s2, png, "--out", &out2])?;
         }
 
         if let Some(parent) = icns_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        sh.run(&["iconutil", "-c", "icns", &iconset, "-o", icns])?;
+        run(&["iconutil", "-c", "icns", &iconset, "-o", icns])?;
         Ok(())
     })();
 
     // Always clean up the temporary iconset, even on failure
     let _ = fs::remove_dir_all(&iconset_dir);
     result
+}
+
+fn run(args: &[&str]) -> Result<()> {
+    let status = Command::new(args[0])
+        .args(&args[1..])
+        .status()
+        .with_context(|| format!("Failed to run {}", args.join(" ")))?;
+    if !status.success() {
+        bail!("{} exited with {}", args.join(" "), status);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -60,7 +73,7 @@ mod tests {
         // we should fail fast with a clear message that names the missing file.
         let missing = PathBuf::from("/definitely/does/not/exist.png");
         let dest = std::env::temp_dir().join("strudel-icns-test.icns");
-        let err = make_icns(&missing, &dest, true).expect_err("must error on missing PNG");
+        let err = make_icns(&missing, &dest).expect_err("must error on missing PNG");
         let msg = err.to_string();
         assert!(msg.contains("Source PNG not found"), "got: {msg}");
         assert!(msg.contains("exist.png"), "msg should name the path: {msg}");
