@@ -277,7 +277,10 @@ impl MacosBuilder {
                 .with_context(|| format!("Failed to remove existing {}", dest.display()))?;
         }
         self.copy_tree(app_bundle, &dest)?;
-        cprintln!("<green>Installed to</green> <cyan>{}</cyan>", dest.display());
+        cprintln!(
+            "<green>Installed to</green> <cyan>{}</cyan>",
+            dest.display()
+        );
         Ok(())
     }
 

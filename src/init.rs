@@ -93,10 +93,8 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
                 .with_default(true)
                 .with_help_message("You can also run `strudel login` later")
                 .prompt()?;
-            if sign_in_now {
-                if let Err(e) = provisioning::login(None) {
-                    eprintln!("Sign-in failed: {e:#}\nYou can run `strudel login` later.");
-                }
+            if sign_in_now && let Err(e) = provisioning::login(None) {
+                eprintln!("Sign-in failed: {e:#}\nYou can run `strudel login` later.");
             }
         }
 
@@ -109,7 +107,7 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
             provisioning,
         )
     } else {
-        generate_initial_toml(&app_name, &bundle_id, &version, &build_number)
+        generate_initial_toml(&app_name, &bundle_id, &version, build_number)
     };
     std::fs::create_dir_all(output_dir)?;
     std::fs::write(&out_path, &content)?;
