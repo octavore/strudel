@@ -87,6 +87,30 @@ pub fn profile_info(config_path: &Path, target: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `strudel devices` (no subcommand): list devices tracked in
+/// `.strudel/devices.toml` for each selected iOS target.
+pub fn devices_list(config_path: &Path, target: Option<&str>) -> Result<()> {
+    let project = load_config(config_path)?;
+    let targets = project.select(target, crate::config::Platform::Ios, true)?;
+    let multi = targets.len() > 1;
+
+    for cfg in targets {
+        if multi {
+            cprintln!("<bold,cyan>{}</bold,cyan>", cfg.app_name);
+        }
+        let paths = Paths::new(cfg);
+        let set = DeviceSet::load(&paths.devices_toml)?;
+        if set.device.is_empty() {
+            cprintln!("  <dim>No tracked devices. Run `strudel devices add`.</dim>");
+            continue;
+        }
+        for d in &set.device {
+            cprintln!("  {}  <dim>{}</dim>", d.name, d.udid);
+        }
+    }
+    Ok(())
+}
+
 fn global_config_section() -> Result<()> {
     let path = GlobalConfig::xdg_path()?;
     header("Global config", Some(&path));
@@ -372,7 +396,7 @@ fn device_lines(paths: &Paths) {
     if set.device.is_empty() {
         field2(
             "tracked devices",
-            "none (run `strudel device add`)".to_string(),
+            "none (run `strudel devices add`)".to_string(),
         );
         return;
     }

@@ -143,20 +143,16 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
 
     println!("\nNext steps:");
     if include_macos {
-        cprintln!("  <blue>strudel bundle</blue>   # build app bundle (unsigned)");
-        cprintln!(
-            "  <blue>strudel build</blue>    # build + sign for local dev (ad-hoc if no identity)"
-        );
-        cprintln!("  <blue>strudel release</blue>  # full release (sign, notarize, DMG)");
+        cprintln!("  <blue>strudel build</blue>          # build + sign (ad-hoc if no identity)");
+        cprintln!("  <blue>strudel run</blue>            # build + sign + open");
+        cprintln!("  <blue>strudel release</blue>        # full release (sign, notarize, DMG)");
     }
     if include_ios {
-        cprintln!("  <blue>strudel sim</blue>              # build and run in the iOS Simulator");
+        cprintln!("  <blue>strudel run --sim</blue>      # build and run in the iOS Simulator");
         cprintln!(
-            "  <blue>strudel device add</blue>       # register a device and fetch a provisioning profile"
+            "  <blue>strudel devices add</blue>    # register a device and fetch a provisioning profile"
         );
-        cprintln!(
-            "  <blue>strudel device</blue>           # build, install, and launch on a device"
-        );
+        cprintln!("  <blue>strudel run --device</blue>   # build, install, and launch on a device");
     }
 
     Ok(())

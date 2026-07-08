@@ -6,7 +6,7 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 
 > [!IMPORTANT]
 > **Current limitations**
-> - **iOS support is still experimental.** `strudel sim` and `strudel device` work for local development, but distributing iOS apps is unsupported.
+> - **iOS support is still experimental.** `strudel run --sim` and `strudel run --device` work for local development, but distributing iOS apps is unsupported.
 > - iOS device builds require a paid Apple Developer account. strudel can auto-register devices and provision development profiles via the App Store Connect API (see [iOS device builds](#ios-device-builds)), but this has only been tested with a paid account.
 > - **App Store distribution is not supported yet.** strudel supports direct/notarized distribution (Developer ID) for macOS apps, but there is currently no support for submitting to the Mac App Store or iOS App Store.
 
@@ -46,15 +46,15 @@ strudel init
 
 # ...edit strudel.toml, info.json, entitlements.json...
 
-# create an unsigned app bundle
-strudel bundle # --dry-run
-
-# or create an ad-hoc codesigned app bundle
+# create an ad-hoc codesigned app bundle
 strudel build # --dry-run
 
-# or create a real codesigned app bundel
+# or create a real codesigned app bundle
 export APPLE_SIGNING_IDENTITY=...
 strudel build
+
+# or skip codesigning entirely
+strudel build --unsigned
 
 # produce a signed, notarized DMG
 export APPLE_API_KEY_PATH=...
@@ -70,11 +70,10 @@ Note that the env vars above can also be stored in the `strudel.toml` config fil
 strudel [OPTIONS] <COMMAND>
 
 Commands:
-  bundle     Build the app bundle only (no signing/notarization)
-  build      Build and sign the app bundle (no notarization or DMG); for local dev
-  release    Full release: build, sign, notarize, and package DMG
-  sim        Build for the iOS Simulator and launch in Simulator.app
-  device     Build for a connected iOS device, then install and launch
+  build      Assemble the app bundle. Signed on macOS by default; add --unsigned to skip
+  run        Build and launch locally (macOS: sign + open; iOS: simulator or device)
+  release    Full distributable: build, sign, notarize, and package DMG (macOS only)
+  devices    Manage tracked iOS devices; bare command lists them
   profile    Fetch (or refresh) the development provisioning profile for iOS device builds
   init       Scaffold a strudel.toml in the given directory
   config     Manage global strudel config (~/.config/strudel/config.toml)
@@ -83,10 +82,14 @@ Commands:
 
 Options:
       --config <CONFIG>  Path to config file [default: strudel.toml]
-      --target <TARGET>  Select a target by app name (multi-target configs only)
   -h, --help             Print help
   -V, --version          Print version
 ```
+
+`build`, `run`, and `release` take an optional target name as a positional
+argument (`strudel build MyApp`) to select one target in a multi-target
+config; other commands (`devices`, `profile`, `status`, `clean`) take
+`--target <name>` instead.
 
 `strudel help <topic>` has extended documentation for many subjects beyond the
 subcommands above, including `config`, `targets`, `signing`, `notarize`,
@@ -104,24 +107,13 @@ strudel init             # scaffold in the current directory
 strudel init ./myapp     # scaffold in ./myapp
 ```
 
-### `bundle`
-
-Build the app bundle, without codesigning or notarization. Useful for local testing.
-This cleans the old build, runs `swift build -c release`, and then assembles `.app`.
-
-```sh
-strudel bundle
-strudel bundle --debug       # build with the debug configuration instead of release
-strudel bundle --dry-run     # print commands without executing them
-```
-
 ### `build`
 
-Build and sign the app bundle, stopping at a signed `.app` (no notarization and no
-DMG). This is the same as `strudel bundle` but also runs `codesign` at the end.
-
-Meant for local development - hardened runtime and some entitlements only
-take effect on a signed binary.
+Assemble the app bundle for one target (or all eligible targets, if no target
+name is given). On macOS this cleans the old build, runs `swift build -c
+release`, assembles `.app`, and codesigns it (no notarization or DMG). On iOS
+it assembles a `.app` for the Simulator triple, but doesn't install or launch
+it.
 
 If `sign_identity` (`APPLE_SIGNING_IDENTITY`) is set, `strudel` signs with that identity;
 otherwise it signs **ad-hoc** (`codesign --sign -`), which needs no certificate
@@ -132,14 +124,41 @@ easily. For that, you will need to run `strudel release` to have your app notari
 
 ```sh
 strudel build
+strudel build MyApp          # select one target by app name
+strudel build --open         # open the .app after a successful build
 strudel build --debug        # build with the debug configuration instead of release
 strudel build --dry-run      # print commands without executing them
 ```
 
+Add `--unsigned` (macOS only) to skip codesigning and leave the bundle as-is.
+
+```sh
+strudel build --unsigned
+```
+
+### `run`
+
+Build and launch locally. On macOS this signs (same identity/ad-hoc rules as
+`build`) and opens the app. On iOS it installs and launches in the Simulator
+by default, or on a connected device with `--device`.
+
+```sh
+strudel run
+strudel run MyApp                     # select one target by app name
+strudel run --unsigned                # macOS: skip codesigning
+strudel run --sim                     # iOS: launch in the Simulator (default)
+strudel run --sim "iPhone 16 Pro"     # iOS: override the simulator name
+strudel run --device                  # iOS: launch on a connected device
+strudel run --device "iPhone 15"      # iOS: target a specific tracked device
+strudel run --dry-run                 # print commands without executing them
+```
+
 ### `release`
 
-Like `strudel build` but also creates a notarized DMG file so you can distribute your app.
-This step requires valid signing credentials from a paid Apple Developer membership (see below).
+Like `strudel build` but also creates a notarized DMG file so you can
+distribute your app. macOS only — iOS targets error with a pointer to `run
+--device`. This step requires valid signing credentials from a paid Apple
+Developer membership (see below).
 
 ```sh
 strudel release
@@ -210,7 +229,7 @@ PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 
 ### `[ios]` (optional, experimental)
 
-For iOS apps, this contains settings for `strudel sim` and `strudel device`. iOS support is experimental. All fields are optional except `provisioning`, which is required for device builds.
+For iOS apps, this contains settings for `strudel run --sim` and `strudel run --device`. iOS support is experimental. All fields are optional except `provisioning`, which is required for device builds.
 
 > [!NOTE]
 > The flat, single-target form (a top-level `[app]`, as shown above) is always
@@ -219,20 +238,20 @@ For iOS apps, this contains settings for `strudel sim` and `strudel device`. iOS
 
 > [!TIP]
 > strudel can auto-manage device registration and development provisioning
-> profiles via the App Store Connect API. The usual flow is `strudel device register`
-> once, then `strudel device` to build, install, and launch. See
+> profiles via the App Store Connect API. The usual flow is `strudel devices add`
+> once, then `strudel run --device` to build, install, and launch. See
 > [iOS device builds](#ios-device-builds) for the full workflow, or set
 > `provisioning_profile` in `[build]` to manage the profile yourself.
 
-| Key                 | Type   | Default          | Description                                                                                              |
-| ------------------- | ------ | ---------------- | -------------------------------------------------------------------------------------------------------- |
+| Key                 | Type   | Default                        | Description                                                                                      |
+| ------------------- | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------ |
 | `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles) |
-| `apple_id`          | string | *(none)*         | Apple ID email; pre-fills the login prompt for the `"free"` path                                        |
-| `simulator`         | string | `"iPhone 16"`    | Simulator name for `strudel sim`; override with `--simulator`                                           |
-| `device`            | string | *(auto)*         | Device name or UDID for `strudel device`; auto-detected if unset                                        |
-| `deployment_target` | string | `"18.0"`         | iOS deployment target, e.g. `"17.0"`                                                                    |
-| `assets_dir`        | string | *(none)*         | `.xcassets` directory compiled into the bundle with `xcrun actool`                                      |
-| `app_icon_name`     | string | `"AppIcon"`      | Icon set name inside `assets_dir`                                                                        |
+| `apple_id`          | string | *(none)*                       | Apple ID email; pre-fills the login prompt for the `"free"` path                                 |
+| `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                              |
+| `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                            |
+| `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                             |
+| `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`                               |
+| `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                |
 
 ### `[[extensions]]` (optional)
 
@@ -307,21 +326,23 @@ To produce a plain compressed DMG with no special styling.
 plain = true
 ```
 
-### `[signing]` and `[notarize]` (optional in strudel.toml)
+### `[apple]` (optional in strudel.toml)
 
-Required for `release`. Each identifier is resolved in priority order:
-**env var > strudel.toml > [global config](#global-config)**. Secrets are
-environment-only and have no config key. See [Signing & notarization](#signing--notarization)
-for the full reference.
+Apple developer identifiers, shared by signing, notarization, and
+provisioning-profile management (the App Store Connect API key authenticates
+all three). Required for `release`. Each identifier is resolved in priority
+order: **env var > strudel.toml > [global config](#global-config)**. Secrets
+are environment-only and have no config key. See
+[Signing & notarization](#signing--notarization) for the full reference.
 
-| Key                       | Type    | Env var                  | Description                                               |
-| ------------------------- | ------- | ------------------------ | --------------------------------------------------------- |
-| `[signing] identity`      | string  | `APPLE_SIGNING_IDENTITY` | Signing identity                                          |
-| `[signing] team_id`       | string  | `APPLE_TEAM_ID`          | Apple Developer Team ID                                   |
-| `[notarize] api_issuer`   | string  | `APPLE_API_ISSUER`       | App Store Connect issuer UUID                             |
-| `[notarize] api_key`      | string  | `APPLE_API_KEY`          | App Store Connect key ID                                  |
-| `[notarize] api_key_path` | string  | `APPLE_API_KEY_PATH`     | Path to the `.p8` key file                                |
-| `[notarize] timeout`      | integer | —                        | Seconds to wait for notarization (`notarytool --timeout`) |
+| Key                        | Type    | Env var                  | Description                                               |
+| -------------------------- | ------- | ------------------------ | --------------------------------------------------------- |
+| `[apple] identity`         | string  | `APPLE_SIGNING_IDENTITY` | Signing identity                                          |
+| `[apple] team_id`          | string  | `APPLE_TEAM_ID`          | Apple Developer Team ID                                   |
+| `[apple] api_issuer`       | string  | `APPLE_API_ISSUER`       | App Store Connect issuer UUID                             |
+| `[apple] api_key`          | string  | `APPLE_API_KEY`          | App Store Connect key ID                                  |
+| `[apple] api_key_path`     | string  | `APPLE_API_KEY_PATH`     | Path to the `.p8` key file                                |
+| `[apple] notarize_timeout` | integer | —                        | Seconds to wait for notarization (`notarytool --timeout`) |
 
 > Secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`)
 > are read from the environment only and have no config key.
@@ -346,7 +367,7 @@ Swift package, or for monorepos with several executables that share signing and
 notarization credentials.
 
 - `platform` is required on every `[[target]]`, either `macos` or `ios`.
-- `[signing]` and `[notarize]` are always shared (top-level only).
+- `[apple]` is always shared (top-level only).
 - A top-level `[ios]` supplies defaults for iOS targets; a per-target `ios.*`
   field wins over the matching top-level field, field by field (not
   whole-section replacement).
@@ -354,11 +375,9 @@ notarization credentials.
 
 ```toml
 # Shared across all targets (top-level only):
-[signing]
-identity = "Developer ID Application: You (XXXXXXXXXX)"
-team_id  = "XXXXXXXXXX"
-
-[notarize]
+[apple]
+identity     = "Developer ID Application: You (XXXXXXXXXX)"
+team_id      = "XXXXXXXXXX"
 api_key      = "2X9R4HXF34"
 api_key_path = "AuthKey_2X9R4HXF34.p8"
 
@@ -384,17 +403,17 @@ ios.deployment_target = "18.0"
 ```
 
 When multiple targets are eligible for a command, strudel runs them all and
-prints a per-target header. Narrow to one target with `--target <app name>`:
+prints a per-target header. Narrow to one target by name:
 
 ```sh
-strudel build --target MyApp
-strudel sim   --target MyApp
+strudel build MyApp
+strudel run   MyApp
 ```
 
-Each command routes to the matching platform automatically:
-
-- `bundle` / `build` / `release` select macOS targets
-- `sim` / `device` select iOS targets.
+`build`, `run`, and `release` take the target name as a positional argument
+and dispatch per target based on its own platform (macOS or iOS). Other
+commands (`devices`, `profile`, `status`, `clean`) take `--target <app name>`
+instead.
 
 With multiple targets, each gets its own build directory (`.build/dist/<name>-macos`,
 `.build/dist/<name>-ios`) to avoid collisions; override per-target with
@@ -403,46 +422,48 @@ example or run `strudel help targets` for more.
 
 ## iOS device builds
 
-`strudel device` builds for a connected iOS device, then installs and launches
-it. strudel can auto-manage device registration and a development provisioning
-profile through the App Store Connect API, using the same credentials as
-notarization (see [Notarization auth](#notarization-auth)).
+`strudel run --device` builds for a connected iOS device, then installs and
+launches it. strudel can auto-manage device registration and a development
+provisioning profile through the App Store Connect API, using the same
+credentials as notarization (see [Notarization auth](#notarization-auth)).
 
 > [!IMPORTANT]
 > **Admin vs Developer API keys.** Registering devices and creating bundle IDs
 > and provisioning profiles modifies your App Store Connect account, so it
 > requires an API key with the **Admin** role. A lower-privilege **Developer**
 > key is enough for notarization (`strudel release`) but will fail with an
-> "insufficient permissions" error on `strudel device register`, `strudel
-> device`, or `strudel profile`. Either issue an Admin key for these flows, or
+> "insufficient permissions" error on `strudel devices add`, `strudel run
+> --device`, or `strudel profile`. Either issue an Admin key for these flows, or
 > register the device and create the profile manually in the
 > [Developer portal](https://developer.apple.com/account/resources/) and point
 > `provisioning_profile` at it.
 
 ```sh
 # One-time: register connected device(s) on the portal and track them locally
-strudel device register
+strudel devices add
 
 # Build, install, and launch on a connected device
-strudel device
+strudel run --device
 ```
 
-`strudel device register` registers connected devices on the App Store Connect
+`strudel devices add` registers connected devices on the App Store Connect
 portal and records them in `.strudel/devices.toml`. This file should be .gitignored
-since devices are per-developer.
+since devices are per-developer. `strudel devices` (no subcommand) lists the
+tracked devices.
 
-On the first `strudel device`, strudel looks up (or creates) the bundle ID,
-finds your development certificate, creates a provisioning profile embedding all
-specified devices, and caches it at `.strudel/<bundle_id>.mobileprovision`.
-Subsequent runs reuse the cached profile while it's still current, re-fetching
-automatically if it has expired or no longer covers every tracked device.
+On the first `strudel run --device`, strudel looks up (or creates) the bundle
+ID, finds your development certificate, creates a provisioning profile
+embedding all specified devices, and caches it at
+`.strudel/<bundle_id>.mobileprovision`. Subsequent runs reuse the cached
+profile while it's still current, re-fetching automatically if it has expired
+or no longer covers every tracked device.
 
 Useful flags and the standalone profile command:
 
 ```sh
-strudel device --device "iPhone 15"   # target specific tracked device(s)
-strudel profile                        # fetch/refresh the cached profile without building
-strudel profile --force                # recreate the profile even if current
+strudel run --device "iPhone 15"       # target specific tracked device(s)
+strudel profile fetch                  # fetch/refresh the cached profile without building
+strudel profile fetch --force          # recreate the profile even if current
 ```
 
 To opt out of auto-management and supply your own profile, set
@@ -464,18 +485,15 @@ Open it in your editor (creating it with a template if it doesn't exist):
 strudel config edit
 ```
 
-Only `[signing]` and `[notarize]` are supported here — `[app]`, `[build]`,
-`[ios]`, `[dmg]`, and `[[extensions]]` are project-specific and belong only
-in `strudel.toml`.
+Only `[apple]` is supported here — `[app]`, `[build]`, `[ios]`, `[dmg]`, and
+`[[extensions]]` are project-specific and belong only in `strudel.toml`.
 
 ```toml
 # ~/.config/strudel/config.toml
 
-[signing]
-identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
-team_id  = "XXXXXXXXXX"
-
-[notarize]
+[apple]
+identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+team_id      = "XXXXXXXXXX"
 api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 api_key      = "2X9R4HXF34"
 api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
@@ -500,13 +518,13 @@ Developer membership.
 After downloading and installing the certificate into the keychain on your machine, you
 can verify its presence with `security find-identity -p codesigning`.
 
-Then, either set `identity` in `strudel.toml` under `[signing]`, or pass it via the
+Then, either set `identity` in `strudel.toml` under `[apple]`, or pass it via the
 `APPLE_SIGNING_IDENTITY` env var.
 
-| Config key           | Environment variable     | Description                                             |
-| -------------------- | ------------------------ | ------------------------------------------------------- |
-| `[signing] identity` | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (XXXXXXXXXX)` |
-| `[signing] team_id`  | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                    |
+| Config key         | Environment variable     | Description                                             |
+| ------------------ | ------------------------ | ------------------------------------------------------- |
+| `[apple] identity` | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (XXXXXXXXXX)` |
+| `[apple] team_id`  | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                    |
 
 In CI, because the system keychain is not available, you should set the `APPLE_CERTIFICATE`
 and `APPLE_CERTIFICATE_PASSWORD` env vars instead. These cannot be stored in `strudel.toml`.
@@ -533,13 +551,13 @@ and `APPLE_CERTIFICATE_PASSWORD` env vars instead. These cannot be stored in `st
 **Identifiers** are non-secret and resolved in this priority order:
 env var > `strudel.toml` > `~/.config/strudel/config.toml` (see [Global config](#global-config)).
 
-| strudel.toml key          | Environment variable     | Description                                             |
-| ------------------------- | ------------------------ | ------------------------------------------------------- |
-| `[signing] identity`      | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (XXXXXXXXXX)` |
-| `[signing] team_id`       | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                    |
-| `[notarize] api_issuer`   | `APPLE_API_ISSUER`       | App Store Connect issuer UUID                           |
-| `[notarize] api_key`      | `APPLE_API_KEY`          | App Store Connect key ID                                |
-| `[notarize] api_key_path` | `APPLE_API_KEY_PATH`     | Path to the `AuthKey_XXXXXXYYYY.p8` file                |
+| strudel.toml key       | Environment variable     | Description                                             |
+| ---------------------- | ------------------------ | ------------------------------------------------------- |
+| `[apple] identity`     | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (XXXXXXXXXX)` |
+| `[apple] team_id`      | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                    |
+| `[apple] api_issuer`   | `APPLE_API_ISSUER`       | App Store Connect issuer UUID                           |
+| `[apple] api_key`      | `APPLE_API_KEY`          | App Store Connect key ID                                |
+| `[apple] api_key_path` | `APPLE_API_KEY_PATH`     | Path to the `AuthKey_XXXXXXYYYY.p8` file                |
 
 `APPLE_API_ISSUER` is only present for team Apple Developer accounts.
 

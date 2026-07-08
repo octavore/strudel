@@ -131,11 +131,9 @@ fn print_targets() {
         ## Example: macOS + iOS from one strudel.toml
         {ANSI_PURPLE}
         # Shared across all targets:
-        [signing]
-        identity = "Developer ID Application: You (XXXXXXXXXX)"
-        team_id  = "XXXXXXXXXX"
-
-        [notarize]
+        [apple]
+        identity     = "Developer ID Application: You (XXXXXXXXXX)"
+        team_id      = "XXXXXXXXXX"
         api_key      = "2X9R4HXF34"
         api_key_path = "AuthKey_2X9R4HXF34.p8"
 
@@ -172,7 +170,7 @@ fn print_targets() {
         - A config defines EITHER a top-level [app] OR one or more [[target]] blocks,
           never both. Mixing them is an error.
         - `platform` is required on every [[target]] block. Must be `"macos"` or `"ios"`.
-        - `[signing]` and `[notarize]` are always shared (top-level only).
+        - `[apple]` is always shared (top-level only).
         - `[ios]` at the top level supplies defaults for iOS targets; a per-target
           `ios.*` field wins over the matching top-level field, field by field.
 
@@ -181,12 +179,12 @@ fn print_targets() {
         When multiple targets are eligible for a command, strudel runs them all and
         prints a per-target header. To narrow to a single target:
         {ANSI_BLUE}
-        strudel build --target MyApp
-        strudel sim   --target MyApp
+        strudel build MyApp
+        strudel run   MyApp
         {ANSI_RESET}
-        Each command routes to the matching platform automatically:
-          bundle / build / release -> macOS targets
-          sim / device             -> iOS targets
+        `build`, `run`, and `release` take the target name as a positional argument
+        and dispatch per target based on its own platform (macOS or iOS). Other
+        commands (`devices`, `profile`, `status`, `clean`) take `--target` instead.
 
         ## Build directories
 
@@ -200,7 +198,7 @@ fn print_targets() {
 
         Assembling and signing [[extensions]] inside an iOS bundle is not yet
         supported. A warning is printed and the extensions list is ignored for
-        `strudel sim` and `strudel device`.
+        iOS `strudel build` and `strudel run`.
 
         ## See also
 
@@ -248,23 +246,20 @@ fn print_config() {
         [build_env]
         PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
         {ANSI_RESET}
-        ## [signing] — optional (required for `release`)
-        {ANSI_PURPLE}
-        [signing]
-        identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
-        team_id  = "XXXXXXXXXX"
-        {ANSI_RESET}
-        Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
-        See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
+        ## [apple] — optional (required for `release`)
 
-        ## [notarize] — optional (required for `release`)
+        Apple developer identifiers, shared by signing, notarization, and
+        provisioning-profile management (the App Store Connect API key
+        authenticates all three).
         {ANSI_PURPLE}
-        [notarize]
-        api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        api_key      = "2X9R4HXF34"
-        api_key_path = "AuthKey_2X9R4HXF34.p8"
+        [apple]
+        identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+        team_id      = "XXXXXXXXXX"
 
-        timeout = 600   # seconds to wait for notarytool; default: 600
+        api_issuer       = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        api_key          = "2X9R4HXF34"
+        api_key_path     = "AuthKey_2X9R4HXF34.p8"
+        notarize_timeout = 600   # seconds to wait for notarytool; default: 600
         {ANSI_RESET}
         Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
         See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
@@ -344,13 +339,13 @@ fn print_signing() {
         1. Environment: {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}, {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}
         2. Project config (strudel.toml):
         {ANSI_PURPLE}
-        [signing]
+        [apple]
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
         {ANSI_RESET}
         3. Global config (~/.config/strudel/config.toml) — shared across all projects:
         {ANSI_PURPLE}
-        [signing]
+        [apple]
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
         {ANSI_RESET}
@@ -415,7 +410,7 @@ fn print_notarize() {
         1. Environment: {ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}
         2. Project config (strudel.toml):
         {ANSI_PURPLE}
-        [notarize]
+        [apple]
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"  # Issuer ID
         api_key      = "2X9R4HXF34"                             # Key ID
         api_key_path = "AuthKey_2X9R4HXF34.p8"                  # path to .p8 file
@@ -423,7 +418,7 @@ fn print_notarize() {
         3. Global config (~/.config/strudel/config.toml) — shared across all projects.
            api_key_path here is typically an absolute path:
         {ANSI_PURPLE}
-        [notarize]
+        [apple]
         api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
         {ANSI_RESET}
         Edit the global config: {ANSI_BLUE}strudel config edit{ANSI_RESET}
@@ -431,8 +426,8 @@ fn print_notarize() {
 
         ## Timeout
         {ANSI_PURPLE}
-        [notarize]
-        timeout = 600   # seconds; default: 600
+        [apple]
+        notarize_timeout = 600   # seconds; default: 600
         {ANSI_RESET}
         Notarization typically completes in under a minute, but Apple's servers can
         occasionally be slow.
@@ -493,10 +488,10 @@ fn print_entitlements() {
         API (the same credentials used for notarization). The recommended workflow is:
 
           1. Run once to register your device on the portal and track it locally:
-               strudel device register
+               strudel devices add
 
-          2. Then just run strudel device — it fetches and caches the profile automatically:
-               strudel device
+          2. Then just run strudel run --device — it fetches and caches the profile automatically:
+               strudel run --device
 
         The profile is cached at .strudel/<bundle_id>.mobileprovision (gitignored). On every
         build strudel checks whether the cached profile is still current (not expired, includes
@@ -627,18 +622,24 @@ fn print_ios_device() {
 
         Register your device on the App Store Connect portal and track it locally:
         {ANSI_BLUE}
-          strudel device register
+          strudel devices add
         {ANSI_RESET}
         With a device connected and Developer Mode enabled, this registers it on the portal
-        and adds it to .strudel/devices.toml (gitignored). Repeat whenever you add a device.
+        (if not already) and adds it to .strudel/devices.toml (gitignored). Repeat whenever
+        you add a device.
 
-        To register a specific subset of connected devices:
+        To add a specific subset of connected devices:
         {ANSI_BLUE}
-          strudel device register --device "iPhone 15" --device "iPad Air"
+          strudel devices add --device "iPhone 15" --device "iPad Air"
+        {ANSI_RESET}
+        To register a device on the portal only, without a connection or local tracking
+        (e.g. a teammate's device):
+        {ANSI_BLUE}
+          strudel devices register --udid <UDID> --name "Their iPhone"
         {ANSI_RESET}
         ## Building and installing
         {ANSI_BLUE}
-          strudel device
+          strudel run --device
         {ANSI_RESET}
         On first run, strudel calls the App Store Connect API to:
           1. Look up (or create) the bundle ID
@@ -653,14 +654,18 @@ fn print_ios_device() {
 
         To target specific devices for one build (all must be in devices.toml):
         {ANSI_BLUE}
-          strudel device --device "iPhone 15" --device "iPhone 16 Pro"
+          strudel run --device "iPhone 15" --device "iPhone 16 Pro"
         {ANSI_RESET}
         ## Managing the profile manually
 
-        To fetch or force-refresh the cached profile without building:
+        To check the cached profile's status without building:
         {ANSI_BLUE}
           strudel profile
-          strudel profile --force
+        {ANSI_RESET}
+        To fetch or force-refresh the cached profile without building:
+        {ANSI_BLUE}
+          strudel profile fetch
+          strudel profile fetch --force
         {ANSI_RESET}
         To opt out of auto-management and use your own profile, set in strudel.toml:
         {ANSI_PURPLE}
@@ -680,8 +685,9 @@ fn print_ios_device() {
         Note: registering devices and creating bundle IDs and profiles requires an API key
         with the {ANSI_GREEN}Admin{ANSI_RESET} role. A {ANSI_GREEN}Developer{ANSI_RESET} key
         is fine for notarization but fails with "insufficient permissions" on
-        `strudel device register`, `strudel device`, and `strudel profile`. Either use an Admin
-        key or register the device and create the profile manually and set build.provisioning_profile.
+        `strudel devices add`, `strudel run --device`, and `strudel profile fetch`. Either use
+        an Admin key or register the device and create the profile manually and set
+        build.provisioning_profile.
 
         ## .strudel/devices.toml
 
@@ -781,16 +787,14 @@ fn print_global_config() {
 
         ## Supported keys
         {ANSI_PURPLE}
-        [signing]
-        identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
-        team_id  = "XXXXXXXXXX"
-
-        [notarize]
+        [apple]
+        identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+        team_id      = "XXXXXXXXXX"
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         api_key      = "2X9R4HXF34"
         api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
         {ANSI_RESET}
-        Only {ANSI_PURPLE}[signing]{ANSI_RESET} and {ANSI_PURPLE}[notarize]{ANSI_RESET} are supported here. {ANSI_PURPLE}[app]{ANSI_RESET}, {ANSI_PURPLE}[build]{ANSI_RESET}, {ANSI_PURPLE}[ios]{ANSI_RESET}, {ANSI_PURPLE}[dmg]{ANSI_RESET}, and
+        Only {ANSI_PURPLE}[apple]{ANSI_RESET} is supported here. {ANSI_PURPLE}[app]{ANSI_RESET}, {ANSI_PURPLE}[build]{ANSI_RESET}, {ANSI_PURPLE}[ios]{ANSI_RESET}, {ANSI_PURPLE}[dmg]{ANSI_RESET}, and
         {ANSI_PURPLE}[[extensions]]{ANSI_RESET} are project-specific and belong only in strudel.toml.
 
         ## Typical use
@@ -913,17 +917,18 @@ fn print_ios_free_provisioning() {
 
         3. Register your device and build as usual:
         {ANSI_BLUE}
-           strudel device register
-           strudel device
+           strudel devices add
+           strudel run --device
         {ANSI_RESET}
         ## Session management
         {ANSI_BLUE}
         strudel login                        # interactive sign-in
         strudel login --apple-id you@ex.com  # pre-fill the email
         strudel login clear                  # clear session and cached credentials
-        strudel login status                 # show login + provisioning state
+        strudel login status                 # show just the Apple ID session
+        strudel status                       # show full config + session + project state
         {ANSI_RESET}
-        The session token expires. If a `strudel device` run fails with an auth
+        The session token expires. If a `strudel run --device` run fails with an auth
         error, re-run `strudel login`.
 
         ## What strudel stores
@@ -941,11 +946,11 @@ fn print_ios_free_provisioning() {
         ## Profile refresh
 
         A fresh profile is fetched whenever the cached one is stale (expired or
-        missing a device). `strudel device` does this automatically. To trigger
+        missing a device). `strudel run --device` does this automatically. To trigger
         manually:
         {ANSI_BLUE}
-        strudel profile           # fetch if stale
-        strudel profile --force   # force-refresh
+        strudel profile fetch           # fetch if stale
+        strudel profile fetch --force   # force-refresh
         {ANSI_RESET}
         Each refresh revokes the previous dev certificate for this machine (to stay
         within the 2-cert limit per team) and generates a new RSA keypair + CSR.

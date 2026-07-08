@@ -1,8 +1,8 @@
 # strudel.toml — multi-target example: macOS + iOS from one Swift package
 #
 # This configuration builds two separate targets from the same repository:
-#   - macOS: `strudel bundle / build / release`
-#   - iOS:   `strudel sim / device`
+#   - macOS: `strudel build / run / release`
+#   - iOS:   `strudel run --sim / run --device`
 #
 # [apple] is shared across all targets. Per-target settings live inside each
 # [[target]] block.

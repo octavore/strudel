@@ -13,10 +13,10 @@ pub enum IosProvisioningBackend {
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IosSection {
-    /// iOS Simulator name for `strudel sim`. Default: `"iPhone 16"`.
+    /// iOS Simulator name for `strudel run --sim`. Default: `"iPhone 16"`.
     pub simulator: Option<String>,
 
-    /// Connected device name or UDID for `strudel device`.
+    /// Connected device name or UDID for `strudel run --device`.
     /// If unset, strudel auto-detects the first connected device.
     pub device: Option<String>,
 

@@ -91,7 +91,7 @@ impl IosBuilder {
             if filtered.is_empty() {
                 bail!(
                     "None of the connected devices match the given selectors.\n\
-                     Run `strudel device add` without `--device` to register \
+                     Run `strudel devices add` without `--device` to register \
                      all connected devices."
                 );
             }
@@ -121,7 +121,7 @@ impl IosBuilder {
         }
         cprintln!(
             "\n<green>Done!</green> Registered {} device(s). \
-             Run `strudel device` to build and install.",
+             Run `strudel run --device` to build and install.",
             to_register.len()
         );
         Ok(())
@@ -209,7 +209,7 @@ impl IosBuilder {
                     Some(udid) => udids.push(udid.to_string()),
                     None => bail!(
                         "Device {:?} is not tracked in .strudel/devices.toml.\n\
-                         Run `strudel device add` to register your device(s).",
+                         Run `strudel devices add` to register your device(s).",
                         selector
                     ),
                 }
@@ -222,7 +222,7 @@ impl IosBuilder {
                 Some(udid) => Ok(vec![udid.to_string()]),
                 None => bail!(
                     "Device {:?} (from [ios] config) is not tracked in .strudel/devices.toml.\n\
-                     Run `strudel device add` to register your device(s).",
+                     Run `strudel devices add` to register your device(s).",
                     selector
                 ),
             };
@@ -250,7 +250,7 @@ impl IosBuilder {
         for (udid, name) in &unregistered {
             cprintln!(
                 "<dim>Skipping untracked device {name} ({udid}) — run \
-                 `strudel device add` to add it.</dim>"
+                 `strudel devices add` to add it.</dim>"
             );
         }
 
@@ -373,7 +373,7 @@ fn resolve_connected(
     let resolution = match registered.len() {
         0 => bail!(
             "No connected devices are tracked in .strudel/devices.toml.\n\
-             Run `strudel device add` to register your device(s)."
+             Run `strudel devices add` to register your device(s)."
         ),
         1 => {
             let (udid, name) = registered.into_iter().next().unwrap();

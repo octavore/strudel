@@ -47,7 +47,7 @@ pub fn login(apple_id_email: Option<String>) -> Result<()> {
 
 /// After a successful sign-in, check whether the account's team has any
 /// devices registered on the Apple developer portal, and if not, point at
-/// `strudel device add`. Best-effort: a network/auth error here
+/// `strudel devices add`. Best-effort: a network/auth error here
 /// shouldn't fail `login` itself, since sign-in already succeeded.
 fn nudge_device_registration(apple_id: &AppleId, session: &Session) {
     let result = pick_team(apple_id, session).and_then(|team| {
@@ -59,7 +59,7 @@ fn nudge_device_registration(apple_id: &AppleId, session: &Session) {
         Ok(devices) if devices.is_empty() => {
             cprintln!(
                 "<dim>No devices registered on this account yet. Run \
-                 `strudel device add` to register your device(s).</dim>"
+                 `strudel devices add` to register your device(s).</dim>"
             );
         },
         Ok(_) => {},
@@ -128,7 +128,7 @@ pub fn auto_fetch_profile(cfg: &ResolvedConfig, paths: &Paths) -> Result<()> {
     if device_set.device.is_empty() {
         bail!(
             "No devices tracked in .strudel/devices.toml.\n\
-             Run `strudel device add` to register your device(s)."
+             Run `strudel devices add` to register your device(s)."
         );
     }
     let udids: Vec<&str> = device_set.device.iter().map(|d| d.udid.as_str()).collect();

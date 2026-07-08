@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
@@ -22,8 +23,11 @@ struct SimctlDevice {
 }
 
 impl IosBuilder {
-    /// Build for the iOS Simulator and launch in Simulator.app.
-    pub fn sim(&self, sim_override: Option<&str>) -> Result<()> {
+    /// Compile the iOS Simulator triple and assemble a `.app` bundle at
+    /// `<build_dir>/ios-sim/<target>.app`. Shared by `strudel build` (assembly
+    /// only) and `strudel run --sim` (assembly, then ad-hoc sign, install, and
+    /// launch).
+    fn build_sim_bundle(&self) -> Result<PathBuf> {
         let ios_settings = &self.ios;
         if !self.cfg.extensions.is_empty() {
             cprintln!(
@@ -31,7 +35,6 @@ impl IosBuilder {
                  [[extensions]] in this target will be ignored."
             );
         }
-        let sim_name = sim_override.unwrap_or(&ios_settings.simulator);
         let target = &self.cfg.target_name;
         let config_flag = if self.debug { "debug" } else { "release" };
         let deployment = &ios_settings.deployment_target;
@@ -57,7 +60,7 @@ impl IosBuilder {
             .run(&["xcrun", "-f", "swift"])
             .map(|s| if s.is_empty() { "swift".into() } else { s })?;
 
-        step(&format!("Building for iOS Simulator ({sim_name})..."));
+        step("Building for iOS Simulator...");
         let source = self.cfg.source_dir.to_str().unwrap();
         self.sh.run_streamed_env(
             ShellCommand::new(&swift)
@@ -82,6 +85,25 @@ impl IosBuilder {
         let bundle_dir = self.paths.build_dir.join("ios-sim");
         let app_bundle = bundle_dir.join(format!("{target}.app"));
         self.assemble_ios_bundle(&binary, &app_bundle, IosTarget::Simulator)?;
+
+        Ok(app_bundle)
+    }
+
+    /// `strudel build` for an iOS target: assemble a `.app` for the Simulator
+    /// triple. No signing, install, or launch — see `run --sim` for that.
+    pub fn build(&self) -> Result<()> {
+        let app_bundle = self.build_sim_bundle()?;
+        println!();
+        cprintln!("<green>Done! App bundle:</green>");
+        cprintln!("<cyan>{}</cyan>", app_bundle.display());
+        Ok(())
+    }
+
+    /// Build for the iOS Simulator and launch in Simulator.app.
+    pub fn sim(&self, sim_override: Option<&str>) -> Result<()> {
+        let ios_settings = &self.ios;
+        let sim_name = sim_override.unwrap_or(&ios_settings.simulator);
+        let app_bundle = self.build_sim_bundle()?;
 
         step("Ad-hoc signing simulator bundle...");
         self.sh.run(

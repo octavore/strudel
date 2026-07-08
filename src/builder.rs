@@ -23,7 +23,7 @@ mod macos;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use color_print::{cformat, cprintln};
 use indoc::formatdoc;
 pub(crate) use ios::decode_profile;
@@ -251,6 +251,33 @@ impl MacosBuilder {
         };
         cprintln!("<cyan>{}</cyan>", app_bundle.display());
         self.open_app()?;
+        Ok(())
+    }
+
+    /// Copy the built `.app` into `/Applications`, replacing any existing
+    /// install. Assumes the bundle has already been assembled by `bundle`,
+    /// `build`, or `release`.
+    pub fn install_to_applications(&self) -> Result<()> {
+        let app_bundle = &self.paths.app_bundle;
+        let dest = Path::new("/Applications").join(format!("{}.app", self.cfg.app_name));
+
+        println!();
+        if self.dry_run {
+            cprintln!("<dim>[dry-run]</dim> rm -rf {}", dest.display());
+            cprintln!(
+                "<dim>[dry-run]</dim> ditto {} {}",
+                app_bundle.display(),
+                dest.display()
+            );
+            return Ok(());
+        }
+
+        if dest.exists() {
+            std::fs::remove_dir_all(&dest)
+                .with_context(|| format!("Failed to remove existing {}", dest.display()))?;
+        }
+        self.copy_tree(app_bundle, &dest)?;
+        cprintln!("<green>Installed to</green> <cyan>{}</cyan>", dest.display());
         Ok(())
     }
 

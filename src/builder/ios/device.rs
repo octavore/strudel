@@ -14,7 +14,7 @@ use crate::shell::ShellCommand;
 impl IosBuilder {
     /// Build for one or more connected iOS devices, then install and launch.
     ///
-    /// Requires devices to be registered via `strudel device add`. Auto-
+    /// Requires devices to be registered via `strudel devices add`. Auto-
     /// fetches and caches a development provisioning profile via the App Store
     /// Connect API when one is not already current.
     pub fn device(&self, device_selectors: &[String]) -> Result<()> {
