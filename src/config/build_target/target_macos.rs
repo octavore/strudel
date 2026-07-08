@@ -5,7 +5,7 @@ use serde::Deserialize;
 use crate::config::resolved::ResolvedDmg;
 use crate::config::utils::resolve_to;
 
-/// `[dmg]` — DMG window customization for `strudel release`.
+/// DmgSection `[dmg]` contains DMG window customization for `strudel release`.
 ///
 /// The styled Finder window (a generated `.DS_Store`, applied headlessly by the
 /// `dmg` crate) is the default even when this section is absent. Add the

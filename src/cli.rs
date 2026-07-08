@@ -97,7 +97,8 @@ enum Cmd {
 
     /// Show documentation for commands and topics (including: config, targets,
     /// global-config, signing, notarize, entitlements, extensions, dylibs,
-    /// universal, ci, ios-device). Run with no argument to list topics.
+    /// universal, ci, ios-device, ios-free-provisioning). Run with no argument
+    /// to list topics.
     Help(HelpCmd),
 }
 

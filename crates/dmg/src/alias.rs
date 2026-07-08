@@ -67,7 +67,7 @@ pub fn build(vol_name: &str, mount_point: &Path, file_path: &Path) -> Result<Vec
     put_u32(&mut buf[0x70..0x74], file_ino);
     // 0x74: fileCreationDate (4)
     put_u32(&mut buf[0x74..0x78], file_crtime);
-    // 0x78: fileType — 'TIFF' if .tiff, else 0
+    // 0x78: fileType is 'TIFF' if .tiff, else 0
     let ft = if file_name.ends_with(".tiff") || file_name.ends_with(".tif") {
         0x54494646u32
     } else {

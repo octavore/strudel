@@ -1,19 +1,19 @@
-//! The build pipeline drivers. [`BuilderCore`] holds the resolved config,
-//! paths, and a [`Shell`], plus the handful of helpers shared by every
-//! platform. The two platform drivers wrap it:
+//! [`BuilderCore`] holds the resolved config, paths, and a [`Shell`], plus the
+//! helpers shared by every platform. This is wrapped by platform-specific
+//! drivers:
 //!
-//! - [`MacosBuilder`] — the macOS pipeline (compile, assemble, sign, notarize,
-//!   package a DMG). Entry points: `bundle`, `build`, `release`.
-//! - [`IosBuilder`] — the iOS pipeline (simulator, device, provisioning).
+//! - [`MacosBuilder`] for macOS apps (compile, assemble, sign, notarize,
+//!   package a DMG).
+//! - [`IosBuilder`] for iOS apps (simulator, device, provisioning).
 //!
 //! Both deref to [`BuilderCore`], so shared state (`self.cfg`, `self.sh`,
-//! `self.paths`, …) and shared helpers read the same in either driver. The
+//! `self.paths`, etc) and shared helpers are accessible from both. The
 //! work is split across submodules:
 //!
-//! - [`fs`] — dry-run-aware filesystem helpers (on [`BuilderCore`])
-//! - [`keychain`] — signing-credential preflight and certificate import
-//! - [`macos`] — the macOS pipeline stages
-//! - [`ios`] — the iOS pipeline stages
+//! - [`fs`] dry-run-aware filesystem helpers (on [`BuilderCore`])
+//! - [`keychain`] signing-credential preflight and certificate import
+//! - [`macos`] the macOS pipeline stages (todo: move MacOSBuilder here)
+//! - [`ios`] the iOS pipeline stages (todo: move IosBuilder here)
 
 mod fs;
 mod ios;

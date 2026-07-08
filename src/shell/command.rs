@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn command_expands_arg_groups_into_separate_argv_entries() {
         // Visual grouping in Display must not bleed into the actual process
-        // arguments — argv must still be split per element.
+        // arguments, argv must still be split per element.
         let cmd = ShellCommand::new("echo")
             .arg("a")
             .arg_group(["b", "c"])

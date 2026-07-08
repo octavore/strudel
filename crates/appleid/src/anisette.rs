@@ -44,7 +44,7 @@ impl AnisetteProvider {
 
             // OTP headers: only available when the account is registered with
             // AOSKit (i.e. signed in via System Settings > Apple Account).
-            // Omit them silently rather than failing — Apple may accept the
+            // Omit them silently rather than failing, Apple may accept the
             // request without them when the gs_token is otherwise valid.
             if let Ok(v) = nsobj_string(&otp_dict, "X-Apple-MD") {
                 h.insert("X-Apple-I-MD".to_string(), v);

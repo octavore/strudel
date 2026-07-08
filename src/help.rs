@@ -214,7 +214,7 @@ fn print_config() {
         Relative paths are resolved relative to the config file's directory.
         Override the config path with: {ANSI_BLUE}strudel --config path/to/strudel.toml <cmd>{ANSI_RESET}
 
-        ## [app] — required
+        ## [app] required
         {ANSI_PURPLE}
         [app]
         name         = "MyApp"              # display name, .app bundle name, binary name
@@ -222,7 +222,7 @@ fn print_config() {
         version      = "1.0.0"              # CFBundleShortVersionString
         build_number = "1"                  # CFBundleVersion
         {ANSI_RESET}
-        ## [build] — optional
+        ## [build] optional
         {ANSI_PURPLE}
         [build]
         source_dir             = "."                       # Swift package root; default: config file dir
@@ -239,14 +239,14 @@ fn print_config() {
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
         resources              = ["Assets/logo.png"]       # individual files to copy into Contents/Resources/
         {ANSI_RESET}
-        ## [build_env] — optional
+        ## [build_env] optional
 
         Extra env vars forwarded to {ANSI_BLUE}swift build{ANSI_RESET} (e.g. for pkg-config):
         {ANSI_PURPLE}
         [build_env]
         PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
         {ANSI_RESET}
-        ## [apple] — optional (required for `release`)
+        ## [apple] optional, but required for `release`
 
         Apple developer identifiers, shared by signing, notarization, and
         provisioning-profile management (the App Store Connect API key
@@ -264,17 +264,17 @@ fn print_config() {
         Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
         See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
 
-        ## [[target]] — optional, repeatable (multi-target configs)
+        ## [[target]] optional, repeatable (multi-target configs)
 
         Replace [app] with one or more [[target]] blocks to build multiple
         products or platforms (e.g. macOS + iOS) from the same strudel.toml.
         See: {ANSI_BLUE}strudel help targets{ANSI_RESET}
 
-        ## [[extensions]] — optional, repeatable
+        ## [[extensions]] optional, repeatable
 
         See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
 
-        ## [ios] — optional
+        ## [ios] optional
 
         Only valid inside an iOS [[target]] block, or as a top-level fallback for
         iOS targets in a multi-target config - the flat single-app form above is
@@ -287,7 +287,7 @@ fn print_config() {
         assets_dir        = "Sources/App/Assets.xcassets"  # xcassets for actool
         app_icon_name     = "AppIcon"    # icon set name inside assets_dir
 
-        # Provisioning backend — required for device builds. Choose one:
+        # Provisioning backend, required for device builds. Choose one:
         #   "app_store_connect"  paid account + App Store Connect API key; 1-year profiles
         #   "free"               any Apple ID, no paid account; 7-day profiles, max 3 devices
         provisioning = "app_store_connect"  # or "free"
@@ -295,7 +295,7 @@ fn print_config() {
         {ANSI_RESET}
         See {ANSI_BLUE}strudel help ios-device{ANSI_RESET} and {ANSI_BLUE}strudel help ios-free-provisioning{ANSI_RESET}.
 
-        ## [dmg] — optional overrides (styled Finder window is the default)
+        ## [dmg] optional overrides for macOS DMG window layout
         {ANSI_PURPLE}
         [dmg]
         plain          = false                         # set true for a plain UDZO DMG
@@ -311,8 +311,7 @@ fn print_config() {
         By default (even with no `[dmg]` section), strudel stages the app, an
         Applications symlink, and a generated `.DS_Store` that lays out the Finder
         window (icon positions, size, background), then builds the compressed DMG
-        directly from that folder. This is fully headless — no mounting, Finder,
-        or AppleScript required.
+        directly from that folder.
 
         To skip window configuration and produce a plain compressed DMG directly:
         {ANSI_PURPLE}
@@ -343,7 +342,7 @@ fn print_signing() {
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
         {ANSI_RESET}
-        3. Global config (~/.config/strudel/config.toml) — shared across all projects:
+        3. Global config (~/.config/strudel/config.toml) is shared across all projects:
         {ANSI_PURPLE}
         [apple]
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
@@ -380,8 +379,8 @@ fn print_signing() {
           2. Each .appex (with the extension's entitlements)
           3. Host .app (with the host entitlements)
 
-        Do not use --deep on the host sign — it would re-apply host entitlements
-        to nested bundles, which is incorrect.
+        We do not use --deep on the host sign as it would incorrectly re-apply host entitlements
+        to nested bundles.
 
         ## See also
 
@@ -415,7 +414,7 @@ fn print_notarize() {
         api_key      = "2X9R4HXF34"                             # Key ID
         api_key_path = "AuthKey_2X9R4HXF34.p8"                  # path to .p8 file
         {ANSI_RESET}
-        3. Global config (~/.config/strudel/config.toml) — shared across all projects.
+        3. Global config (~/.config/strudel/config.toml) is shared across all projects.
            api_key_path here is typically an absolute path:
         {ANSI_PURPLE}
         [apple]
@@ -490,7 +489,7 @@ fn print_entitlements() {
           1. Run once to register your device on the portal and track it locally:
                strudel devices add
 
-          2. Then just run strudel run --device — it fetches and caches the profile automatically:
+          2. Run fetches the profile and caches it automatically:
                strudel run --device
 
         The profile is cached at .strudel/<bundle_id>.mobileprovision (gitignored). On every
@@ -512,7 +511,7 @@ fn print_entitlements() {
 
         ## Extensions
 
-        Each extension gets its own entitlements file (required — extensions are sandboxed
+        Each extension gets its own entitlements file (required, extensions are sandboxed
         independently of the host app):
 
           [[extensions]]
@@ -590,8 +589,8 @@ fn print_extensions() {
 
         ## Sign order
 
-        Inside-out: embedded dylibs -> each .appex -> host .app. Never use --deep on the
-        host — it would apply host entitlements to nested bundles incorrectly.
+        Inside-out: embedded dylibs -> each .appex -> host .app. `--deep` is not used on the
+        host as it would apply host entitlements to nested bundles incorrectly.
     "#});
 }
 
@@ -735,7 +734,7 @@ fn print_dylibs() {
         ## Static libraries
 
         Static libraries (.a) are linked directly into the binary and do not need to be
-        listed in embed_libs — nothing to embed or sign.
+        listed in embed_libs, nothing to embed or sign.
     "#});
 }
 
@@ -831,7 +830,7 @@ fn print_ci() {
 
           {ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}    issuer UUID from App Store Connect
           {ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}       key ID (e.g. "2X9R4HXF34")
-          {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}  path to the .p8 file (or set inline — see below)
+          {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}  path to the .p8 file (or set inline, see below)
 
         ## GitHub Actions example
 

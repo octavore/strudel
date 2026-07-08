@@ -101,8 +101,8 @@ impl Shell {
 
     /// Run a command, streaming stdout/stderr live to the terminal.
     /// Use for long-running commands (e.g. `swift build`) where progress
-    /// should be visible. Output is not captured, so failures report only
-    /// the exit code — the diagnostics are already on screen.
+    /// should be visible. Output is not captured, failures report only
+    /// the exit code (since command output is streamed live).
     pub fn run_streamed_env(&self, shell_cmd: ShellCommand) -> Result<()> {
         shell_cmd.log(self.dry_run);
         if self.dry_run {

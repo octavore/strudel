@@ -58,15 +58,12 @@ impl GlobalConfig {
 }
 
 pub const GLOBAL_CONFIG_TEMPLATE: &str = indoc::indoc! {r#"
-    # ~/.config/strudel/config.toml — strudel global config
+    # strudel global config
     #
-    # Values here apply to every project on this machine. Each can be overridden
+    # Values here apply to all projects. Each can be overridden
     # per-project in strudel.toml, or via the matching environment variable.
     #
-    # Apple developer identifiers, shared by signing, notarization, and
-    # provisioning-profile management — or set via the matching env var
-    # (APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID, APPLE_API_*).
-    [apple]
+    # [apple]
     # identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
     # team_id      = "XXXXXXXXXX"
     # api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"

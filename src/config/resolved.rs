@@ -136,7 +136,7 @@ pub struct ResolvedConfig {
     pub apple_api_key: String,
     pub apple_api_key_path: Option<PathBuf>,
 
-    // Secrets — read from the environment only, never from strudel.toml.
+    // Secrets (read from the environment only, never from strudel.toml).
     pub apple_certificate: SecretString,
     pub apple_certificate_password: SecretString,
 }

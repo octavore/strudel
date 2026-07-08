@@ -35,7 +35,7 @@ pub struct ExtensionPaths {
     pub binary: PathBuf,
     pub info_plist: PathBuf,
     pub resources: PathBuf,
-    /// Generated plist for codesign — lives next to the host's
+    /// Generated plist for codesign. Lives next to the host's
     /// `Entitlements.plist` in the build dir.
     pub entitlements_plist: PathBuf,
 }
@@ -224,8 +224,8 @@ mod tests {
 
     #[test]
     fn app_name_with_spaces_is_preserved_literally() {
-        // The .app bundle and DMG names embed the app name verbatim —
-        // spaces and case are kept (matches Finder's display name).
+        // The .app bundle and DMG names embed the app name verbatim.
+        // Spaces and case are preserved matching Finder's display name.
         let p = Paths::new(&cfg("/out", "My App", "1.0"));
         assert_eq!(p.app_bundle, PathBuf::from("/out/My App.app"));
         assert_eq!(p.dmg, PathBuf::from("/out/My App-1.0.dmg"));

@@ -249,7 +249,7 @@ impl IosBuilder {
         // Hint about connected devices that aren't tracked rather than failing.
         for (udid, name) in &unregistered {
             cprintln!(
-                "<dim>Skipping untracked device {name} ({udid}) — run \
+                "<dim>Skipping untracked device {name} ({udid}). Run \
                  `strudel devices add` to add it.</dim>"
             );
         }

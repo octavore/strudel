@@ -27,7 +27,7 @@ pub struct ExtensionSection {
     /// is placed at `<name>.appex/Contents/MacOS/<target_name>`.
     pub target_name: String,
 
-    /// `CFBundleIdentifier` of the extension — typically a child of the host
+    /// `CFBundleIdentifier` of the extension. Typically a child of the host
     /// app's bundle id (e.g. `com.example.myapp.Extension`).
     pub bundle_id: String,
 
@@ -41,7 +41,7 @@ pub struct ExtensionSection {
     /// object.
     pub info_json_path: Option<PathBuf>,
 
-    /// JSON entitlements for the extension — required, since extensions are
+    /// JSON entitlements for the extension. Required, since extensions are
     /// sandboxed independently of the host app.
     pub entitlements_json_path: Option<PathBuf>,
 
@@ -123,21 +123,21 @@ impl ExtensionSection {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExtensionKindConfig {
     SafariWebExtension {
-        /// Directory whose contents (manifest.json, JS, HTML, icons, …) are
+        /// Directory whose contents (manifest.json, JS, HTML, icons, etc) are
         /// copied wholesale into `<name>.appex/Contents/Resources/`.
         resources_dir: PathBuf,
         /// `NSExtensionPrincipalClass`. Defaults to
-        /// `"<target_name>.SafariWebExtensionHandler"` — the Apple Xcode
-        /// template convention.
+        /// `"<target_name>.SafariWebExtensionHandler"` (Apple Xcode
+        /// template convention).
         principal_class: Option<String>,
     },
     AppExtension {
-        /// `NSExtensionPointIdentifier` — identifies the extension point this
+        /// `NSExtensionPointIdentifier` identifies the extension point this
         /// extension targets (e.g. `"com.apple.share-services"` for a Share
         /// Extension, `"com.apple.FinderSync"` for a Finder Sync Extension).
         extension_point_identifier: String,
-        /// `NSExtensionPrincipalClass`. Optional — some extension points
-        /// require it, others do not.
+        /// `NSExtensionPrincipalClass`. Optional, not all extension points
+        /// require it.
         principal_class: Option<String>,
     },
 }

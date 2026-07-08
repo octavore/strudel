@@ -7,7 +7,7 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 > [!IMPORTANT]
 > **Current limitations**
 > - **iOS support is still experimental.** `strudel run --sim` and `strudel run --device` work for local development, but distributing iOS apps is unsupported.
-> - iOS device builds require a paid Apple Developer account. strudel can auto-register devices and provision development profiles via the App Store Connect API (see [iOS device builds](#ios-device-builds)), but this has only been tested with a paid account.
+> - iOS device builds can use either a paid Apple Developer account (App Store Connect API, 1-year profiles) or any free Apple ID (`strudel login`, 7-day profiles, max 3 devices). strudel auto-registers devices and provisions development profiles for both (see [iOS device builds](#ios-device-builds)).
 > - **App Store distribution is not supported yet.** strudel supports direct/notarized distribution (Developer ID) for macOS apps, but there is currently no support for submitting to the Mac App Store or iOS App Store.
 
 - [Installation](#installation)
@@ -70,14 +70,17 @@ Note that the env vars above can also be stored in the `strudel.toml` config fil
 strudel [OPTIONS] <COMMAND>
 
 Commands:
+  init       Scaffold a strudel.toml in the given directory
+  login      Sign in with an Apple ID for free iOS provisioning (7-day profiles)
   build      Assemble the app bundle. Signed on macOS by default; add --unsigned to skip
   run        Build and launch locally (macOS: sign + open; iOS: simulator or device)
   release    Full distributable: build, sign, notarize, and package DMG (macOS only)
   devices    Manage tracked iOS devices; bare command lists them
-  profile    Fetch (or refresh) the development provisioning profile for iOS device builds
-  init       Scaffold a strudel.toml in the given directory
-  config     Manage global strudel config (~/.config/strudel/config.toml)
+  profile    Show provisioning-profile status; `profile fetch` fetches/refreshes it
+  clean      Remove the strudel output directory and run `swift package clean`
   make-icns  Convert a PNG to .icns using sips + iconutil
+  config     Manage global strudel config (~/.config/strudel/config.toml)
+  status     Show overall status: toolchain, config, session, and per-target state
   help       Show documentation for a topic (run `strudel help` to list topics)
 
 Options:
@@ -93,8 +96,8 @@ config; other commands (`devices`, `profile`, `status`, `clean`) take
 
 `strudel help <topic>` has extended documentation for many subjects beyond the
 subcommands above, including `config`, `targets`, `signing`, `notarize`,
-`entitlements`, `extensions`, `ios-device`, and more. Run `strudel help` with no
-argument to list every topic.
+`entitlements`, `extensions`, `ios-device`, `ios-free-provisioning`, and more.
+Run `strudel help` with no argument to list every topic.
 
 ### `init`
 
@@ -115,7 +118,7 @@ release`, assembles `.app`, and codesigns it (no notarization or DMG). On iOS
 it assembles a `.app` for the Simulator triple, but doesn't install or launch
 it.
 
-If `sign_identity` (`APPLE_SIGNING_IDENTITY`) is set, `strudel` signs with that identity;
+If a signing identity (`[apple] identity` / `APPLE_SIGNING_IDENTITY`) is set, `strudel` signs with that identity;
 otherwise it signs **ad-hoc** (`codesign --sign -`), which needs no certificate
 or Apple account.
 
@@ -126,6 +129,7 @@ easily. For that, you will need to run `strudel release` to have your app notari
 strudel build
 strudel build MyApp          # select one target by app name
 strudel build --open         # open the .app after a successful build
+strudel build --install      # copy the built .app into /Applications
 strudel build --debug        # build with the debug configuration instead of release
 strudel build --dry-run      # print commands without executing them
 ```
@@ -150,6 +154,7 @@ strudel run --sim                     # iOS: launch in the Simulator (default)
 strudel run --sim "iPhone 16 Pro"     # iOS: override the simulator name
 strudel run --device                  # iOS: launch on a connected device
 strudel run --device "iPhone 15"      # iOS: target a specific tracked device
+strudel run --debug                   # build with the debug configuration instead of release
 strudel run --dry-run                 # print commands without executing them
 ```
 
@@ -180,7 +185,7 @@ resubmitting. Run `strudel help notarize` for more.
 
 ## Config file structure
 
-The config file (`strudel.toml` by default) is TOML, organized into six
+The config file (`strudel.toml` by default) is TOML, organized into seven
 sections. Relative paths are resolved **relative to the config file's directory**
 unless absolute. Unknown keys are rejected, so typos surface as errors. See the HelloWorldApp
 [`strudel.toml`](./examples/HelloWorldApp/strudel.toml) for an annotated template.
@@ -424,8 +429,20 @@ example or run `strudel help targets` for more.
 
 `strudel run --device` builds for a connected iOS device, then installs and
 launches it. strudel can auto-manage device registration and a development
-provisioning profile through the App Store Connect API, using the same
-credentials as notarization (see [Notarization auth](#notarization-auth)).
+provisioning profile using one of two backends, selected by `[ios]
+provisioning` in `strudel.toml`:
+
+- `"app_store_connect"` — a paid Apple Developer account, driven through the
+  App Store Connect API using the same credentials as notarization (see
+  [Notarization auth](#notarization-auth)). Produces 1-year profiles.
+- `"free"` — any Apple ID, no paid account. Run `strudel login` once to sign
+  in, then use the same device workflow below. Produces 7-day profiles, with a
+  limit of 3 devices and 10 App IDs per team. Run `strudel help
+  ios-free-provisioning` for the full walkthrough.
+
+Both backends share the device and profile workflow below; the free path just
+adds the one-time `strudel login`. `strudel status` shows the current session
+and per-target provisioning state.
 
 > [!IMPORTANT]
 > **Admin vs Developer API keys.** Registering devices and creating bundle IDs
@@ -433,7 +450,7 @@ credentials as notarization (see [Notarization auth](#notarization-auth)).
 > requires an API key with the **Admin** role. A lower-privilege **Developer**
 > key is enough for notarization (`strudel release`) but will fail with an
 > "insufficient permissions" error on `strudel devices add`, `strudel run
-> --device`, or `strudel profile`. Either issue an Admin key for these flows, or
+> --device`, or `strudel profile fetch`. Either issue an Admin key for these flows, or
 > register the device and create the profile manually in the
 > [Developer portal](https://developer.apple.com/account/resources/) and point
 > `provisioning_profile` at it.

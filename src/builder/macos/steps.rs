@@ -363,7 +363,7 @@ impl MacosBuilder {
 
         // With no identity configured, sign ad-hoc (`--sign -`): no certificate
         // or account needed, enough to exercise entitlements locally. A real
-        // identity (and notarization) is required to distribute — see `release`.
+        // identity (and notarization) is required to distribute. See `release`.
         let adhoc = self.cfg.sign_identity.is_empty();
 
         // Create the base codesign command. The hardened runtime and a trusted
@@ -373,7 +373,7 @@ impl MacosBuilder {
         // This is necessary to prevent crashes when the app attempts to load embedded
         // frameworks that do not share the same Team ID.
         let (identity, msg) = if adhoc {
-            ("-", " (ad-hoc — no signing identity configured)...")
+            ("-", " (ad-hoc: no signing identity configured)...")
         } else {
             (self.cfg.sign_identity.as_str(), "")
         };
@@ -407,7 +407,7 @@ impl MacosBuilder {
         // Sign extensions inside-out: each `.appex` must be signed with its
         // own entitlements before the host bundle is sealed. A single
         // `codesign --deep` pass over the host would re-use the host's
-        // entitlements for the nested bundle, which is wrong — the
+        // entitlements for the nested bundle, which is wrong: the
         // extension is sandboxed independently and typically needs a
         // different set.
         for (ext, ext_paths) in self.cfg.extensions.iter().zip(self.paths.extensions.iter()) {
@@ -555,7 +555,7 @@ impl MacosBuilder {
                 temp_dmg,
             )?;
         } else {
-            // Plain UDZO: no custom window layout — use staging folder approach.
+            // Plain UDZO: no custom window layout, use staging folder approach.
             let staging = &self.paths.dmg_staging;
             let staging_str = staging.to_str().unwrap();
             let staging_app = staging.join(format!("{app_name}.app"));

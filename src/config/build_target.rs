@@ -34,7 +34,7 @@ impl BuildTarget {
     }
 }
 
-/// `[app]` — required application metadata.
+/// AppSection `[app]` contains required application metadata.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct AppSection {
@@ -44,7 +44,8 @@ pub struct AppSection {
     pub build_number: String,
 }
 
-/// `[build]` — inputs and outputs. All optional, with defaults.
+/// BuildSection `[build]` contains inputs and outputs. All optional, with
+/// defaults.
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct BuildSection {

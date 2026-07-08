@@ -26,10 +26,10 @@ pub struct DmgSpec {
 
 /// Create a compressed, styled DMG at `output`.
 ///
-/// We pre-generate the `.DS_Store` that carries the Finder window layout, so
-/// there is no need to mount a read-write image and drive Finder/AppleScript.
+/// We pre-generate the `.DS_Store` that carries the Finder window layout, to
+/// avoid having to mount a read-write image and drive Finder/AppleScript.
 /// Instead the volume is built from a staging folder in a single
-/// `hdiutil create -srcfolder` call — no attach, no flaky detach loop.
+/// `hdiutil create -srcfolder` call.
 pub fn create(spec: &DmgSpec, output: &Path) -> Result<()> {
     let tmp = tempfile::tempdir().context("creating temp dir for DMG build")?;
     let staging = tmp.path().join("staging");
@@ -90,7 +90,7 @@ fn populate(spec: &DmgSpec, staging: &Path) -> Result<()> {
         fs::copy(bg_src, &bg_dest).context("copying background image")?;
 
         // The alias is built from the staging paths, so its CNIDs won't match
-        // the final volume — Finder resolves it by name/relative path instead,
+        // the final volume. Finder resolves it by name/relative path instead,
         // which is stable (`<vol>/.background/<name>`).
         let alias_bytes =
             alias::build(&spec.vol_name, staging, &bg_dest).context("building alias record")?;

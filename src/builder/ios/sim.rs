@@ -90,7 +90,7 @@ impl IosBuilder {
     }
 
     /// `strudel build` for an iOS target: assemble a `.app` for the Simulator
-    /// triple. No signing, install, or launch — see `run --sim` for that.
+    /// triple. No signing, install, or launch. See `run --sim` for that.
     pub fn build(&self) -> Result<()> {
         let app_bundle = self.build_sim_bundle()?;
         println!();

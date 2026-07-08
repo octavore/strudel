@@ -52,7 +52,7 @@ impl ReleaseCmd {
             .release(),
             ResolvedTargetPlatform::Ios(_) => {
                 bail!(
-                    "`release` is not supported yet for iOS targets — use \
+                    "`release` is not supported yet for iOS targets. Use \
                      `run --device` instead."
                 )
             },

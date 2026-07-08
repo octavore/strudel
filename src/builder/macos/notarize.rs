@@ -95,7 +95,7 @@ impl MacosBuilder {
                     format!("{}m{}s", elapsed_s / 60, elapsed_s % 60)
                 };
                 cprint!(
-                    "\x1b[2K\r  <dim>{apple_status} — {waited} elapsed, next poll in {remaining}s</dim>"
+                    "\x1b[2K\r  <dim>{apple_status}: {waited} elapsed, next poll in {remaining}s</dim>"
                 );
                 std::io::stdout().flush().ok();
                 sleep(Duration::from_secs(1));

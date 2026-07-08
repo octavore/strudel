@@ -9,7 +9,7 @@ pub enum IosProvisioningBackend {
     AppStoreConnect,
 }
 
-/// `[ios]` — optional settings for iOS simulator and device workflows.
+/// IosSection `[ios]` optional settings for iOS simulator and device workflows.
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IosSection {
