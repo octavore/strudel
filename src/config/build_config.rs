@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use indoc::formatdoc;
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
@@ -122,6 +123,7 @@ impl BuildConfig {
             },
         };
 
+        ensure_unique_target_ids(&targets)?;
         Ok(ResolvedProject { targets })
     }
 
@@ -133,6 +135,24 @@ impl BuildConfig {
     ) -> Result<ResolvedConfig> {
         Ok(self.resolve_project(config_dir, global)?.targets.remove(0))
     }
+}
+
+/// Target ids are derived as `{platform}/{app.name}`, so two `[[target]]`
+/// blocks sharing a platform must not share an app name. Such targets would be
+/// indistinguishable to `--target` and would resolve to the same default build
+/// directory, silently clobbering each other's artifacts.
+fn ensure_unique_target_ids(targets: &[ResolvedConfig]) -> Result<()> {
+    let mut seen = HashSet::new();
+    for target in targets {
+        if !seen.insert(target.target_id.as_str()) {
+            bail!(
+                "Duplicate target {:?}: two [[target]] blocks share a platform and an \
+                 app.name. Give them distinct app.name values.",
+                target.target_id
+            );
+        }
+    }
+    Ok(())
 }
 
 fn resolve_target(
@@ -151,13 +171,14 @@ fn resolve_target(
         ..
     } = target;
 
+    let target_id = format!("{}/{}", platform.as_str(), app.name);
     let source_dir = resolve_path(config_dir, build.source_dir.unwrap_or(".".into()));
     // The single-target form has exactly one target, so its build dir doesn't
-    // need a name/platform suffix to stay unique.
+    // need the target id to stay unique.
     let build_dir_default = if is_single {
         ".build/dist".to_string()
     } else {
-        format!(".build/dist/{}-{}", app.name, platform.as_str())
+        format!(".build/dist/{target_id}")
     };
     let build_dir = resolve_path(
         &source_dir,
@@ -213,6 +234,7 @@ fn resolve_target(
 
     Ok(ResolvedConfig {
         platform: Some(platform),
+        target_id,
         // User-supplied input paths are resolved relative to the config file's
         // directory (the one fixed anchor the user reasons about), independent of
         // `source_dir`. info_json_path and icon are optional with no default.
@@ -922,8 +944,47 @@ mod tests {
         assert_eq!(project.targets.len(), 2);
         assert_eq!(project.targets[0].platform, Some(Platform::Macos));
         assert_eq!(project.targets[0].app_name, "MyApp");
+        assert_eq!(project.targets[0].target_id, "macos/MyApp");
         assert_eq!(project.targets[1].platform, Some(Platform::Ios));
         assert_eq!(project.targets[1].app_name, "MyApp");
+        assert_eq!(project.targets[1].target_id, "ios/MyApp");
+    }
+
+    #[test]
+    fn same_platform_and_app_name_is_a_duplicate_target() {
+        // Two iOS targets sharing an app name (e.g. an iPhone and an iPad app)
+        // would collide on both --target and the default build directory.
+        let err = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "MyApp"
+            app.bundle_id = "com.example.myapp.phone"
+            app.version = "1"
+            app.build_number = "1"
+            ios.provisioning = "free"
+
+            [[target]]
+            platform = "ios"
+            app.name = "MyApp"
+            app.bundle_id = "com.example.myapp.pad"
+            app.version = "1"
+            app.build_number = "1"
+            ios.provisioning = "free"
+        "#})
+        .unwrap()
+        .resolve_project(Path::new("/cfg"), None)
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Duplicate target \"ios/MyApp\""), "got: {msg}");
+    }
+
+    #[test]
+    fn same_app_name_on_different_platforms_is_allowed() {
+        // The whole point of the platform segment: one product, two targets.
+        parse_build_config(MULTI)
+            .unwrap()
+            .resolve_project(Path::new("/cfg"), None)
+            .expect("macos/MyApp and ios/MyApp are distinct target ids");
     }
 
     #[test]
@@ -1023,14 +1084,14 @@ mod tests {
             .unwrap()
             .resolve_project(Path::new("/cfg"), None)
             .unwrap();
-        // Multi-target: each target gets .build/dist/<name>-<platform>.
+        // Multi-target: each target gets .build/dist/<target-id>.
         assert_eq!(
             project.targets[0].build_dir,
-            PathBuf::from("/cfg/.build/dist/MyApp-macos")
+            PathBuf::from("/cfg/.build/dist/macos/MyApp")
         );
         assert_eq!(
             project.targets[1].build_dir,
-            PathBuf::from("/cfg/.build/dist/MyApp-ios")
+            PathBuf::from("/cfg/.build/dist/ios/MyApp")
         );
     }
 

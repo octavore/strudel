@@ -59,6 +59,7 @@ pub const MULTI: &str = indoc::indoc! {r#"
 
 pub static RESOLVED: LazyLock<ResolvedConfig> = LazyLock::new(|| ResolvedConfig {
     platform: None,
+    target_id: "A".into(),
     app_name: "A".into(),
     bundle_id: "b".into(),
     version: "1".into(),

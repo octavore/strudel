@@ -7,7 +7,7 @@ use crate::{builder, config};
 
 #[derive(clap::Args)]
 pub(crate) struct CleanCmd {
-    /// Select a target by app name (multi-target configs only)
+    /// Select a target by id
     #[arg(long)]
     target: Option<String>,
 

@@ -176,21 +176,32 @@ fn print_targets() {
 
         ## Selecting targets at runtime
 
+        Every target has an id of `<platform>/<app.name>`, e.g. `macos/MyApp` and
+        `ios/MyApp`. Two targets on the same platform may not share an app name.
+
         When multiple targets are eligible for a command, strudel runs them all and
-        prints a per-target header. To narrow to a single target:
+        prints a per-target header. To narrow to a single target, give any substring
+        of its id, eg:
         {ANSI_BLUE}
-        strudel build MyApp
-        strudel run   MyApp
+        strudel build ios/MyApp    # the whole id
+        strudel build mac          # a prefix of the platform
+        strudel build MyApp        # the app name
         {ANSI_RESET}
-        `build`, `run`, and `release` take the target name as a positional argument
-        and dispatch per target based on its own platform (macOS or iOS). Other
-        commands (`devices`, `profile`, `status`, `clean`) take `--target` instead.
+        A selector must select exactly one target. `MyApp` above works only if a
+        single target carries that app name; when both a macOS and an iOS target do,
+        strudel will report an error. Exact id matches always works, eg `ios/App`
+        selects that target even alongside `ios/AppPro`.
+
+        `build`, `run`, and `release` take the selector as a positional argument and
+        dispatch per target based on its own platform (macOS or iOS). Other commands
+        (`devices`, `profile`, `status`, `clean`) take `--target` instead.
 
         ## Build directories
 
-        With multiple targets, each gets its own build directory to avoid collisions:
-          .build/dist/<name>-macos
-          .build/dist/<name>-ios
+        With multiple targets, each gets its own build directory, named for its target
+        id so they cannot collide:
+          .build/dist/macos/<name>
+          .build/dist/ios/<name>
 
         Override per-target with {ANSI_PURPLE}build.build_dir{ANSI_RESET}.
 

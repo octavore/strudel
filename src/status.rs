@@ -69,15 +69,15 @@ pub fn profile_info(config_path: &Path, target: Option<&str>) -> Result<()> {
         .ok()
         .and_then(|d| read_session(&d.session_json));
 
-    for cfg in &project.targets {
-        if let Some(name) = target
-            && cfg.app_name != name
-        {
-            continue;
-        }
+    let targets = match target {
+        Some(selector) => vec![project.resolve_target(selector)?],
+        None => project.targets.iter().collect(),
+    };
+
+    for cfg in targets {
         cprintln!(
             "<bold,cyan>{}</bold,cyan>  <dim>{}</dim>",
-            cfg.app_name,
+            cfg.target_id,
             cfg.bundle_id
         );
         match &cfg.target_platform {
@@ -97,7 +97,7 @@ pub fn devices_list(config_path: &Path, target: Option<&str>) -> Result<()> {
 
     for cfg in targets {
         if multi {
-            cprintln!("<bold,cyan>{}</bold,cyan>", cfg.app_name);
+            cprintln!("<bold,cyan>{}</bold,cyan>", cfg.target_id);
         }
         let paths = Paths::new(cfg);
         let set = DeviceSet::load(&paths.devices_toml)?;
@@ -216,8 +216,8 @@ fn project_section(config_path: &Path, target: Option<&str>, session: Option<&Se
 
     header("Project", Some(config_path));
     for cfg in &project.targets {
-        if let Some(name) = target
-            && cfg.app_name != name
+        if let Some(selector) = target
+            && !cfg.target_id.contains(selector)
         {
             continue;
         }
@@ -232,7 +232,7 @@ fn target_block(cfg: &ResolvedConfig, session: Option<&Session>) {
     };
     cprintln!(
         "  target: <bold,cyan>{}</bold,cyan> <dim>{}</dim>",
-        cfg.app_name,
+        cfg.target_id,
         cfg.bundle_id
     );
 

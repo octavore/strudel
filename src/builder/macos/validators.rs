@@ -210,6 +210,7 @@ mod tests {
     fn empty_cfg() -> ResolvedConfig {
         ResolvedConfig {
             platform: None,
+            target_id: "A".into(),
             app_name: "A".into(),
             bundle_id: "b".into(),
             version: "1".into(),

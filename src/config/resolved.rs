@@ -64,15 +64,22 @@ pub struct ResolvedProject {
 }
 
 impl ResolvedProject {
-    /// Return the subset of targets eligible for `platform`, optionally
-    /// filtered by `name` (matched against `app_name`).
+    /// Resolve a `--target` selector against every target in the project.
+    pub fn resolve_target(&self, selector: &str) -> Result<&ResolvedConfig> {
+        let all: Vec<&ResolvedConfig> = self.targets.iter().collect();
+        resolve_one(&all, selector)
+    }
+
+    /// Return the subset of targets eligible for `platform`, narrowed to one
+    /// when a `--target` selector is given.
     ///
     /// - Agnostic targets (`platform: None`) are eligible for every platform.
-    /// - `allow_all = true` returns all eligible when no name is given.
-    /// - `allow_all = false` with >1 eligible target (and no name) is an error.
+    /// - `allow_all = true` returns all eligible when no selector is given.
+    /// - `allow_all = false` with >1 eligible target (and no selector) is an
+    ///   error.
     pub fn select(
         &self,
-        name: Option<&str>,
+        selector: Option<&str>,
         platform: Platform,
         allow_all: bool,
     ) -> Result<Vec<&ResolvedConfig>> {
@@ -86,39 +93,82 @@ impl ResolvedProject {
             bail!("No {} targets in strudel.toml", platform.label());
         }
 
-        if let Some(name) = name {
-            let matched: Vec<&ResolvedConfig> = eligible
-                .iter()
-                .filter(|t| t.app_name == name)
-                .copied()
-                .collect();
-            if matched.is_empty() {
-                let available: Vec<&str> = eligible.iter().map(|t| t.app_name.as_str()).collect();
+        if let Some(selector) = selector {
+            if !eligible.iter().any(|t| t.target_id.contains(selector))
+                && let Some(other) = self.targets.iter().find(|t| t.target_id.contains(selector))
+                && let Some(other_platform) = other.platform
+            {
                 bail!(
-                    "No {} target named {name:?}. Available: {}",
-                    platform.label(),
-                    available.join(", ")
+                    "Target {:?} is a {} target; this command only runs {} targets.",
+                    other.target_id,
+                    other_platform.label(),
+                    platform.label()
                 );
             }
-            return Ok(matched);
+            return Ok(vec![resolve_one(&eligible, selector)?]);
         }
 
         if allow_all || eligible.len() == 1 {
             return Ok(eligible);
         }
 
-        let available: Vec<&str> = eligible.iter().map(|t| t.app_name.as_str()).collect();
         bail!(
             "Multiple {} targets; select one with --target. Available: {}",
             platform.label(),
-            available.join(", ")
+            target_ids(&eligible)
         );
     }
+}
+
+/// Resolve a selector to exactly one of `candidates`. Anything that matches
+/// zero or more than one target is an error: a selector always names a single
+/// target, and the caller is told which ids to choose between.
+fn resolve_one<'a>(
+    candidates: &[&'a ResolvedConfig],
+    selector: &str,
+) -> Result<&'a ResolvedConfig> {
+    // Prefer exact id matches over substring matches, in case one target id
+    // is a substring of another.
+    if let Some(exact) = candidates.iter().find(|t| t.target_id == selector) {
+        return Ok(exact);
+    }
+
+    let matched: Vec<&ResolvedConfig> = candidates
+        .iter()
+        .copied()
+        .filter(|t| t.target_id.contains(selector))
+        .collect();
+
+    match matched.as_slice() {
+        [one] => Ok(one),
+        [] => bail!(
+            "No target matching {selector:?}. Available: {}",
+            target_ids(candidates)
+        ),
+        many => bail!(
+            "Target {selector:?} is ambiguous; it matches {}. Select one by its full target id.",
+            target_ids(many)
+        ),
+    }
+}
+
+fn target_ids(targets: &[&ResolvedConfig]) -> String {
+    targets
+        .iter()
+        .map(|t| t.target_id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub platform: Option<Platform>,
+    /// Synthetic target identity, `{platform}/{app_name}` (e.g. `macos/MyApp`).
+    /// Unique within a project. Selects the target on the command line, labels
+    /// its output, and names its default build directory. Distinct from
+    /// `app_name`, which is the product identity baked into the bundle, and
+    /// from `target_name`, which is the Swift executable target.
+    pub target_id: String,
     pub app_name: String,
     pub bundle_id: String,
     pub version: String,
@@ -249,13 +299,16 @@ impl From<ResolvedIosSection> for ResolvedTargetPlatform {
 
 #[cfg(test)]
 mod select_tests {
+    use std::path::Path;
+
+    use indoc::indoc;
+
     use crate::config::build_config::BuildConfig;
     use crate::config::build_target::Platform;
     use crate::config::fixtures::MULTI;
     use crate::config::resolved::ResolvedProject;
 
     fn two_target_project() -> ResolvedProject {
-        use std::path::Path;
         let cfg: BuildConfig = toml::from_str(MULTI).unwrap();
         cfg.resolve_project(Path::new("/cfg"), None).unwrap()
     }
@@ -274,10 +327,6 @@ mod select_tests {
 
     #[test]
     fn no_matching_platform_is_error() {
-        // Build a macos-only project, then ask for iOS.
-        use std::path::Path;
-
-        use indoc::indoc;
         let cfg: BuildConfig = toml::from_str(indoc! { r#"
             [[target]]
             platform = "macos"
@@ -303,10 +352,77 @@ mod select_tests {
     }
 
     #[test]
-    fn ambiguous_without_target_flag_is_error() {
-        use std::path::Path;
+    fn any_substring_of_any_id_spelling_selects_the_target() {
+        let proj = two_target_project();
+        for selector in ["macos/MyApp", "macos", "mac", "macos/My"] {
+            let matched = proj.resolve_target(selector).unwrap();
+            assert_eq!(matched.target_id, "macos/MyApp", "selector {selector:?}");
+        }
+    }
 
-        use indoc::indoc;
+    #[test]
+    fn substring_matching_is_case_sensitive() {
+        let proj = two_target_project();
+        assert!(proj.resolve_target("MacOS").is_err());
+        assert!(proj.resolve_target("myapp").is_err());
+    }
+
+    #[test]
+    fn ambiguous_selector_is_error_listing_full_ids() {
+        let proj = two_target_project();
+        for selector in ["MyApp", "os/"] {
+            let err = proj.resolve_target(selector).unwrap_err();
+            let msg = format!("{err}");
+            assert!(msg.contains("ambiguous"), "selector {selector:?}: {msg}");
+            assert!(msg.contains("macos/MyApp"), "selector {selector:?}: {msg}");
+            assert!(msg.contains("ios/MyApp"), "selector {selector:?}: {msg}");
+        }
+    }
+
+    #[test]
+    fn an_exact_id_beats_a_substring_of_a_longer_id() {
+        let cfg: BuildConfig = toml::from_str(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "App"
+            app.bundle_id = "com.a"
+            app.version = "1"
+            app.build_number = "1"
+            ios.provisioning = "free"
+
+            [[target]]
+            platform = "ios"
+            app.name = "AppPro"
+            app.bundle_id = "com.b"
+            app.version = "1"
+            app.build_number = "1"
+            ios.provisioning = "free"
+        "#})
+        .unwrap();
+        let proj = cfg.resolve_project(Path::new("/cfg"), None).unwrap();
+
+        assert_eq!(proj.resolve_target("ios/App").unwrap().target_id, "ios/App");
+        assert_eq!(
+            proj.resolve_target("ios/AppPro").unwrap().target_id,
+            "ios/AppPro"
+        );
+        // "App" is an exact id for neither, so the ambiguity stands.
+        assert!(proj.resolve_target("App").is_err());
+    }
+
+    #[test]
+    fn selecting_a_target_from_the_wrong_platform_says_so() {
+        let proj = two_target_project();
+        let err = proj
+            .select(Some("macos/MyApp"), Platform::Ios, true)
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("is a macOS target"), "got: {msg}");
+        assert!(msg.contains("only runs iOS targets"), "got: {msg}");
+    }
+
+    #[test]
+    fn ambiguous_without_target_flag_is_error() {
         let cfg: BuildConfig = toml::from_str(indoc! { r#"
             [[target]]
             platform = "macos"

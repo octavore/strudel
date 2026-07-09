@@ -8,7 +8,7 @@ use crate::config::{self, ResolvedTargetPlatform};
 
 #[derive(clap::Args)]
 pub(crate) struct BuildCmd {
-    /// Select a target by app name (multi-target configs only)
+    /// Select a target by id
     target: Option<String>,
 
     /// macOS only: skip codesigning and leave the bundle unsigned.

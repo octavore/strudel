@@ -13,7 +13,7 @@ pub(crate) struct DevicesCmd {
     #[command(subcommand)]
     command: Option<DevicesAction>,
 
-    /// Select a target by app name (multi-target configs only)
+    /// Select a target by id
     #[arg(long)]
     target: Option<String>,
 }
@@ -33,7 +33,7 @@ enum DevicesAction {
         #[arg(long)]
         dry_run: bool,
 
-        /// Select a target by app name (multi-target configs only)
+        /// Select a target by id
         #[arg(long)]
         target: Option<String>,
     },
@@ -53,7 +53,7 @@ enum DevicesAction {
         #[arg(long)]
         dry_run: bool,
 
-        /// Select a target by app name (multi-target configs only)
+        /// Select a target by id
         #[arg(long)]
         target: Option<String>,
     },

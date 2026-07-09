@@ -13,7 +13,7 @@ pub(crate) struct ProfileCmd {
     #[command(subcommand)]
     command: Option<ProfileAction>,
 
-    /// Select a target by app name (multi-target configs only)
+    /// Select a target by id
     #[arg(long)]
     target: Option<String>,
 }
@@ -31,7 +31,7 @@ enum ProfileAction {
         #[arg(long)]
         force: bool,
 
-        /// Select a target by app name (multi-target configs only)
+        /// Select a target by id
         #[arg(long)]
         target: Option<String>,
     },

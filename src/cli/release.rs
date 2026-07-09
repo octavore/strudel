@@ -8,7 +8,7 @@ use crate::config::{self, ResolvedTargetPlatform};
 
 #[derive(clap::Args)]
 pub(crate) struct ReleaseCmd {
-    /// Select a target by app name (multi-target configs only)
+    /// Select a target by id
     target: Option<String>,
 
     /// Print commands without executing them
@@ -34,7 +34,7 @@ impl ReleaseCmd {
         let project = config::load_config(config)?;
         let targets = all_or_named(&project, self.target.as_deref())?;
         if self.resume.is_some() && targets.len() > 1 {
-            let available: Vec<&str> = targets.iter().map(|t| t.app_name.as_str()).collect();
+            let available: Vec<&str> = targets.iter().map(|t| t.target_id.as_str()).collect();
             bail!(
                 "Multiple targets; select one to resume. Available: {}",
                 available.join(", ")

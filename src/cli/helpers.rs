@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use color_print::cprintln;
 
 use crate::config::{Platform, ResolvedConfig, ResolvedProject};
@@ -21,26 +21,10 @@ pub(crate) fn all_or_named<'a>(
     project: &'a ResolvedProject,
     target: Option<&str>,
 ) -> Result<Vec<&'a ResolvedConfig>> {
-    let Some(name) = target else {
-        return Ok(project.targets.iter().collect());
-    };
-    let matched: Vec<&ResolvedConfig> = project
-        .targets
-        .iter()
-        .filter(|t| t.app_name == name)
-        .collect();
-    if matched.is_empty() {
-        let available: Vec<&str> = project
-            .targets
-            .iter()
-            .map(|t| t.app_name.as_str())
-            .collect();
-        bail!(
-            "No target named {name:?}. Available: {}",
-            available.join(", ")
-        );
+    match target {
+        None => Ok(project.targets.iter().collect()),
+        Some(selector) => Ok(vec![project.resolve_target(selector)?]),
     }
-    Ok(matched)
 }
 
 // Run the given function for each target, printing a header per target when
@@ -52,7 +36,7 @@ pub(crate) fn run_for_targets(
     let multi = targets.len() > 1;
     for cfg in targets {
         if multi {
-            cprintln!("\n<bold,cyan>-- {} --</bold,cyan>", cfg.app_name);
+            cprintln!("\n<bold,cyan>-- {} --</bold,cyan>", cfg.target_id);
         }
         f(cfg)?;
     }

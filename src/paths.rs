@@ -152,11 +152,14 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::config::{IosProvisioningBackend, ResolvedIosSection};
+    use crate::config::{
+        ExtensionKind, IosProvisioningBackend, ResolvedExtension, ResolvedIosSection,
+    };
 
     fn cfg(build_dir: &str, app_name: &str, version: &str) -> ResolvedConfig {
         ResolvedConfig {
             platform: None,
+            target_id: app_name.into(),
             app_name: app_name.into(),
             bundle_id: "x".into(),
             version: version.into(),
@@ -233,7 +236,6 @@ mod tests {
 
     #[test]
     fn extension_paths_nest_under_plugins() {
-        use crate::config::{ExtensionKind, ResolvedExtension};
         let mut c = cfg("/out", "MyApp", "1.0");
         c.extensions.push(ResolvedExtension {
             kind: ExtensionKind::SafariWebExtension,

@@ -6,7 +6,7 @@ use crate::status;
 
 #[derive(clap::Args)]
 pub(crate) struct StatusCmd {
-    /// Select a target by app name (multi-target configs only)
+    /// Select a target by id
     #[arg(long)]
     target: Option<String>,
 }
