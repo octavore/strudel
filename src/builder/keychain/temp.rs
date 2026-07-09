@@ -52,8 +52,13 @@ impl MacosBuilder {
         step("Importing signing certificate into a temporary keychain...");
 
         let pid = std::process::id();
-        let keychain = std::env::temp_dir()
-            .join(format!("strudel-{pid}.keychain-db"))
+        let temp_dir = tempfile::Builder::new()
+            .prefix("strudel-keychain-")
+            .tempdir()
+            .context("Failed to create temporary directory for keychain")?;
+        let keychain = temp_dir
+            .path()
+            .join("strudel.keychain-db")
             .to_string_lossy()
             .into_owned();
         // Locks the throwaway keychain; never leaves this process, and the
@@ -80,6 +85,7 @@ impl MacosBuilder {
                 path: keychain,
                 original_list: Vec::new(),
                 dry_run: true,
+                _temp_dir: temp_dir,
             }));
         }
 
@@ -88,7 +94,7 @@ impl MacosBuilder {
             .decode(cert_b64.expose_secret().trim())
             .context("APPLE_CERTIFICATE is not valid base64")?;
 
-        let p12_path = std::env::temp_dir().join(format!("strudel-{pid}.p12"));
+        let p12_path = temp_dir.path().join(format!("strudel-{pid}.p12"));
         fs::write(&p12_path, &p12)
             .with_context(|| format!("Failed to write {}", p12_path.display()))?;
         let p12_str = p12_path.to_string_lossy().into_owned();
@@ -146,6 +152,7 @@ impl MacosBuilder {
             path: keychain,
             original_list,
             dry_run: false,
+            _temp_dir: temp_dir,
         }))
     }
 }
@@ -159,6 +166,8 @@ pub(in crate::builder) struct TempKeychain {
     path: String,
     original_list: Vec<String>,
     dry_run: bool,
+    // Held only to keep the directory (and its cleanup on drop) alive.
+    _temp_dir: tempfile::TempDir,
 }
 
 impl Drop for TempKeychain {

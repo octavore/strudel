@@ -72,7 +72,8 @@ mod tests {
         // Guard the user against `sips`/`iconutil` producing a cryptic error;
         // we should fail fast with a clear message that names the missing file.
         let missing = PathBuf::from("/definitely/does/not/exist.png");
-        let dest = std::env::temp_dir().join("strudel-icns-test.icns");
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let dest = dir.path().join("strudel-icns-test.icns");
         let err = make_icns(&missing, &dest).expect_err("must error on missing PNG");
         let msg = err.to_string();
         assert!(msg.contains("Source PNG not found"), "got: {msg}");
