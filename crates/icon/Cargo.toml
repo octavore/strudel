@@ -6,6 +6,7 @@ description = "Composite macOS-style squircle app icons from foreground artwork"
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+resvg = "0.47.0"
 thiserror = "2"
 
 [dev-dependencies]

@@ -2,6 +2,9 @@ mod color;
 mod mask;
 mod path;
 mod rasterize;
+mod svg;
+
+use std::path::Path;
 
 use image::{Rgba, RgbaImage};
 use thiserror::Error;
@@ -12,6 +15,45 @@ pub use crate::color::parse_hex_color;
 pub enum IconError {
     #[error("invalid color {0:?}: expected #RRGGBB")]
     InvalidColor(String),
+    #[error("invalid SVG: {0}")]
+    InvalidSvg(String),
+    #[error("failed to read icon source {path:?}: {source}")]
+    ReadForeground {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to decode icon source {path:?}: {source}")]
+    DecodeForeground {
+        path: std::path::PathBuf,
+        #[source]
+        source: image::ImageError,
+    },
+}
+
+/// Loads `path` as foreground artwork, rasterizing it if it's an SVG (`.svg`
+/// extension, case-insensitive) or decoding it as a raster image otherwise.
+/// `target_size` bounds the SVG rasterization resolution (its longer side);
+/// it's ignored for raster sources, which are decoded at their native size.
+pub fn load_foreground(path: &Path, target_size: u32) -> Result<RgbaImage, IconError> {
+    let is_svg = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"));
+
+    if is_svg {
+        let data = std::fs::read(path).map_err(|source| IconError::ReadForeground {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        svg::rasterize(&data, target_size)
+    } else {
+        Ok(image::open(path)
+            .map_err(|source| IconError::DecodeForeground {
+                path: path.to_path_buf(),
+                source,
+            })?
+            .to_rgba8())
+    }
 }
 
 /// Tunable parameters for [`generate`]. Defaults approximate the macOS
