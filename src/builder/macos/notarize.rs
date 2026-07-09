@@ -83,39 +83,15 @@ impl MacosBuilder {
         const POLL_SECS: u64 = 20;
         let started = Instant::now();
         let timeout = Duration::from_secs(self.cfg.notarize_timeout);
-        let mut apple_status = String::from("Waiting");
 
         loop {
-            // Tick every second so the elapsed time and countdown stay live.
-            for remaining in (1..=POLL_SECS).rev() {
-                let elapsed_s = started.elapsed().as_secs();
-                let waited = if elapsed_s < 60 {
-                    format!("{elapsed_s}s")
-                } else {
-                    format!("{}m{}s", elapsed_s / 60, elapsed_s % 60)
-                };
-                cprint!(
-                    "\x1b[2K\r  <dim>{apple_status}: {waited} elapsed, next poll in {remaining}s</dim>"
-                );
-                std::io::stdout().flush().ok();
-                sleep(Duration::from_secs(1));
-            }
-
-            let elapsed = started.elapsed();
-            if elapsed >= timeout {
-                println!();
-                bail!(
-                    "Notarization timed out after {}s.\n\
-                     Submission ID: {uuid}\n\
-                     Run `strudel release --resume` to continue when Apple finishes processing.",
-                    self.cfg.notarize_timeout
-                );
-            }
-
+            // Check status immediately on entry (and again after each wait) so
+            // resuming a submission that already finished doesn't sit through
+            // a needless countdown before finding out.
             let v = self.notarytool_info(uuid, auth_args)?;
             let status = v["status"].as_str().unwrap_or("unknown");
 
-            match status {
+            let apple_status = match status {
                 "Accepted" => {
                     println!();
                     cprintln!("  <green>Accepted!</green>");
@@ -134,9 +110,33 @@ impl MacosBuilder {
                         }
                     );
                 },
-                other => {
-                    apple_status = other.to_string();
-                },
+                other => other.to_string(),
+            };
+
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                println!();
+                bail!(
+                    "Notarization timed out after {}s.\n\
+                     Submission ID: {uuid}\n\
+                     Run `strudel release --resume` to continue when Apple finishes processing.",
+                    self.cfg.notarize_timeout
+                );
+            }
+
+            // Tick every second so the elapsed time and countdown stay live.
+            for remaining in (1..=POLL_SECS).rev() {
+                let elapsed_s = started.elapsed().as_secs();
+                let waited = if elapsed_s < 60 {
+                    format!("{elapsed_s}s")
+                } else {
+                    format!("{}m{}s", elapsed_s / 60, elapsed_s % 60)
+                };
+                cprint!(
+                    "\x1b[2K\r  <dim>{apple_status}: {waited} elapsed, next poll in {remaining}s</dim>"
+                );
+                std::io::stdout().flush().ok();
+                sleep(Duration::from_secs(1));
             }
         }
     }
@@ -270,6 +270,13 @@ impl MacosBuilder {
         step("Resuming notarization...");
         cprintln!("  <dim>Submission ID: {uuid}</dim>");
 
-        self.poll_notarization(&uuid, &pending, &dmg_dest, &auth_args)
+        self.poll_notarization(&uuid, &pending, &dmg_dest, &auth_args)?;
+
+        println!();
+        cprintln!(
+            "<green>Done!</green> DMG: <cyan>{}</cyan>",
+            dmg_dest.display()
+        );
+        Ok(())
     }
 }
