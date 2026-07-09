@@ -251,8 +251,8 @@ fn print_config() {
         {ANSI_RESET}
         ## [build.icon] optional; no icon if unset
         # Either a png or icns file copied in unmodified (set icon.path), or
-        # generate an icon from a png at build time. For iOS targets, ios.assets_dir
-        # takes precedence if both are set.
+        # generate an icon from a png or svg at build time (icon.src). For iOS
+        # targets, ios.assets_dir takes precedence if both are set.
         {ANSI_PURPLE}
         icon.src        = "art.png"
         icon.scale      = 1.2               # optional

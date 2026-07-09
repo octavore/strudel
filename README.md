@@ -232,7 +232,7 @@ path = "AppIcon.icns"
 ```
 
 ```toml
-# generate an icon from a source image
+# generate an icon from a source image (png or svg)
 [build.icon]
 src = "art.png"
 scale = 1.2               # optional

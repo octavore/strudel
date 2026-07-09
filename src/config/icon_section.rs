@@ -6,7 +6,7 @@ use crate::config::resolved::ResolvedIcon;
 use crate::config::utils::resolve_to;
 
 /// `[build.icon]`: either a png or icns file copied into the bundle as-is,
-/// or generate an icon from a png at build time.
+/// or generate an icon from a png or svg source image at build time.
 /// Untagged, since the two forms are distinguished by their field names
 /// (`path` vs `src`) rather than an explicit tag:
 ///
@@ -29,7 +29,7 @@ pub enum IconSection {
         icns: Option<bool>,
     },
     Generated {
-        /// Source image to composite into an icon.
+        /// Source image (png/svg) to composite into an icon.
         src: PathBuf,
 
         /// Multiplier to scale the source image.

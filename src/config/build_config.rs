@@ -364,7 +364,7 @@ pub fn generate_initial_toml(
         # source_dir             = "."                  # default: current dir
         # entitlements_json_path = "entitlements.json"  # default: none
         # Bundle icon; either a png or icns file copied in unmodified (set icon.path),
-        # or generate an icon from a png at build time:
+        # or generate an icon from a png/svg at build time:
         # icon.src               = "art.png"
         # icon.scale             = 1.2         # optional
         # icon.background        = "#fefefe" # optional; hex, defaults to white
