@@ -177,10 +177,57 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_gives_default() {
+    fn load_from_missing_file_is_an_error() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("nonexistent.toml");
-        // load_from errors on missing file; the missing-file fast-path is in load()
         assert!(GlobalConfig::load_from(&path).is_err());
+    }
+
+    #[test]
+    fn load_gives_default_when_no_config_file_exists() {
+        // No global config is the common case: a project that sets everything
+        // in strudel.toml must not be forced to create ~/.config/strudel.
+        let dir = tempfile::TempDir::new().unwrap();
+        with_xdg_config_home(dir.path(), || {
+            let g = GlobalConfig::load().expect("a missing global config is not an error");
+            assert!(g.signing_identity.is_none());
+            assert!(g.notarize_api_key_path.is_none());
+        });
+    }
+
+    #[test]
+    fn load_reads_the_file_from_the_xdg_config_home() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let strudel_dir = dir.path().join("strudel");
+        std::fs::create_dir_all(&strudel_dir).unwrap();
+        std::fs::write(
+            strudel_dir.join("config.toml"),
+            indoc::indoc! {r#"
+                [apple]
+                identity = "Developer ID Application: Me (ABC123)"
+            "#},
+        )
+        .unwrap();
+
+        with_xdg_config_home(dir.path(), || {
+            let g = GlobalConfig::load().unwrap();
+            assert_eq!(
+                g.signing_identity.as_deref(),
+                Some("Developer ID Application: Me (ABC123)")
+            );
+        });
+    }
+
+    /// Point the XDG lookup at `dir` for the duration of `f`. `XDG_CONFIG_DIRS`
+    /// is cleared too, otherwise `find_config_file` would fall back to the
+    /// system directories and could pick up a real config.
+    fn with_xdg_config_home<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(dir.as_os_str())),
+                ("XDG_CONFIG_DIRS", Some("".as_ref())),
+            ],
+            f,
+        )
     }
 }

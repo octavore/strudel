@@ -170,11 +170,17 @@ mod tests {
 
     #[test]
     fn run_init_refuses_to_overwrite() {
-        let dir = std::env::temp_dir().join(format!("strudel-init-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("strudel.toml"), "existing").unwrap();
-        let err = run_init(&dir).expect_err("must refuse to overwrite");
-        assert!(err.to_string().contains("already exists"), "got: {err}",);
-        std::fs::remove_dir_all(&dir).ok();
+        // TempDir cleans up on drop, including when an assertion below panics.
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = dir.path().join("strudel.toml");
+        std::fs::write(&config, "existing").unwrap();
+
+        let err = run_init(dir.path()).expect_err("must refuse to overwrite");
+        assert!(err.to_string().contains("already exists"), "got: {err}");
+        assert_eq!(
+            std::fs::read_to_string(&config).unwrap(),
+            "existing",
+            "the refusal must leave the existing file untouched"
+        );
     }
 }

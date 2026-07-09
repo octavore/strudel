@@ -4,8 +4,8 @@ project_name = "strudel-build"
 install = "cargo install --path ."
 fmt = ["cargo clippy", "cargo +nightly fmt"]
 check = "cargo +nightly fmt -- --check"
-test = "cargo test --locked"
-lint = "cargo clippy --all-targets --locked -- -D warnings"
+test = "cargo test --workspace --locked"
+lint = "cargo clippy --workspace --all-targets --locked -- -D warnings"
 ci = [":check", ":lint", ":test"]
 release = "./scripts/release.sh"
 

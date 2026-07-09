@@ -149,52 +149,20 @@ pub fn ensure_strudel_dir(strudel_dir: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
-    use crate::config::{
-        ExtensionKind, IosProvisioningBackend, ResolvedExtension, ResolvedIosSection,
-    };
+    use crate::config::fixtures::resolved_ios;
+    use crate::config::{ExtensionKind, ResolvedExtension};
 
     fn cfg(build_dir: &str, app_name: &str, version: &str) -> ResolvedConfig {
         ResolvedConfig {
-            platform: None,
             target_id: app_name.into(),
             app_name: app_name.into(),
             bundle_id: "x".into(),
             version: version.into(),
-            build_number: "1".into(),
             source_dir: PathBuf::from("/src"),
             build_dir: PathBuf::from(build_dir),
-            info_json_path: None,
-            entitlements_json_path: None,
-            icon: None,
-            archs: vec!["arm64".into()],
             target_name: app_name.into(),
-            sign_identity: String::new(),
-            notarize_timeout: 600,
-            build_env: HashMap::new(),
-            embed_libs: Vec::new(),
-            provisioning_profile: None,
-            extensions: Vec::new(),
-            target_platform: ResolvedIosSection {
-                simulator: "iPhone 16".into(),
-                device: None,
-                deployment_target: "18.0".into(),
-                assets_dir: None,
-                app_icon_name: "AppIcon".into(),
-                provisioning: IosProvisioningBackend::AppStoreConnect,
-                apple_id: None,
-            }
-            .into(),
-            team_id: String::new(),
-            apple_api_issuer: String::new(),
-            apple_api_key: String::new(),
-            apple_api_key_path: None,
-            apple_certificate: String::new().into(),
-            apple_certificate_password: String::new().into(),
-            resources_dir: None,
-            resources: Vec::new(),
+            ..resolved_ios()
         }
     }
 

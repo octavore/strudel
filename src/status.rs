@@ -3,6 +3,7 @@
 //! `.strudel/` provisioning artifacts. `strudel login status` prints just the
 //! Apple ID session block.
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -581,10 +582,20 @@ fn mask_opt(v: &Option<String>) -> String {
 
 /// Shorten a path by replacing the home-directory prefix with `~`.
 fn shorten(path: &Path) -> String {
+    shorten_under(path, std::env::var_os("HOME"))
+}
+
+/// [`shorten`] with `$HOME` passed in rather than read from the environment,
+/// so tests do not have to mutate a process-global other threads are reading.
+fn shorten_under(path: &Path, home: Option<OsString>) -> String {
     let s = path.to_string_lossy().to_string();
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = home {
         let home = home.to_string_lossy();
-        if let Some(rest) = s.strip_prefix(home.as_ref()) {
+        // Only on a directory boundary: `/Users/tester2` is not under
+        // `/Users/tester`, and must not render as `~2`.
+        if let Some(rest) = s.strip_prefix(home.as_ref())
+            && (rest.is_empty() || rest.starts_with('/'))
+        {
             return format!("~{rest}");
         }
     }
@@ -619,14 +630,39 @@ mod tests {
         );
     }
 
+    fn home() -> Option<OsString> {
+        Some(OsString::from("/Users/tester"))
+    }
+
     #[test]
     fn shorten_replaces_home() {
-        // SAFETY: single-threaded test; sets HOME for the shorten() lookup.
-        unsafe { std::env::set_var("HOME", "/Users/tester") };
         assert_eq!(
-            shorten(Path::new("/Users/tester/.config/strudel/config.toml")),
+            shorten_under(
+                Path::new("/Users/tester/.config/strudel/config.toml"),
+                home()
+            ),
             "~/.config/strudel/config.toml"
         );
-        assert_eq!(shorten(Path::new("/etc/hosts")), "/etc/hosts");
+    }
+
+    #[test]
+    fn shorten_replaces_a_bare_home_dir() {
+        assert_eq!(shorten_under(Path::new("/Users/tester"), home()), "~");
+    }
+
+    #[test]
+    fn shorten_leaves_paths_outside_home_alone() {
+        assert_eq!(shorten_under(Path::new("/etc/hosts"), home()), "/etc/hosts");
+        // A sibling whose name merely starts with $HOME's is not under $HOME:
+        // the prefix has to land on a directory boundary, not any character.
+        assert_eq!(
+            shorten_under(Path::new("/Users/tester2/x"), home()),
+            "/Users/tester2/x"
+        );
+    }
+
+    #[test]
+    fn shorten_without_home_returns_the_path_unchanged() {
+        assert_eq!(shorten_under(Path::new("/etc/hosts"), None), "/etc/hosts");
     }
 }

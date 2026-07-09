@@ -422,7 +422,7 @@ mod select_tests {
     }
 
     #[test]
-    fn ambiguous_without_target_flag_is_error() {
+    fn ambiguous_without_target_flag_is_error_unless_allow_all() {
         let cfg: BuildConfig = toml::from_str(indoc! { r#"
             [[target]]
             platform = "macos"
@@ -444,29 +444,24 @@ mod select_tests {
         let err = proj.select(None, Platform::Macos, false).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("--target"), "got: {msg}");
-    }
 
-    #[test]
-    fn allow_all_returns_all_eligible() {
-        let proj = two_target_project();
-        // MULTI has one macos and one ios target; asking for macos with allow_all=true
-        // returns the single macos one.
+        // Same project, but allow_all lifts the ambiguity and returns both.
         let targets = proj.select(None, Platform::Macos, true).unwrap();
-        assert_eq!(targets.len(), 1);
+        assert_eq!(targets.len(), 2);
     }
 }
 
 #[cfg(test)]
-pub mod fixtures {
+mod credential_tests {
     use std::path::PathBuf;
 
     use secrecy::ExposeSecret;
 
-    use crate::config::fixtures::RESOLVED;
+    use crate::config::fixtures::resolved_ios;
 
     #[test]
     fn notary_auth_returns_api_key_when_complete() {
-        let mut r = RESOLVED.clone();
+        let mut r = resolved_ios();
         r.apple_api_key_path = Some(PathBuf::from("/k.p8"));
         r.apple_api_key = "KID".into();
         r.apple_api_issuer = "ISS".into();
@@ -479,12 +474,12 @@ pub mod fixtures {
 
     #[test]
     fn notary_auth_none_when_nothing_set() {
-        assert!(RESOLVED.notary_auth().is_none());
+        assert!(resolved_ios().notary_auth().is_none());
     }
 
     #[test]
     fn notary_auth_none_when_api_key_incomplete() {
-        let mut r = RESOLVED.clone();
+        let mut r = resolved_ios();
         // Key path present but key id missing -> incomplete API set.
         r.apple_api_key_path = Some(PathBuf::from("/k.p8"));
         assert!(r.notary_auth().is_none());
@@ -492,8 +487,8 @@ pub mod fixtures {
 
     #[test]
     fn signing_cert_present_and_absent() {
-        assert!(RESOLVED.signing_cert().is_none());
-        let mut r = RESOLVED.clone();
+        assert!(resolved_ios().signing_cert().is_none());
+        let mut r = resolved_ios();
         r.apple_certificate = "BASE64".into();
         r.apple_certificate_password = "pw".into();
         let (cert, pw) = r.signing_cert().unwrap();

@@ -226,26 +226,65 @@ fn paint_gloss(canvas: &mut RgbaImage, mask: &[f32], size: u32, inset: u32, opti
 mod tests {
     use super::*;
 
+    const FG: [u8; 3] = [10, 20, 30];
+
+    /// A wide (2.5:1) foreground, and options with the gloss switched off so
+    /// painted pixels keep the exact `FG` color. Tests about placement should
+    /// not have to model the gloss ramp; `gloss_lightens_the_artwork` covers
+    /// that separately.
+    fn wide_foreground() -> (RgbaImage, IconOptions) {
+        let fg = RgbaImage::from_pixel(200, 80, Rgba([FG[0], FG[1], FG[2], 255]));
+        let options = IconOptions {
+            gloss_alpha: 0.0,
+            ..IconOptions::default()
+        };
+        (fg, options)
+    }
+
+    fn rgb(canvas: &RgbaImage, x: u32, y: u32) -> [u8; 3] {
+        let px = canvas.get_pixel(x, y);
+        [px[0], px[1], px[2]]
+    }
+
     #[test]
     fn generate_accepts_non_square_foreground() {
         // A wide, non-square foreground should be fit inside the artwork
         // area (letterboxed) rather than rejected or stretched.
-        let foreground = RgbaImage::from_pixel(200, 80, Rgba([10, 20, 30, 255]));
-        let canvas = generate(&foreground, &IconOptions::default())
-            .expect("non-square foreground should be accepted");
-        assert_eq!(canvas.width(), IconOptions::default().canvas_size);
-        assert_eq!(canvas.height(), IconOptions::default().canvas_size);
-        // Some pixel near the center should have picked up the foreground color,
-        // confirming the art was actually painted (not skipped/cropped away).
-        let center = canvas.get_pixel(canvas.width() / 2, canvas.height() / 2);
-        assert_eq!([center[0], center[1], center[2]], [10, 20, 30]);
+        let (fg, options) = wide_foreground();
+        let canvas = generate(&fg, &options).expect("non-square foreground should be accepted");
+        assert_eq!(canvas.width(), options.canvas_size);
+        assert_eq!(canvas.height(), options.canvas_size);
+
+        // The center picked up the foreground, so the art was really painted
+        // rather than skipped or cropped away.
+        let mid = canvas.width() / 2;
+        assert_eq!(rgb(&canvas, mid, mid), FG);
+
+        // 200px above center is outside the letterboxed art but still well
+        // inside the squircle, so it must show the background. If the art were
+        // stretched to fill instead of fit, this would be FG too.
+        assert_eq!(
+            rgb(&canvas, mid, mid - 200),
+            [255, 255, 255],
+            "a 2.5:1 foreground must be letterboxed, not stretched"
+        );
     }
 
     #[test]
-    fn generate_accepts_square_foreground() {
-        let foreground = RgbaImage::from_pixel(100, 100, Rgba([200, 100, 50, 255]));
-        let canvas = generate(&foreground, &IconOptions::default())
-            .expect("square foreground should be accepted");
-        assert_eq!(canvas.width(), IconOptions::default().canvas_size);
+    fn gloss_lightens_the_artwork() {
+        // The gloss is a white ramp over the whole squircle, strongest at the
+        // top. It tints the artwork, so a pixel of painted art comes back
+        // lighter than the source color under default options.
+        let (fg, _) = wide_foreground();
+        let canvas = generate(&fg, &IconOptions::default()).unwrap();
+        let mid = canvas.width() / 2;
+        let center = rgb(&canvas, mid, mid);
+        assert_ne!(center, FG, "default options apply gloss");
+        for (channel, source) in center.iter().zip(FG) {
+            assert!(
+                *channel > source,
+                "gloss blends toward white: {center:?} vs {FG:?}"
+            );
+        }
     }
 }

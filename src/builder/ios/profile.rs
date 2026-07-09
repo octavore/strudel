@@ -191,10 +191,9 @@ pub fn decode_profile(profile_path: &Path) -> Result<plist::Value> {
 }
 
 /// Return `true` when `profile_path` is a valid, current profile for the
-/// given `required_udids`, `bundle_id`, and `team_id`. Returns `false` when:
-/// the profile has expired (or expires within 5 minutes), any required UDID
-/// is absent from `ProvisionedDevices`, or the `application-identifier`
-/// entitlement does not match `<team_id>.<bundle_id>` (when `team_id` is set).
+/// given `required_udids`, `bundle_id`, and `team_id`. Returns `false` when the
+/// file is absent or cannot be decoded, and for the reasons listed on
+/// [`dict_is_current`].
 pub fn profile_is_current(
     profile_path: &Path,
     required_udids: &[&str],
@@ -212,18 +211,38 @@ pub fn profile_is_current(
         Some(d) => d,
         None => return Ok(false),
     };
+    Ok(dict_is_current(
+        dict,
+        SystemTime::now(),
+        required_udids,
+        bundle_id,
+        team_id,
+    ))
+}
 
+/// The content checks behind [`profile_is_current`], split out from the
+/// `security cms` decode so they can be exercised directly. `now` is injected
+/// rather than read from the clock, so the expiry window is testable.
+///
+/// Returns `false` when the profile has no `ExpirationDate` or expires within
+/// 5 minutes of `now`, when any of `required_udids` is absent from
+/// `ProvisionedDevices`, or when the `application-identifier` entitlement is
+/// not `<team_id>.<bundle_id>`. An empty `required_udids` skips the device
+/// check; an empty `team_id` skips the entitlement check.
+fn dict_is_current(
+    dict: &plist::Dictionary,
+    now: SystemTime,
+    required_udids: &[&str],
+    bundle_id: &str,
+    team_id: &str,
+) -> bool {
     // Expiration: must not expire within 5 minutes.
-    if let Some(exp) = dict.get("ExpirationDate").and_then(|v| v.as_date()) {
-        let sys_time = SystemTime::from(exp);
-        let cutoff = SystemTime::now()
-            .checked_add(Duration::from_secs(300))
-            .unwrap_or_else(SystemTime::now);
-        if sys_time <= cutoff {
-            return Ok(false);
-        }
-    } else {
-        return Ok(false);
+    let Some(exp) = dict.get("ExpirationDate").and_then(|v| v.as_date()) else {
+        return false;
+    };
+    let cutoff = now.checked_add(Duration::from_secs(300)).unwrap_or(now);
+    if SystemTime::from(exp) <= cutoff {
+        return false;
     }
 
     // Device coverage: every required UDID must appear in ProvisionedDevices.
@@ -233,10 +252,8 @@ pub fn profile_is_current(
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|v| v.as_string()).collect())
             .unwrap_or_default();
-        for udid in required_udids {
-            if !provisioned.contains(udid) {
-                return Ok(false);
-            }
+        if !required_udids.iter().all(|u| provisioned.contains(u)) {
+            return false;
         }
     }
 
@@ -250,24 +267,157 @@ pub fn profile_is_current(
             .and_then(|v| v.as_string())
             .unwrap_or("");
         if actual != expected {
-            return Ok(false);
+            return false;
         }
     }
 
-    Ok(true)
+    true
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use plist::{Dictionary, Value};
+
+    use crate::builder::ios::profile::{dict_is_current, profile_is_current};
+
+    const BUNDLE_ID: &str = "com.example.app";
+    const TEAM_ID: &str = "TEAM123456";
+
+    /// A fixed "now" well clear of the epoch, so tests can subtract from it
+    /// without `SystemTime` underflowing.
+    fn now() -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
+    }
+
+    /// A profile that passes every check: expires in an hour, provisions both
+    /// devices, and carries the matching `application-identifier`.
+    fn valid_profile() -> Dictionary {
+        let mut entitlements = Dictionary::new();
+        entitlements.insert(
+            "application-identifier".into(),
+            format!("{TEAM_ID}.{BUNDLE_ID}").into(),
+        );
+
+        let mut dict = Dictionary::new();
+        dict.insert("ExpirationDate".into(), Value::Date(expires_in(3600)));
+        dict.insert(
+            "ProvisionedDevices".into(),
+            Value::Array(vec!["AAA".into(), "BBB".into()]),
+        );
+        dict.insert("Entitlements".into(), Value::Dictionary(entitlements));
+        dict
+    }
+
+    fn expires_in(secs: u64) -> plist::Date {
+        (now() + Duration::from_secs(secs)).into()
+    }
+
+    /// `dict_is_current` with the fixture's bundle and team, so each test only
+    /// varies the thing it is about.
+    fn is_current(dict: &Dictionary, required_udids: &[&str]) -> bool {
+        dict_is_current(dict, now(), required_udids, BUNDLE_ID, TEAM_ID)
+    }
+
     #[test]
-    fn profile_is_current_missing_file_returns_false() {
-        let result = super::profile_is_current(
+    fn missing_file_returns_false() {
+        let result = profile_is_current(
             std::path::Path::new("/nonexistent/path.mobileprovision"),
             &[],
-            "com.example.app",
+            BUNDLE_ID,
             "",
         )
         .unwrap();
         assert!(!result);
+    }
+
+    #[test]
+    fn valid_profile_is_current() {
+        assert!(is_current(&valid_profile(), &["AAA", "BBB"]));
+    }
+
+    #[test]
+    fn expiry_inside_the_five_minute_window_is_not_current() {
+        // A profile about to expire is treated as stale: signing with it would
+        // produce a build that stops launching minutes later.
+        let mut dict = valid_profile();
+        dict.insert("ExpirationDate".into(), Value::Date(expires_in(299)));
+        assert!(!is_current(&dict, &[]), "299s out is inside the window");
+
+        dict.insert("ExpirationDate".into(), Value::Date(expires_in(300)));
+        assert!(!is_current(&dict, &[]), "the boundary is exclusive");
+
+        dict.insert("ExpirationDate".into(), Value::Date(expires_in(301)));
+        assert!(is_current(&dict, &[]), "301s out is outside the window");
+    }
+
+    #[test]
+    fn already_expired_is_not_current() {
+        let mut dict = valid_profile();
+        dict.insert(
+            "ExpirationDate".into(),
+            Value::Date((now() - Duration::from_secs(1)).into()),
+        );
+        assert!(!is_current(&dict, &[]));
+    }
+
+    #[test]
+    fn missing_expiration_date_is_not_current() {
+        let mut dict = valid_profile();
+        dict.remove("ExpirationDate");
+        assert!(!is_current(&dict, &[]));
+    }
+
+    #[test]
+    fn a_required_udid_missing_from_the_profile_is_not_current() {
+        // This is what triggers a re-fetch after `strudel device register`.
+        let dict = valid_profile();
+        assert!(!is_current(&dict, &["AAA", "CCC"]));
+        assert!(!is_current(&dict, &["CCC"]));
+    }
+
+    #[test]
+    fn no_required_udids_skips_the_device_check() {
+        // A macOS-style profile has no ProvisionedDevices at all.
+        let mut dict = valid_profile();
+        dict.remove("ProvisionedDevices");
+        assert!(is_current(&dict, &[]));
+        assert!(!is_current(&dict, &["AAA"]));
+    }
+
+    #[test]
+    fn application_identifier_mismatch_is_not_current() {
+        // A profile for a different app, or issued under a different team, must
+        // not be reused just because it happens to be cached at this path.
+        let mut dict = valid_profile();
+        let mut entitlements = Dictionary::new();
+        entitlements.insert(
+            "application-identifier".into(),
+            format!("{TEAM_ID}.com.example.other").into(),
+        );
+        dict.insert("Entitlements".into(), Value::Dictionary(entitlements));
+        assert!(!is_current(&dict, &[]));
+
+        assert!(
+            !dict_is_current(&valid_profile(), now(), &[], BUNDLE_ID, "OTHERTEAM"),
+            "same bundle id under another team must not match"
+        );
+    }
+
+    #[test]
+    fn missing_entitlements_is_not_current_when_team_id_is_set() {
+        let mut dict = valid_profile();
+        dict.remove("Entitlements");
+        assert!(!is_current(&dict, &[]));
+    }
+
+    #[test]
+    fn empty_team_id_skips_the_entitlement_check() {
+        // team_id is unset until the user configures one, and an unconfigured
+        // project should still be able to reuse a cached profile.
+        let mut dict = valid_profile();
+        dict.remove("Entitlements");
+        assert!(dict_is_current(&dict, now(), &[], BUNDLE_ID, ""));
     }
 }

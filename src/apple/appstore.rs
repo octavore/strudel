@@ -430,15 +430,4 @@ mod tests {
         assert!(msg.contains("(500)"), "got: {msg}");
         assert!(msg.contains("Internal Server Error"), "got: {msg}");
     }
-
-    #[test]
-    fn bundle_id_list_response_shape() {
-        let json = r#"{"data":[{"id":"XYZ123","type":"bundleIds","attributes":{"name":"MyApp","identifier":"com.example.app","platform":"IOS","seedId":"TEAM1"}}]}"#;
-        let val: serde_json::Value = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            val["data"][0]["attributes"]["identifier"],
-            "com.example.app"
-        );
-        assert_eq!(val["data"][0]["id"], "XYZ123");
-    }
 }

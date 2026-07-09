@@ -328,7 +328,7 @@ mod tests {
 
     use super::*;
     use crate::builder::IosBuilder;
-    use crate::config::fixtures::RESOLVED;
+    use crate::config::fixtures::resolved_ios;
 
     #[test]
     fn ios_app_bundle_path_is_flat() {
@@ -338,7 +338,7 @@ mod tests {
     }
 
     fn builder() -> IosBuilder {
-        IosBuilder::new(RESOLVED.clone(), true, false).unwrap()
+        IosBuilder::new(resolved_ios(), true, false).unwrap()
     }
 
     #[test]

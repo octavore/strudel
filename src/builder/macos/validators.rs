@@ -201,44 +201,11 @@ impl MacosBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use super::*;
-    use crate::config::{ResolvedConfig, ResolvedMacOsSection};
-
-    fn empty_cfg() -> ResolvedConfig {
-        ResolvedConfig {
-            platform: None,
-            target_id: "A".into(),
-            app_name: "A".into(),
-            bundle_id: "b".into(),
-            version: "1".into(),
-            build_number: "1".into(),
-            source_dir: PathBuf::from("/x"),
-            build_dir: PathBuf::from("/x"),
-            info_json_path: None,
-            entitlements_json_path: None,
-            icon: None,
-            archs: vec!["arm64".into()],
-            target_name: "A".into(),
-            sign_identity: String::new(),
-            notarize_timeout: 600,
-            build_env: HashMap::new(),
-            embed_libs: Vec::new(),
-            provisioning_profile: None,
-            extensions: Vec::new(),
-            target_platform: ResolvedMacOsSection { dmg: None }.into(),
-            team_id: String::new(),
-            apple_api_issuer: String::new(),
-            apple_api_key: String::new(),
-            apple_api_key_path: None,
-            apple_certificate: String::new().into(),
-            apple_certificate_password: String::new().into(),
-            resources_dir: None,
-            resources: Vec::new(),
-        }
-    }
+    use crate::config::ResolvedConfig;
+    use crate::config::fixtures::resolved_macos;
 
     fn builder(cfg: ResolvedConfig) -> MacosBuilder {
         MacosBuilder::new(cfg, true, false, false, None, false).unwrap()
@@ -246,7 +213,7 @@ mod tests {
 
     #[test]
     fn problems_reports_missing_identity_and_notary() {
-        let b = builder(empty_cfg());
+        let b = builder(resolved_macos());
         let problems = b.credential_problems();
         assert_eq!(problems.len(), 2);
         assert!(
@@ -263,7 +230,7 @@ mod tests {
 
     #[test]
     fn problems_empty_when_api_key_set() {
-        let mut cfg = empty_cfg();
+        let mut cfg = resolved_macos();
         cfg.sign_identity = "Developer ID Application: X (TEAM)".into();
         cfg.apple_api_key_path = Some(PathBuf::from("/k.p8"));
         cfg.apple_api_key = "KID".into();
@@ -276,7 +243,7 @@ mod tests {
         // Dry-run must not bail: a missing-credential dry-run is the user
         // explicitly checking what `release` would do - they shouldn't have to
         // populate every secret just to preview the pipeline.
-        let b = builder(empty_cfg());
+        let b = builder(resolved_macos());
         b.preflight_credentials()
             .expect("dry-run preflight must succeed even without credentials");
     }

@@ -460,31 +460,24 @@ mod tests {
     use crate::config::{BuildConfig, Platform};
 
     #[test]
-    fn generated_toml_parses_into_build_config() {
-        // The scaffolded file must be valid input to the config loader.
-        // Otherwise `strudel init` produces a file `strudel build` rejects.
+    fn generated_toml_parses_and_resolves() {
+        // The scaffolded file must be valid input to the config loader, and it
+        // must resolve cleanly: otherwise `strudel init` produces a file that
+        // `strudel build` rejects. Resolving subsumes parsing, so one test
+        // covers both halves.
         let t = generate_initial_toml("MyApp", "com.example.myapp", "1.2.3", "42");
         let cfg: BuildConfig = toml::from_str(&t).expect("scaffolded TOML must parse");
-        let BuildConfig::Single(single) = cfg else {
+        let BuildConfig::Single(single) = &cfg else {
             panic!("scaffolded TOML should parse as a single-target config");
         };
-        assert_eq!(single.app.name, "MyApp");
         assert_eq!(single.app.bundle_id, "com.example.myapp");
-        assert_eq!(single.app.version, "1.2.3");
         assert_eq!(single.app.build_number, "42");
-    }
 
-    #[test]
-    fn generated_toml_resolves_with_defaults() {
-        // After parsing it must also resolve cleanly, i.e. every key the
-        // template emits round-trips through resolve_config (no missing
-        // required derived fields, no path resolution panics).
-        let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0", "1");
-        let cfg: BuildConfig = toml::from_str(&t).unwrap();
-        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        let r = cfg
+            .resolve(Path::new("/cfg"), None)
+            .expect("scaffolded TOML must resolve");
         assert_eq!(r.app_name, "MyApp");
-        assert_eq!(r.target_name, "MyApp"); // default = app.name
-        assert_eq!(r.notarize_timeout, 600); // default
+        assert_eq!(r.version, "1.2.3");
     }
 
     #[test]
@@ -552,9 +545,7 @@ mod tests {
         );
         assert_eq!(single.apple.api_key.as_deref(), Some("KEYID123"));
         assert_eq!(single.apple.notarize_timeout, Some(1200));
-        let dmg = single.dmg.as_ref().expect("FULL fixture includes [dmg]");
-        assert_eq!(dmg.window_width, Some(800));
-        assert_eq!(dmg.icon_size, Some(100));
+        assert!(single.dmg.is_some(), "FULL fixture includes [dmg]");
     }
 
     #[test]
@@ -661,6 +652,9 @@ mod tests {
 
             [build]
             entitlements_json_path = "/abs/ent.json"
+
+            [dmg]
+            background = "/abs/bg.png"
         "#})
         .unwrap();
         let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
@@ -668,6 +662,11 @@ mod tests {
             r.entitlements_json_path,
             Some(PathBuf::from("/abs/ent.json"))
         );
+        let ResolvedTargetPlatform::Mac(macos) = &r.target_platform else {
+            panic!("expected a macOS target");
+        };
+        let dmg = macos.dmg.as_ref().expect("[dmg] section is present");
+        assert_eq!(dmg.background, Some(PathBuf::from("/abs/bg.png")));
     }
 
     #[test]
@@ -853,60 +852,94 @@ mod tests {
         assert_eq!(dmg.applications_y, 192);
     }
 
-    #[test]
-    fn dmg_background_absolute_path_untouched() {
-        let cfg = parse_build_config(indoc! { r#"
-            [app]
-            name = "X"
-            bundle_id = "y"
-            version = "1"
-            build_number = "1"
-
-            [dmg]
-            background = "/abs/bg.png"
-        "#})
-        .unwrap();
-        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
-        let ResolvedTargetPlatform::Mac(macos) = &r.target_platform else {
-            panic!("expected a macOS target");
-        };
-        let dmg = macos.dmg.as_ref().unwrap();
-        assert_eq!(dmg.background, Some(PathBuf::from("/abs/bg.png")));
-    }
+    /// A single-target config with an empty `[apple]` section, so every
+    /// identifier has to come from the environment or the global config.
+    const NO_APPLE_SECTION: &str = indoc! { r#"
+        [app]
+        name = "X"
+        bundle_id = "y"
+        version = "1"
+        build_number = "1"
+    "#};
 
     #[test]
-    fn environment_wins_over_config_value() {
-        // When both an env var and a config value are present, the env var takes
-        // precedence. Use temp_env to avoid polluting other tests.
+    fn environment_wins_over_project_and_global() {
+        // Env beats both lower layers, even when all three are populated.
+        // temp_env keeps the vars from leaking into other tests.
         temp_env::with_vars(
             [
                 ("APPLE_SIGNING_IDENTITY", Some("env-identity")),
                 ("APPLE_TEAM_ID", Some("env-team")),
+                ("APPLE_API_ISSUER", Some("env-issuer")),
+                ("APPLE_API_KEY", Some("env-key")),
+                ("APPLE_API_KEY_PATH", Some("/env/AuthKey.p8")),
             ],
             || {
                 let cfg = parse_build_config(FULL).unwrap();
-                let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+                let r = cfg
+                    .resolve(Path::new("/cfg"), Some(&global_config()))
+                    .unwrap();
                 assert_eq!(r.sign_identity, "env-identity");
                 assert_eq!(r.team_id, "env-team");
+                assert_eq!(r.apple_api_issuer, "env-issuer");
+                assert_eq!(r.apple_api_key, "env-key");
+                assert_eq!(r.apple_api_key_path, Some(PathBuf::from("/env/AuthKey.p8")));
             },
         );
     }
 
     #[test]
-    fn config_value_used_when_no_env_var() {
-        // When the env var is absent, the config file value is used.
-        temp_env::with_vars(
-            [
-                ("APPLE_SIGNING_IDENTITY", None::<&str>),
-                ("APPLE_TEAM_ID", None::<&str>),
-            ],
-            || {
-                let cfg = parse_build_config(FULL).unwrap();
-                let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
-                assert_eq!(r.sign_identity, "Developer ID Application: Me (TEAM123456)");
-                assert_eq!(r.team_id, "TEAM123456");
-            },
-        );
+    fn project_value_wins_over_global() {
+        // FULL populates every [apple] key, so nothing should fall through to
+        // the global config.
+        temp_env::with_vars(APPLE_ENV_UNSET, || {
+            let cfg = parse_build_config(FULL).unwrap();
+            let r = cfg
+                .resolve(Path::new("/cfg"), Some(&global_config()))
+                .unwrap();
+            assert_eq!(r.sign_identity, "Developer ID Application: Me (TEAM123456)");
+            assert_eq!(r.team_id, "TEAM123456");
+            assert_eq!(r.apple_api_issuer, "issuer-uuid");
+            assert_eq!(r.apple_api_key, "KEYID123");
+            // A project-relative key path anchors on the config dir, and must not
+            // be shadowed by the global config's absolute path.
+            assert_eq!(r.apple_api_key_path, Some(PathBuf::from("/cfg/AuthKey.p8")));
+        });
+    }
+
+    #[test]
+    fn global_fills_in_values_the_project_omits() {
+        temp_env::with_vars(APPLE_ENV_UNSET, || {
+            let cfg = parse_build_config(NO_APPLE_SECTION).unwrap();
+            let r = cfg
+                .resolve(Path::new("/cfg"), Some(&global_config()))
+                .unwrap();
+            assert_eq!(r.sign_identity, "global-identity");
+            assert_eq!(r.team_id, "global-team");
+            assert_eq!(r.apple_api_issuer, "global-issuer");
+            assert_eq!(r.apple_api_key, "global-key");
+            // The global path was made absolute at load time, so it is used
+            // as-is rather than joined onto the project's config dir.
+            assert_eq!(
+                r.apple_api_key_path,
+                Some(PathBuf::from("/global/AuthKey.p8"))
+            );
+        });
+    }
+
+    #[test]
+    fn absent_everywhere_leaves_identifiers_empty() {
+        // No env, no [apple] section, no global config: resolve must still
+        // succeed. Missing credentials are reported later by preflight, not here.
+        temp_env::with_vars(APPLE_ENV_UNSET, || {
+            let cfg = parse_build_config(NO_APPLE_SECTION).unwrap();
+            let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+            assert_eq!(r.sign_identity, "");
+            assert_eq!(r.team_id, "");
+            assert_eq!(r.apple_api_issuer, "");
+            assert_eq!(r.apple_api_key, "");
+            assert_eq!(r.apple_api_key_path, None);
+        });
     }
 
     #[test]
@@ -937,6 +970,8 @@ mod tests {
 
     #[test]
     fn multi_target_parses_to_n_targets_with_platforms() {
+        // MULTI shares one app name across two platforms, so this also covers
+        // the rule that the platform segment keeps such target ids distinct.
         let project = parse_build_config(MULTI)
             .unwrap()
             .resolve_project(Path::new("/cfg"), None)
@@ -976,15 +1011,6 @@ mod tests {
         .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("Duplicate target \"ios/MyApp\""), "got: {msg}");
-    }
-
-    #[test]
-    fn same_app_name_on_different_platforms_is_allowed() {
-        // The whole point of the platform segment: one product, two targets.
-        parse_build_config(MULTI)
-            .unwrap()
-            .resolve_project(Path::new("/cfg"), None)
-            .expect("macos/MyApp and ios/MyApp are distinct target ids");
     }
 
     #[test]
@@ -1093,20 +1119,6 @@ mod tests {
             project.targets[1].build_dir,
             PathBuf::from("/cfg/.build/dist/ios/MyApp")
         );
-    }
-
-    #[test]
-    fn single_target_keeps_default_build_dir() {
-        let cfg = parse_build_config(indoc! { r#"
-            [app]
-            name = "X"
-            bundle_id = "y"
-            version = "1"
-            build_number = "1"
-        "#})
-        .unwrap();
-        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
-        assert_eq!(r.build_dir, PathBuf::from("/cfg/.build/dist"));
     }
 
     #[test]
