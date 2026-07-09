@@ -31,11 +31,10 @@ pub fn render_to_png(icon: &ResolvedIcon, dest: &Path) -> Result<()> {
             background,
             ..
         } => {
-            let foreground = image::open(src)
-                .with_context(|| format!("Failed to read icon source image: {}", src.display()))?
-                .to_rgba8();
-
             let default_options = icon::IconOptions::default();
+            let foreground = icon::load_foreground(src, default_options.canvas_size)
+                .with_context(|| format!("Failed to read icon source image: {}", src.display()))?;
+
             let background = match background {
                 Some(hex) => icon::parse_hex_color(hex)
                     .with_context(|| format!("Invalid icon background color {hex:?}"))?,
@@ -48,8 +47,12 @@ pub fn render_to_png(icon: &ResolvedIcon, dest: &Path) -> Result<()> {
             };
             let canvas =
                 icon::generate(&foreground, &options).context("Failed to generate app icon")?;
+            // `dest` may be named `AppIcon.icns` even though these are always
+            // PNG bytes (macOS sniffs content, not the extension). `save()`
+            // picks its encoder from the extension, and `image` doesn't know
+            // `.icns` at all, so it would bail before encoding.
             canvas
-                .save(dest)
+                .save_with_format(dest, image::ImageFormat::Png)
                 .with_context(|| format!("Failed to write generated icon: {}", dest.display()))
         },
     }
@@ -72,9 +75,8 @@ pub fn render_ios_icon(icon: &ResolvedIcon, canvas_size: u32) -> Result<RgbaImag
         } => (src, *scale, background.as_deref()),
     };
 
-    let foreground = image::open(path)
-        .with_context(|| format!("Failed to read icon source image: {}", path.display()))?
-        .to_rgba8();
+    let foreground = icon::load_foreground(path, canvas_size)
+        .with_context(|| format!("Failed to read icon source image: {}", path.display()))?;
 
     let default_options = icon::IconOptions::default();
     let background = match background {
