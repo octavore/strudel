@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 
@@ -27,6 +27,14 @@ pub(crate) struct ReleaseCmd {
     /// Build and package the DMG without submitting for notarization
     #[arg(long)]
     skip_notarization: bool,
+
+    /// Copy the built app into /Applications after a successful release
+    #[arg(long)]
+    install: bool,
+
+    /// Copy the built DMG into this directory after a successful release
+    #[arg(long)]
+    dmg_output_dir: Option<PathBuf>,
 }
 
 impl ReleaseCmd {
@@ -41,15 +49,24 @@ impl ReleaseCmd {
             );
         }
         run_for_targets(targets, |cfg| match &cfg.target_platform {
-            ResolvedTargetPlatform::Mac(_) => MacosBuilder::new(
-                cfg.clone(),
-                self.dry_run,
-                self.open,
-                false,
-                self.resume.clone(),
-                self.skip_notarization,
-            )?
-            .release(),
+            ResolvedTargetPlatform::Mac(_) => {
+                let builder = MacosBuilder::new(
+                    cfg.clone(),
+                    self.dry_run,
+                    self.open,
+                    false,
+                    self.resume.clone(),
+                    self.skip_notarization,
+                )?;
+                builder.release()?;
+                if self.install {
+                    builder.install_to_applications()?;
+                }
+                if let Some(ref dir) = self.dmg_output_dir {
+                    builder.copy_dmg_to(dir)?;
+                }
+                Ok(())
+            },
             ResolvedTargetPlatform::Ios(_) => {
                 bail!(
                     "`release` is not supported yet for iOS targets. Use \

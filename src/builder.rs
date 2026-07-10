@@ -284,6 +284,31 @@ impl MacosBuilder {
         Ok(())
     }
 
+    /// Copy the built DMG into `dir`, replacing any existing file of the same
+    /// name. Assumes the DMG has already been packaged by `release`.
+    pub fn copy_dmg_to(&self, dir: &Path) -> Result<()> {
+        let dmg = &self.paths.dmg;
+        let dmg_name = dmg
+            .file_name()
+            .with_context(|| format!("DMG path has no file name: {}", dmg.display()))?;
+        let dest = dir.join(dmg_name);
+
+        if !self.dry_run {
+            self.create_dir(dir)?;
+            if dest.exists() {
+                std::fs::remove_file(&dest)
+                    .with_context(|| format!("Failed to remove existing {}", dest.display()))?;
+            }
+        }
+        self.copy_file(dmg, &dest)?;
+        println!();
+        cprintln!(
+            "<green>DMG copied to</green> <cyan>{}</cyan>",
+            dest.display()
+        );
+        Ok(())
+    }
+
     /// Full release pipeline: clean -> binary -> assemble -> sign -> package
     /// DMG -> notarize. With `--resume`, skips the build and resumes a
     /// pending notarization instead. With `--skip-notarization`, stops
