@@ -253,7 +253,8 @@ impl MacosBuilder {
                             format_elapsed(state.submitted_at)
                         );
                     }
-                    bail!("Run: strudel release --resume <UUID>");
+                    let most_recent = &pending[0].0;
+                    bail!("Run: strudel release --resume {most_recent}");
                 },
             }
         } else {
