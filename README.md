@@ -23,6 +23,7 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 - [Development](#development)
 - [Other tips](#other-tips)
 - [Acknowledgements](#acknowledgements)
+- [License](#license)
 
 ## Installation
 
@@ -889,3 +890,7 @@ cargo install --path .
 ## Acknowledgements
 
 🍻 and 🐙 to my Spring 2 '26 batchmates and everyone else at the [Recurse Center](https://www.recurse.com), you're the best!
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
