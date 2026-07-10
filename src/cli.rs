@@ -64,7 +64,8 @@ enum Cmd {
     /// iOS: unsigned .app, no install/launch.
     Build(BuildCmd),
     /// Build and launch locally.
-    /// macOS: runs build, then opens the app.
+    /// macOS: runs build, then opens the app. With no flags, only macOS
+    /// targets run; pass --sim/--device for iOS.
     /// iOS: install and launch on a simulator or device.
     Run(RunCmd),
     /// (macOS) Create a full distributable DMG: signed, notarized, and

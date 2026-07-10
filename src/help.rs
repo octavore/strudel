@@ -196,6 +196,11 @@ fn print_targets() {
         dispatch per target based on its own platform (macOS or iOS). Other commands
         (`devices`, `profile`, `status`, `clean`) take `--target` instead.
 
+        `strudel run` with no selector, `--sim`, or `--device` is an exception: it
+        only runs macOS targets, since launching iOS needs `--sim` or `--device` to
+        say where. Pass `--sim`/`--device` to run iOS targets instead, or a selector
+        to target the app explicitly regardless of platform.
+
         ## Build directories
 
         With multiple targets, each gets its own build directory, named for its target

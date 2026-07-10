@@ -43,10 +43,13 @@ impl RunCmd {
         let project = config::load_config(config)?;
         // --sim / --device only apply to iOS targets, so if either is given
         // restrict selection to iOS instead of also running the macOS target.
+        // With no flags at all, only run macOS targets.
         let targets = if self.sim.is_some() || !self.device.is_empty() {
             project.select(self.target.as_deref(), Platform::Ios, true)?
-        } else {
+        } else if self.target.is_some() {
             all_or_named(&project, self.target.as_deref())?
+        } else {
+            project.select(None, Platform::Macos, true)?
         };
         run_for_targets(targets, |cfg| match &cfg.target_platform {
             ResolvedTargetPlatform::Mac(_) => {
