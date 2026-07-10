@@ -231,7 +231,7 @@ fn print_config() {
         name         = "MyApp"              # display name, .app bundle name, binary name
         bundle_id    = "com.example.myapp"  # CFBundleIdentifier
         version      = "1.0.0"              # CFBundleShortVersionString
-        build_number = "1"                  # CFBundleVersion
+        build_number = "1"                  # CFBundleVersion; default: "1"
         {ANSI_RESET}
         ## [build] optional
         {ANSI_PURPLE}

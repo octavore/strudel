@@ -307,7 +307,7 @@ fn resolve_target(
         app_name: app.name,
         bundle_id: app.bundle_id,
         version: app.version,
-        build_number: app.build_number,
+        build_number: app.build_number.unwrap_or_else(|| "1".to_string()),
         source_dir,
         build_dir,
         target_name,
@@ -343,12 +343,7 @@ pub struct NotaryAuth {
 }
 
 // todo: optionally generate ios/ios+macos configs
-pub fn generate_initial_toml(
-    app_name: &str,
-    bundle_id: &str,
-    version: &str,
-    build_number: &str,
-) -> String {
+pub fn generate_initial_toml(app_name: &str, bundle_id: &str, version: &str) -> String {
     formatdoc! {r##"
         # strudel build configuration
         # See `strudel help config` for the full list of options.
@@ -357,7 +352,7 @@ pub fn generate_initial_toml(
         name         = "{app_name}"
         bundle_id    = "{bundle_id}"
         version      = "{version}"
-        build_number = "{build_number}"
+        # build_number = "1"  # optional, defaults to "1"
 
         # Paths are relative to this file's directory unless absolute.
         # [build]
@@ -389,7 +384,6 @@ pub fn generate_initial_toml_with_ios(
     app_name: &str,
     bundle_id: &str,
     version: &str,
-    build_number: &str,
     include_macos: bool,
     ios_provisioning: IosProvisioningBackend,
 ) -> String {
@@ -405,7 +399,7 @@ pub fn generate_initial_toml_with_ios(
             app.name         = "{app_name}"
             app.bundle_id    = "{bundle_id}"
             app.version      = "{version}"
-            app.build_number = "{build_number}"
+            # app.build_number = "1"  # optional, defaults to "1"
 
             # build.entitlements_json_path = "entitlements.json"
             # build.icon.src               = "art.png"  # or build.icon.path = "AppIcon.icns"
@@ -439,7 +433,7 @@ pub fn generate_initial_toml_with_ios(
         app.name         = "{app_name}"
         app.bundle_id    = "{bundle_id}"
         app.version      = "{version}"
-        app.build_number = "{build_number}"
+        # app.build_number = "1"  # optional, defaults to "1"
 
         # ios.simulator          = "iPhone 16"
         # ios.deployment_target  = "18.0"
@@ -465,19 +459,20 @@ mod tests {
         // must resolve cleanly: otherwise `strudel init` produces a file that
         // `strudel build` rejects. Resolving subsumes parsing, so one test
         // covers both halves.
-        let t = generate_initial_toml("MyApp", "com.example.myapp", "1.2.3", "42");
+        let t = generate_initial_toml("MyApp", "com.example.myapp", "1.2.3");
         let cfg: BuildConfig = toml::from_str(&t).expect("scaffolded TOML must parse");
         let BuildConfig::Single(single) = &cfg else {
             panic!("scaffolded TOML should parse as a single-target config");
         };
         assert_eq!(single.app.bundle_id, "com.example.myapp");
-        assert_eq!(single.app.build_number, "42");
+        assert_eq!(single.app.build_number, None);
 
         let r = cfg
             .resolve(Path::new("/cfg"), None)
             .expect("scaffolded TOML must resolve");
         assert_eq!(r.app_name, "MyApp");
         assert_eq!(r.version, "1.2.3");
+        assert_eq!(r.build_number, "1");
     }
 
     #[test]
@@ -486,7 +481,6 @@ mod tests {
             "MyApp",
             "com.example.myapp",
             "1.0",
-            "1",
             true,
             IosProvisioningBackend::AppStoreConnect,
         );
@@ -512,7 +506,6 @@ mod tests {
             "MyApp",
             "com.example.myapp",
             "1.0",
-            "1",
             false,
             IosProvisioningBackend::Free,
         );
@@ -534,7 +527,7 @@ mod tests {
             panic!("FULL fixture should parse as a single-target config");
         };
         assert_eq!(single.app.name, "MyApp");
-        assert_eq!(single.app.build_number, "42");
+        assert_eq!(single.app.build_number.as_deref(), Some("42"));
         assert_eq!(
             single.build.archs.as_deref(),
             Some(&["arm64".into(), "x86_64".into()][..])
@@ -572,9 +565,28 @@ mod tests {
             [app]
             name = "X"
             bundle_id = "y"
-            version = "1"
         "#});
-        assert!(err.is_err(), "missing build_number should fail");
+        assert!(err.is_err(), "missing version should fail");
+    }
+
+    #[test]
+    fn missing_build_number_defaults_to_one() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+        "#})
+        .expect("build_number should default to \"1\"");
+        let BuildConfig::Single(single) = &cfg else {
+            panic!("expected single-target config");
+        };
+        assert_eq!(single.app.build_number, None);
+
+        let resolved = cfg
+            .resolve(Path::new("/cfg"), None)
+            .expect("should resolve with defaulted build_number");
+        assert_eq!(resolved.build_number, "1");
     }
 
     #[test]
@@ -748,7 +760,7 @@ mod tests {
 
     #[test]
     fn dmg_absent_uses_defaults() {
-        let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0", "1");
+        let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0");
         let cfg: BuildConfig = toml::from_str(&t).unwrap();
         let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         let ResolvedTargetPlatform::Mac(macos) = &r.target_platform else {

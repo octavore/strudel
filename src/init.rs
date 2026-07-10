@@ -64,7 +64,6 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
     let default_id = format!("com.example.{}", app_name.to_lowercase());
     let bundle_id = prompt("Bundle ID", Some(&default_id))?;
     let version = prompt("Version", Some("0.1.0"))?;
-    let build_number = "1";
 
     let platforms = inquire::Select::new("Platforms:", vec!["macOS", "iOS", "both"]).prompt()?;
     let include_macos = platforms != "iOS";
@@ -98,16 +97,9 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
             }
         }
 
-        generate_initial_toml_with_ios(
-            &app_name,
-            &bundle_id,
-            &version,
-            build_number,
-            include_macos,
-            provisioning,
-        )
+        generate_initial_toml_with_ios(&app_name, &bundle_id, &version, include_macos, provisioning)
     } else {
-        generate_initial_toml(&app_name, &bundle_id, &version, build_number)
+        generate_initial_toml(&app_name, &bundle_id, &version)
     };
     std::fs::create_dir_all(output_dir)?;
     std::fs::write(&out_path, &content)?;

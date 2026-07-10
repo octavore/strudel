@@ -42,7 +42,7 @@ pub struct AppSection {
     pub name: String,
     pub bundle_id: String,
     pub version: String,
-    pub build_number: String,
+    pub build_number: Option<String>,
 }
 
 /// BuildSection `[build]` contains inputs and outputs. All optional, with
