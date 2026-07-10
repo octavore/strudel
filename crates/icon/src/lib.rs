@@ -72,7 +72,7 @@ pub struct IconOptions {
     pub foreground_scale: f32,
     /// Corner radius as a fraction of the squircle's size, fed into the
     /// same continuous-corner curve as
-    /// `UIBezierPath(roundedRect:cornerRadius:)`. ~0.181 matches Apple's
+    /// `UIBezierPath(roundedRect:cornerRadius:)`. ~0.245 matches Apple's
     /// 1024pt macOS icon template.
     pub corner_radius_ratio: f32,
     pub shadow_blur: usize,
@@ -86,9 +86,9 @@ impl Default for IconOptions {
         IconOptions {
             canvas_size: 1024,
             background: Rgba([255, 255, 255, 255]),
-            squircle_scale: 0.84,
+            squircle_scale: 0.81,
             foreground_scale: 0.64,
-            corner_radius_ratio: 0.1811,
+            corner_radius_ratio: 0.245,
             shadow_blur: 24,
             shadow_offset_y: 10.0,
             shadow_alpha: 0.35,
