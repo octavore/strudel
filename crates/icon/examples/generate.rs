@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::{env, process};
 
-use icon::{IconOptions, generate, parse_hex_color};
+use strudel_icon::{IconOptions, generate, parse_hex_color};
 
 fn main() {
     let mut args = env::args().skip(1);

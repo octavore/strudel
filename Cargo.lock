@@ -109,32 +109,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
-name = "appleid"
-version = "0.4.0"
-dependencies = [
- "aes",
- "aes-gcm",
- "anyhow",
- "base64",
- "cbc",
- "chrono",
- "hmac 0.13.0",
- "num-bigint 0.5.1",
- "objc2",
- "objc2-foundation",
- "pbkdf2",
- "plist",
- "rand 0.10.2",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "ureq",
- "uuid",
-]
-
-[[package]]
 name = "array-init"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -760,16 +734,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dmg"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "binrw",
- "plist",
- "tempfile",
-]
-
-[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1157,17 +1121,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "icon"
-version = "0.1.0"
-dependencies = [
- "image",
- "resvg",
- "tempfile",
- "thiserror",
- "tiny-skia",
 ]
 
 [[package]]
@@ -2533,17 +2486,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
-name = "strudel"
+name = "strudel-appleid"
+version = "0.4.0"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "anyhow",
+ "base64",
+ "cbc",
+ "chrono",
+ "hmac 0.13.0",
+ "num-bigint 0.5.1",
+ "objc2",
+ "objc2-foundation",
+ "pbkdf2",
+ "plist",
+ "rand 0.10.2",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "strudel-cli"
 version = "0.4.0"
 dependencies = [
  "anstream",
  "anyhow",
- "appleid",
  "base64",
  "clap",
  "color-print",
- "dmg",
- "icon",
  "image",
  "indoc",
  "inquire",
@@ -2554,11 +2530,35 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "srp",
+ "strudel-appleid",
+ "strudel-dmg",
+ "strudel-icon",
  "temp-env",
  "tempfile",
  "toml",
  "ureq",
  "xdg",
+]
+
+[[package]]
+name = "strudel-dmg"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "binrw",
+ "plist",
+ "tempfile",
+]
+
+[[package]]
+name = "strudel-icon"
+version = "0.4.0"
+dependencies = [
+ "image",
+ "resvg",
+ "tempfile",
+ "thiserror",
+ "tiny-skia",
 ]
 
 [[package]]

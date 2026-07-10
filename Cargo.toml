@@ -1,6 +1,6 @@
 [package]
-name = "strudel"
-version = "0.4.0"
+name = "strudel-cli"
+version.workspace = true
 edition = "2024"
 description = "Build and ship macOS/iOS apps without touching Xcode"
 readme = "README.md"
@@ -12,7 +12,10 @@ categories = ["command-line-utilities", "development-tools::build-utils"]
 
 [workspace]
 resolver = "2"
-members = [".", "crates/dmg", "crates/appleid", "crates/icon"]
+members = [".", "crates/appleid", "crates/dmg", "crates/icon"]
+
+[workspace.package]
+version = "0.4.0"
 
 [[bin]]
 name = "strudel"
@@ -21,26 +24,26 @@ path = "src/main.rs"
 [dependencies]
 anstream = "1.0.0"
 anyhow = "1"
+appleid = {package = "strudel-appleid", path = "crates/appleid", version = "0.4.0"}
 base64 = "0.22"
 clap = {version = "4", features = ["derive"]}
 color-print = "0.3.7"
-appleid = {path = "crates/appleid"}
-dmg = {path = "crates/dmg"}
-icon = {path = "crates/icon"}
+dmg = {package = "strudel-dmg", path = "crates/dmg", version = "0.4.0"}
+icon = {package = "strudel-icon", path = "crates/icon", version = "0.4.0"}
 image = {version = "0.25", default-features = false, features = ["png"]}
 indoc = "2"
 inquire = "0.9"
-jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+jsonwebtoken = {version = "10", features = ["rust_crypto"]}
 plist = "1"
 secrecy = "0.10.3"
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
-tempfile = "3"
 shellexpand = "3"
+srp = "=0.7.0-rc.3"
+tempfile = "3"
 toml = "1.1"
 ureq = {version = "3", features = ["json"]}
 xdg = "3.0.0"
-srp = "=0.7.0-rc.3"
 
 [dev-dependencies]
 temp-env = "0.3"

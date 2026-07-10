@@ -1,27 +1,29 @@
 [package]
-name = "appleid"
-version = "0.4.0"
+name = "strudel-appleid"
+version.workspace = true
 edition = "2024"
+description = "Apple ID authentication and provisioning helpers used internally by strudel"
+repository = "https://github.com/octavore/strudel"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1"
-base64 = "0.22"
-num-bigint = "0.5"
-rand = "0.10"
-sha2 = "0.11"
-hmac = "0.13"
-pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 aes = "0.9"
 aes-gcm = "0.11"
-cbc = { version = "0.2", features = ["alloc", "block-padding"] }
-ureq = { version = "3", features = ["json", "native-tls"] }
+anyhow = "1"
+base64 = "0.22"
+cbc = {version = "0.2", features = ["alloc", "block-padding"]}
+chrono = "0.4.45"
+hmac = "0.13"
+num-bigint = "0.5"
+objc2 = "0.6"
+objc2-foundation = {version = "0.3", features = ["NSBundle", "NSDictionary", "NSString"]}
+pbkdf2 = {version = "0.13", default-features = false, features = ["hmac"]}
 plist = "1"
-serde = { version = "1", features = ["derive"] }
+rand = "0.10"
+serde = {version = "1", features = ["derive"]}
 serde_bytes = "0.11"
 serde_json = "1"
-uuid = { version = "1", features = ["v4"] }
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSBundle", "NSDictionary", "NSString"] }
+sha2 = "0.11"
 tempfile = "3"
-chrono = "0.4.45"
+ureq = {version = "3", features = ["json", "native-tls"]}
+uuid = {version = "1", features = ["v4"]}
