@@ -1,13 +1,17 @@
 mod color;
 mod mask;
 mod path;
-mod rasterize;
+mod pixmap;
 mod svg;
 
 use std::path::Path;
 
 use image::{Rgba, RgbaImage};
 use thiserror::Error;
+use tiny_skia::{
+    Color, FillRule, GradientStop, LinearGradient, Mask, Paint, Pixmap, PixmapPaint, Point, Rect,
+    SpreadMode, Transform,
+};
 
 pub use crate::color::parse_hex_color;
 
@@ -97,110 +101,89 @@ impl Default for IconOptions {
 /// drop shadow and a top gloss highlight, centered on a transparent canvas.
 pub fn generate(foreground: &RgbaImage, options: &IconOptions) -> Result<RgbaImage, IconError> {
     let squircle_size = (options.canvas_size as f32 * options.squircle_scale) as u32;
-    let mask = mask::build_squircle_mask(squircle_size, options.corner_radius_ratio);
+    let dim = squircle_size as f32;
+    let radius = dim * options.corner_radius_ratio.min(path::MAX_RADIUS_RATIO);
+    let squircle_path = path::continuous_rounded_rect(dim, dim, radius);
 
-    let mut shadow_mask = mask.clone();
-    mask::box_blur(&mut shadow_mask, squircle_size, options.shadow_blur, 3);
+    let inset = ((options.canvas_size - squircle_size) / 2) as f32;
+    let squircle_transform = Transform::from_translate(inset, inset);
 
-    let mut canvas =
-        RgbaImage::from_pixel(options.canvas_size, options.canvas_size, Rgba([0, 0, 0, 0]));
-    let inset = (options.canvas_size - squircle_size) / 2;
+    let mut canvas = Pixmap::new(options.canvas_size, options.canvas_size)
+        .expect("canvas_size is always nonzero");
 
-    paint_shadow(&mut canvas, &shadow_mask, squircle_size, inset, options);
-    paint_background(&mut canvas, &mask, squircle_size, inset, options);
+    // The squircle's exact silhouette, at canvas position, reused to clip the
+    // foreground artwork (whose own draw call can't take a path directly).
+    let mut squircle_mask =
+        Mask::new(options.canvas_size, options.canvas_size).expect("canvas_size is always nonzero");
+    squircle_mask.fill_path(&squircle_path, FillRule::Winding, true, squircle_transform);
+
+    paint_shadow(&mut canvas, &squircle_path, inset, options);
+    paint_background(&mut canvas, &squircle_path, squircle_transform, options);
     paint_foreground(
         &mut canvas,
-        &mask,
+        &squircle_mask,
         squircle_size,
         inset,
         foreground,
         options,
     );
-    paint_gloss(&mut canvas, &mask, squircle_size, inset, options);
+    paint_gloss(
+        &mut canvas,
+        &squircle_path,
+        squircle_transform,
+        dim,
+        options,
+    );
 
-    Ok(canvas)
-}
-
-/// Standard "over" alpha compositing in straight (non-premultiplied) alpha.
-/// Coverage/edge pixels must go through this rather than a hardcoded
-/// alpha=255 write, otherwise antialiased squircle edges pick up a dark
-/// halo from blending against the transparent-black canvas background.
-fn blend(dst: Rgba<u8>, src_rgb: [u8; 3], src_alpha: f32) -> Rgba<u8> {
-    let src_a = src_alpha.clamp(0.0, 1.0);
-    let dst_a = dst[3] as f32 / 255.0;
-    let out_a = src_a + dst_a * (1.0 - src_a);
-    if out_a <= 0.0 {
-        return Rgba([0, 0, 0, 0]);
-    }
-    let mix = |d: u8, s: u8| {
-        let d = d as f32 / 255.0;
-        let s = s as f32 / 255.0;
-        let out = (s * src_a + d * dst_a * (1.0 - src_a)) / out_a;
-        (out * 255.0).round().clamp(0.0, 255.0) as u8
-    };
-    Rgba([
-        mix(dst[0], src_rgb[0]),
-        mix(dst[1], src_rgb[1]),
-        mix(dst[2], src_rgb[2]),
-        (out_a * 255.0).round() as u8,
-    ])
+    Ok(pixmap::to_straight(&canvas))
 }
 
 fn paint_shadow(
-    canvas: &mut RgbaImage,
-    shadow_mask: &[f32],
-    size: u32,
-    inset: u32,
+    canvas: &mut Pixmap,
+    squircle_path: &tiny_skia::Path,
+    inset: f32,
     options: &IconOptions,
 ) {
-    let offset = options.shadow_offset_y as i64;
-    for y in 0..size {
-        for x in 0..size {
-            let a = shadow_mask[(y * size + x) as usize];
-            if a <= 0.0 {
-                continue;
-            }
-            let cx = inset as i64 + x as i64;
-            let cy = inset as i64 + y as i64 + offset;
-            if cx < 0 || cy < 0 || cx >= canvas.width() as i64 || cy >= canvas.height() as i64 {
-                continue;
-            }
-            let px = canvas.get_pixel_mut(cx as u32, cy as u32);
-            *px = blend(*px, [0, 0, 0], a * options.shadow_alpha);
-        }
-    }
+    let mut shadow_mask = Mask::new(canvas.width(), canvas.height()).expect("canvas is nonzero");
+    let shadow_transform = Transform::from_translate(inset, inset + options.shadow_offset_y);
+    shadow_mask.fill_path(squircle_path, FillRule::Winding, true, shadow_transform);
+    mask::box_blur(&mut shadow_mask, options.shadow_blur, 3);
+
+    let full_canvas = Rect::from_xywh(0.0, 0.0, canvas.width() as f32, canvas.height() as f32)
+        .expect("canvas is nonzero");
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(0, 0, 0, to_alpha_u8(options.shadow_alpha));
+    canvas.fill_rect(
+        full_canvas,
+        &paint,
+        Transform::identity(),
+        Some(&shadow_mask),
+    );
 }
 
 fn paint_background(
-    canvas: &mut RgbaImage,
-    mask: &[f32],
-    size: u32,
-    inset: u32,
+    canvas: &mut Pixmap,
+    squircle_path: &tiny_skia::Path,
+    squircle_transform: Transform,
     options: &IconOptions,
 ) {
-    let bg = [
-        options.background[0],
-        options.background[1],
-        options.background[2],
-    ];
-    let bg_alpha = options.background[3] as f32 / 255.0;
-    for y in 0..size {
-        for x in 0..size {
-            let coverage = mask[(y * size + x) as usize];
-            if coverage <= 0.0 {
-                continue;
-            }
-            let px = canvas.get_pixel_mut(x + inset, y + inset);
-            *px = blend(*px, bg, coverage * bg_alpha);
-        }
-    }
+    let bg = options.background;
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(bg[0], bg[1], bg[2], bg[3]);
+    canvas.fill_path(
+        squircle_path,
+        &paint,
+        FillRule::Winding,
+        squircle_transform,
+        None,
+    );
 }
 
 fn paint_foreground(
-    canvas: &mut RgbaImage,
-    mask: &[f32],
+    canvas: &mut Pixmap,
+    squircle_mask: &Mask,
     squircle_size: u32,
-    inset: u32,
+    inset: f32,
     foreground: &RgbaImage,
     options: &IconOptions,
 ) {
@@ -219,49 +202,62 @@ fn paint_foreground(
         art_h,
         image::imageops::FilterType::Lanczos3,
     );
+
     // Signed: foreground_scale > 1.0 means the art overscans the squircle
-    // (bleeds off the edge, cropped by the mask) rather than being inset.
+    // (bleeds off the edge, cropped by `squircle_mask`) rather than being inset.
     let margin_x = (squircle_size as i64 - art_w as i64) / 2;
     let margin_y = (squircle_size as i64 - art_h as i64) / 2;
 
-    for y in 0..art_h {
-        for x in 0..art_w {
-            let mx = margin_x + x as i64;
-            let my = margin_y + y as i64;
-            if mx < 0 || my < 0 || mx >= squircle_size as i64 || my >= squircle_size as i64 {
-                continue;
-            }
-            let src = *art.get_pixel(x, y);
-            if src[3] == 0 {
-                continue;
-            }
-            let coverage = mask[(my as u32 * squircle_size + mx as u32) as usize];
-            if coverage <= 0.0 {
-                continue;
-            }
-            let px = canvas.get_pixel_mut((inset as i64 + mx) as u32, (inset as i64 + my) as u32);
-            let alpha = (src[3] as f32 / 255.0) * coverage;
-            *px = blend(*px, [src[0], src[1], src[2]], alpha);
-        }
-    }
+    let art_pixmap = pixmap::to_premultiplied(&art);
+    canvas.draw_pixmap(
+        (inset as i64 + margin_x) as i32,
+        (inset as i64 + margin_y) as i32,
+        art_pixmap.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        Some(squircle_mask),
+    );
 }
 
-fn paint_gloss(canvas: &mut RgbaImage, mask: &[f32], size: u32, inset: u32, options: &IconOptions) {
-    for y in 0..size {
-        let t = y as f32 / size as f32;
-        let gloss = (options.gloss_alpha * (1.0 - t * 1.6)).clamp(0.0, options.gloss_alpha);
-        if gloss <= 0.0 {
-            continue;
-        }
-        for x in 0..size {
-            let coverage = mask[(y * size + x) as usize];
-            if coverage <= 0.0 {
-                continue;
-            }
-            let px = canvas.get_pixel_mut(x + inset, y + inset);
-            *px = blend(*px, [255, 255, 255], gloss * coverage);
-        }
+fn paint_gloss(
+    canvas: &mut Pixmap,
+    squircle_path: &tiny_skia::Path,
+    squircle_transform: Transform,
+    squircle_dim: f32,
+    options: &IconOptions,
+) {
+    if options.gloss_alpha <= 0.0 {
+        return;
     }
+    // A vertical ramp from `gloss_alpha` at the top, fading to 0 by 62.5% of
+    // the way down (`1.0 / 1.6`); `SpreadMode::Pad` clamps the rest to
+    // transparent, matching the original `(1.0 - t * 1.6).clamp(0.0, alpha)`.
+    let top = Color::from_rgba8(255, 255, 255, to_alpha_u8(options.gloss_alpha));
+    let bottom = Color::from_rgba8(255, 255, 255, 0);
+    let Some(shader) = LinearGradient::new(
+        Point::from_xy(0.0, 0.0),
+        Point::from_xy(0.0, squircle_dim / 1.6),
+        vec![GradientStop::new(0.0, top), GradientStop::new(1.0, bottom)],
+        SpreadMode::Pad,
+        Transform::identity(),
+    ) else {
+        return;
+    };
+    let paint = Paint {
+        shader,
+        ..Paint::default()
+    };
+    canvas.fill_path(
+        squircle_path,
+        &paint,
+        FillRule::Winding,
+        squircle_transform,
+        None,
+    );
+}
+
+fn to_alpha_u8(alpha: f32) -> u8 {
+    (alpha.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[cfg(test)]

@@ -1,39 +1,35 @@
-use crate::{path, rasterize};
-
-/// Rasterizes the continuous-corner rounded rect (Apple's icon "squircle")
-/// at `size`x`size` with corner radius `radius_ratio * size`.
-pub(crate) fn build_squircle_mask(size: u32, radius_ratio: f32) -> Vec<f32> {
-    let radius_ratio = radius_ratio.min(path::MAX_RADIUS_RATIO);
-    let dim = size as f32;
-    let polygon = path::continuous_rounded_rect(dim, dim, dim * radius_ratio);
-    rasterize::fill_polygon(&polygon, size, size)
-}
-
-pub(crate) fn box_blur(mask: &mut [f32], size: u32, radius: usize, passes: usize) {
+/// Blurs an alpha mask in place with a separable box blur (3 passes
+/// approximates a Gaussian closely enough for a drop shadow).
+pub(crate) fn box_blur(mask: &mut tiny_skia::Mask, radius: usize, passes: usize) {
+    let size = mask.width() as usize;
+    debug_assert_eq!(mask.width(), mask.height());
+    let data = mask.data_mut();
     for _ in 0..passes {
-        box_blur_pass(mask, size, true, radius);
-        box_blur_pass(mask, size, false, radius);
+        box_blur_pass(data, size, true, radius);
+        box_blur_pass(data, size, false, radius);
     }
 }
 
-fn box_blur_pass(mask: &mut [f32], size: u32, horizontal: bool, radius: usize) {
-    let size = size as usize;
-    let window = radius as f32 * 2.0 + 1.0;
+fn box_blur_pass(mask: &mut [u8], size: usize, horizontal: bool, radius: usize) {
+    let window = radius as u32 * 2 + 1;
     let src = mask.to_vec();
     for line in 0..size {
-        let mut sum = 0.0;
+        let mut sum = 0u32;
         for k in 0..=radius.min(size - 1) {
-            sum += sample(&src, size, line, k, horizontal);
+            sum += sample(&src, size, line, k, horizontal) as u32;
         }
         for i in 0..size {
-            mask[index(size, line, i, horizontal)] = sum / window;
+            // Round rather than truncate: `passes * 2` divisions each biasing
+            // down would visibly lighten the shadow. `window` is always odd,
+            // so `window / 2` is exactly the half-step.
+            mask[index(size, line, i, horizontal)] = ((sum + window / 2) / window) as u8;
 
             let add = i + radius + 1;
             if add < size {
-                sum += sample(&src, size, line, add, horizontal);
+                sum += sample(&src, size, line, add, horizontal) as u32;
             }
             if i >= radius {
-                sum -= sample(&src, size, line, i - radius, horizontal);
+                sum -= sample(&src, size, line, i - radius, horizontal) as u32;
             }
         }
     }
@@ -47,8 +43,8 @@ fn index(size: usize, line: usize, i: usize, horizontal: bool) -> usize {
     }
 }
 
-fn sample(src: &[f32], size: usize, line: usize, i: usize, horizontal: bool) -> f32 {
+fn sample(src: &[u8], size: usize, line: usize, i: usize, horizontal: bool) -> u8 {
     src.get(index(size, line, i, horizontal))
         .copied()
-        .unwrap_or(0.0)
+        .unwrap_or(0)
 }

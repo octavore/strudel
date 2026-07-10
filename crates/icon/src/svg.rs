@@ -1,10 +1,10 @@
 use std::sync::{Arc, OnceLock};
 
-use image::{Rgba, RgbaImage};
+use image::RgbaImage;
+use resvg::usvg;
 use resvg::usvg::fontdb;
-use resvg::{tiny_skia, usvg};
 
-use crate::IconError;
+use crate::{IconError, pixmap};
 
 /// The system font database, used to resolve `<text>` in icon artwork.
 /// `load_system_fonts` scans the OS font directories, so it's built once and
@@ -41,27 +41,22 @@ pub(crate) fn rasterize(data: &[u8], target_size: u32) -> Result<RgbaImage, Icon
     let width = ((size.width() * scale).round() as u32).max(1);
     let height = ((size.height() * scale).round() as u32).max(1);
 
-    let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or_else(|| {
+    let mut target = tiny_skia::Pixmap::new(width, height).ok_or_else(|| {
         IconError::InvalidSvg(format!("cannot allocate a {width}x{height} pixel buffer"))
     })?;
     resvg::render(
         &tree,
         tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
+        &mut target.as_mut(),
     );
 
-    // tiny-skia's pixmap is premultiplied alpha; the rest of this crate (and
-    // `image`) works in straight alpha, so unpremultiply on the way out.
-    let mut image = RgbaImage::new(width, height);
-    for (src, dst) in pixmap.pixels().iter().zip(image.pixels_mut()) {
-        let c = src.demultiply();
-        *dst = Rgba([c.red(), c.green(), c.blue(), c.alpha()]);
-    }
-    Ok(image)
+    Ok(pixmap::to_straight(&target))
 }
 
 #[cfg(test)]
 mod tests {
+    use image::Rgba;
+
     use super::*;
 
     const SQUARE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">

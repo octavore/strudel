@@ -1167,6 +1167,7 @@ dependencies = [
  "resvg",
  "tempfile",
  "thiserror",
+ "tiny-skia",
 ]
 
 [[package]]
