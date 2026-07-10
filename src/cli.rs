@@ -4,6 +4,7 @@ mod config;
 mod devices;
 mod help;
 mod helpers;
+mod icon;
 mod init;
 mod login;
 mod profile;
@@ -21,6 +22,7 @@ use crate::cli::clean::CleanCmd;
 use crate::cli::config::ConfigCmd;
 use crate::cli::devices::DevicesCmd;
 use crate::cli::help::HelpCmd;
+use crate::cli::icon::IconCmd;
 use crate::cli::init::InitCmd;
 use crate::cli::login::LoginCmd;
 use crate::cli::profile::ProfileCmd;
@@ -86,6 +88,10 @@ enum Cmd {
 
     /// Manage global strudel config (~/.config/strudel/config.toml)
     Config(ConfigCmd),
+    /// Render each target's configured app icon to a plain PNG (or copy it,
+    /// for a path-based icon), for inspecting generated artwork without
+    /// running a full build.
+    Icon(IconCmd),
     /// Show overall status: local toolchain versions, global config, the
     /// logged-in session (for free provisioning, if any), cached dev
     /// credentials, and per-target provisioning state.
@@ -112,6 +118,7 @@ impl Cli {
             Cmd::Profile(c) => c.execute(&config),
             Cmd::Clean(c) => c.execute(&config),
             Cmd::Config(c) => c.execute(),
+            Cmd::Icon(c) => c.execute(&config),
             Cmd::Status(c) => c.execute(&config),
             Cmd::Help(c) => c.execute(),
         }
