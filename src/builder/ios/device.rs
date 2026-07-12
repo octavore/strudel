@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 
+use crate::apple::fingerprint::parse_fingerprint;
 use crate::apple::provisioning::{self, ensure_keychain_ready};
 use crate::builder::ios::IosTarget;
 use crate::builder::ios::profile::decode_profile;
@@ -307,12 +308,8 @@ impl IosBuilder {
             }
             let fp_out = child.wait_with_output().context("openssl x509 failed")?;
             let fp_str = String::from_utf8_lossy(&fp_out.stdout);
-            // Output: "SHA1 Fingerprint=AA:BB:CC:..."
-            if let Some(fp) = fp_str.split('=').nth(1) {
-                let fp_clean: String = fp.trim().replace(':', "").to_ascii_uppercase();
-                if fp_clean == signing_fp {
-                    return Ok(());
-                }
+            if parse_fingerprint(&fp_str).as_deref() == Some(&signing_fp) {
+                return Ok(());
             }
         }
 

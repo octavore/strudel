@@ -11,9 +11,10 @@ use anyhow::Result;
 use appleid::Session;
 use color_print::cprintln;
 
+use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder;
 use crate::config::{
-    GlobalConfig, IosProvisioningBackend, ResolvedConfig, ResolvedIosSection,
+    GlobalConfig, IosProvisioningBackend, Platform, ResolvedConfig, ResolvedIosSection,
     ResolvedTargetPlatform, load_config,
 };
 use crate::devices::DeviceSet;
@@ -93,7 +94,7 @@ pub fn profile_info(config_path: &Path, target: Option<&str>) -> Result<()> {
 /// `.strudel/devices.toml` for each selected iOS target.
 pub fn devices_list(config_path: &Path, target: Option<&str>) -> Result<()> {
     let project = load_config(config_path)?;
-    let targets = project.select(target, crate::config::Platform::Ios, true)?;
+    let targets = project.select(target, Platform::Ios, true)?;
     let multi = targets.len() > 1;
 
     for cfg in targets {
@@ -503,9 +504,8 @@ fn describe_cert(cert_der: &Path) -> String {
         parts.push(format!("expires {v}"));
     }
     if let Some(fp) = openssl_field(cert_der, "-fingerprint")
-        && let Some(v) = fp.split_once('=').map(|(_, v)| v.trim())
+        && let Some(hex) = parse_fingerprint(&fp)
     {
-        let hex = v.replace(':', "");
         parts.push(format!("sha1 {}", &hex[..hex.len().min(12)]));
     }
     parts.join(", ")

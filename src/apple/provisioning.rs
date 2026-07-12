@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use appleid::{AppleId, Session, Team};
 use color_print::cprintln;
 
+use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder::keychain as kc;
 use crate::config::ResolvedConfig;
 use crate::devices::DeviceSet;
@@ -235,14 +236,8 @@ pub fn dev_cert_sha1() -> Result<Option<String>> {
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
-    // Output: "SHA1 Fingerprint=AA:BB:CC:..."
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let fp = stdout
-        .split('=')
-        .nth(1)
-        .map(|s| s.trim().replace(':', "").to_ascii_uppercase())
-        .filter(|s| !s.is_empty());
-    Ok(fp)
+    Ok(parse_fingerprint(&stdout))
 }
 
 fn get_apple_id(_data: &StrudelData) -> Result<AppleId> {
