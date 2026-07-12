@@ -133,7 +133,9 @@ impl MacosBuilder {
                 } else {
                     format!("{}m{}s", elapsed_s / 60, elapsed_s % 60)
                 };
-                cprintln!("  <dim>{apple_status}: {waited} elapsed, next poll in {POLL_SECS}s</dim>");
+                cprintln!(
+                    "  <dim>{apple_status}: {waited} elapsed, next poll in {POLL_SECS}s</dim>"
+                );
                 sleep(Duration::from_secs(POLL_SECS));
             } else {
                 // Tick every second so the elapsed time and countdown stay live.
