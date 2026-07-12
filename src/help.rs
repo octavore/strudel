@@ -447,6 +447,13 @@ fn print_notarize() {
         Edit the global config: {ANSI_BLUE}strudel config edit{ANSI_RESET}
         See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
 
+        ## Key role
+
+        A "Developer" role key is enough for macOS app notarization, whether locally or in CI.
+        If you also use strudel's iOS auto-provisioning ({ANSI_PURPLE}"app_store_connect"{ANSI_RESET}),
+        use an "Admin" role key instead - device registration and profile management via the
+        App Store Connect API require additional permissions.
+
         ## Timeout
         {ANSI_PURPLE}
         [apple]
@@ -707,7 +714,7 @@ fn print_ios_device() {
 
         Note: registering devices and creating bundle IDs and profiles requires an API key
         with the {ANSI_GREEN}Admin{ANSI_RESET} role. A {ANSI_GREEN}Developer{ANSI_RESET} key
-        is fine for notarization but fails with "insufficient permissions" on
+        is fine for notarization but will fail with "insufficient permissions" on
         `strudel devices add`, `strudel run --device`, and `strudel profile fetch`. Either use
         an Admin key or register the device and create the profile manually and set
         build.provisioning_profile.

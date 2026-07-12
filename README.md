@@ -615,6 +615,12 @@ env var > `strudel.toml` > `~/.config/strudel/config.toml` (see [Global config](
 
 `APPLE_API_ISSUER` is only present for team Apple Developer accounts.
 
+A **Developer**-role API key is enough for notarization alone. If you also use
+strudel's iOS auto-provisioning (`[ios] provisioning = "app_store_connect"`), use
+an **Admin**-role key instead - device registration and profile management via
+the App Store Connect API generally require Admin, and a Developer key fails
+with a 403/`FORBIDDEN_ERROR`.
+
 ### Example
 
 ```sh
