@@ -250,7 +250,7 @@ impl MacosBuilder {
             self.core.cfg.sign_identity = identity;
             keychain
         });
-        self.sign(false)?;
+        self.sign()?;
 
         println!();
         if self.dry_run {
@@ -343,7 +343,7 @@ impl MacosBuilder {
             self.core.cfg.sign_identity = identity;
             keychain
         });
-        self.sign(true)?;
+        self.sign()?;
         self.package_dmg()?;
 
         if !self.skip_notarization {

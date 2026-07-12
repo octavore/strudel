@@ -162,6 +162,21 @@ impl MacosBuilder {
         self.sh
             .run(&["xcrun", "stapler", "staple", app_bundle_str])?;
 
+        step("Verifying Gatekeeper assessment...");
+        let _ = self
+            .sh
+            .run(&[
+                "spctl",
+                "-a",
+                "-t",
+                "open",
+                "--context",
+                "context:primary-signature",
+                "-v",
+                app_bundle_str,
+            ])
+            .inspect_err(|e| cprintln!("<yellow>warning:</yellow> spctl assessment failed: {e}"));
+
         step("Stapling DMG...");
         self.sh
             .run(&["xcrun", "stapler", "staple", pending_dmg_str])?;
