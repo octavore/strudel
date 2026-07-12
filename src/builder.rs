@@ -346,7 +346,14 @@ impl MacosBuilder {
         self.sign()?;
         self.package_dmg()?;
 
-        if !self.skip_notarization {
+        if self.skip_notarization {
+            if !self.dry_run {
+                if let Some(parent) = self.paths.dmg.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::rename(&self.paths.strudel_temp_dmg, &self.paths.dmg)?;
+            }
+        } else {
             self.notarize()?;
         }
 
