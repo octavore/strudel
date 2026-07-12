@@ -53,8 +53,15 @@ impl RunCmd {
         };
         run_for_targets(targets, |cfg| match &cfg.target_platform {
             ResolvedTargetPlatform::Mac(_) => {
-                let mut builder =
-                    MacosBuilder::new(cfg.clone(), self.dry_run, true, self.debug, None, false)?;
+                let mut builder = MacosBuilder::new(
+                    cfg.clone(),
+                    self.dry_run,
+                    true,
+                    self.debug,
+                    None,
+                    false,
+                    false,
+                )?;
                 if self.unsigned {
                     builder.bundle()
                 } else {

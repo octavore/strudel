@@ -172,6 +172,7 @@ strudel release --open               # open the .app after a successful build
 strudel release --skip-notarization  # build and package the DMG, but don't notarize
 strudel release --resume             # resume the most recent pending notarization
 strudel release --resume <uuid>      # resume a specific notarization submission
+strudel release --ci                 # trim noisy per-second notarization progress output for captured CI logs
 ```
 
 Output artifacts are saved to `build_dir`:

@@ -35,6 +35,10 @@ pub(crate) struct ReleaseCmd {
     /// Copy the built DMG into this directory after a successful release
     #[arg(long)]
     dmg_output_dir: Option<PathBuf>,
+
+    /// Trim interactive-only output in CI to reduce log noise.
+    #[arg(long)]
+    ci: bool,
 }
 
 impl ReleaseCmd {
@@ -57,6 +61,7 @@ impl ReleaseCmd {
                     false,
                     self.resume.clone(),
                     self.skip_notarization,
+                    self.ci,
                 )?;
                 builder.release()?;
                 if self.install {

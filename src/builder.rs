@@ -51,6 +51,10 @@ pub struct MacosBuilder {
     open: bool,
     resume: Option<String>,
     skip_notarization: bool,
+    /// Trims interactive-only output (e.g. the per-second notarization
+    /// countdown) that's noisy in captured CI logs but harmless on a real
+    /// terminal.
+    ci: bool,
 }
 
 /// The iOS build pipeline. Wraps a [`BuilderCore`] and the resolved `[ios]`
@@ -178,6 +182,7 @@ impl MacosBuilder {
         debug: bool,
         resume: Option<String>,
         skip_notarization: bool,
+        ci: bool,
     ) -> Result<Self> {
         let ResolvedTargetPlatform::Mac(ref macos) = cfg.target_platform else {
             bail!("MacosBuilder constructed for a non-macOS target");
@@ -189,6 +194,7 @@ impl MacosBuilder {
             open,
             resume,
             skip_notarization,
+            ci,
         })
     }
 

@@ -46,6 +46,7 @@ impl BuildCmd {
                     self.debug,
                     None,
                     false,
+                    false,
                 )?;
                 if self.unsigned {
                     builder.bundle()?;

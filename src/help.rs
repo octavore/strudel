@@ -878,7 +878,12 @@ fn print_ci() {
                   APPLE_API_KEY_PATH:         AuthKey.p8
                 run: |
                   echo "$APPLE_API_KEY_CONTENTS" > AuthKey.p8
-                  strudel release
+                  strudel release --ci
+
+        Pass {ANSI_BLUE}--ci{ANSI_RESET} to trim the per-second notarization countdown, which
+        otherwise spams captured CI logs with a line for every tick. Other output
+        (steps, errors, submission IDs) is unaffected, so it's safe to leave on
+        while debugging a CI run.
 
         ## Preparing APPLE_CERTIFICATE
 

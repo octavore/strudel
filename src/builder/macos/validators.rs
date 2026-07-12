@@ -212,7 +212,7 @@ mod tests {
     use crate::config::fixtures::resolved_macos;
 
     fn builder(cfg: ResolvedConfig) -> MacosBuilder {
-        MacosBuilder::new(cfg, true, false, false, None, false).unwrap()
+        MacosBuilder::new(cfg, true, false, false, None, false, false).unwrap()
     }
 
     #[test]

@@ -124,19 +124,32 @@ impl MacosBuilder {
                 );
             }
 
-            // Tick every second so the elapsed time and countdown stay live.
-            for remaining in (1..=POLL_SECS).rev() {
+            if self.ci {
+                // A plain line per poll cycle instead of a \r-updating
+                // countdown, which reads as endless noise in captured CI logs.
                 let elapsed_s = started.elapsed().as_secs();
                 let waited = if elapsed_s < 60 {
                     format!("{elapsed_s}s")
                 } else {
                     format!("{}m{}s", elapsed_s / 60, elapsed_s % 60)
                 };
-                cprint!(
-                    "\x1b[2K\r  <dim>{apple_status}: {waited} elapsed, next poll in {remaining}s</dim>"
-                );
-                std::io::stdout().flush().ok();
-                sleep(Duration::from_secs(1));
+                cprintln!("  <dim>{apple_status}: {waited} elapsed, next poll in {POLL_SECS}s</dim>");
+                sleep(Duration::from_secs(POLL_SECS));
+            } else {
+                // Tick every second so the elapsed time and countdown stay live.
+                for remaining in (1..=POLL_SECS).rev() {
+                    let elapsed_s = started.elapsed().as_secs();
+                    let waited = if elapsed_s < 60 {
+                        format!("{elapsed_s}s")
+                    } else {
+                        format!("{}m{}s", elapsed_s / 60, elapsed_s % 60)
+                    };
+                    cprint!(
+                        "\x1b[2K\r  <dim>{apple_status}: {waited} elapsed, next poll in {remaining}s</dim>"
+                    );
+                    std::io::stdout().flush().ok();
+                    sleep(Duration::from_secs(1));
+                }
             }
         }
     }
