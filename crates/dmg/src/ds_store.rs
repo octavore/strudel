@@ -48,6 +48,8 @@ struct Record {
 enum Payload {
     Long(u32),
     Blob(Vec<u8>),
+    /// FourCharCode, written as its raw 4 bytes with no length prefix.
+    Type([u8; 4]),
 }
 
 impl BinWrite for Record {
@@ -74,6 +76,7 @@ impl BinWrite for Record {
                 (bytes.len() as u32).write_options(w, endian, ())?;
                 bytes.write_options(w, endian, ())?;
             },
+            Payload::Type(code) => code.write_options(w, endian, ())?,
         }
         Ok(())
     }
@@ -103,6 +106,13 @@ fn make_records(spec: &DsStoreSpec<'_>) -> Result<Vec<Record>> {
             structure_id: *b"vSrn",
             data_type: *b"long",
             payload: Payload::Long(1),
+        },
+        // Forces icon view regardless of the user's Finder default.
+        Record {
+            filename: ".".into(),
+            structure_id: *b"vstl",
+            data_type: *b"type",
+            payload: Payload::Type(*b"icnv"),
         },
         // Icon positions
         Record {
@@ -161,6 +171,7 @@ fn build_bwsp_plist(width: u32, height: u32) -> Result<Vec<u8>> {
     d.insert("ShowToolbar".into(), Value::Boolean(false));
     d.insert("SidebarWidth".into(), Value::Integer(0.into()));
     d.insert("WindowBounds".into(), bounds.into());
+    d.insert("ViewStyle".into(), "icnv".into());
 
     plist_to_bytes(Value::Dictionary(d))
 }
@@ -416,6 +427,7 @@ mod tests {
             pos += 8;
             match data_type {
                 b"long" => pos += 4,
+                b"type" => pos += 4,
                 b"blob" => pos += 4 + read_u32(&bytes, pos) as usize,
                 other => panic!("unexpected data type {other:?}"),
             }
@@ -423,8 +435,8 @@ mod tests {
             names.push(name);
         }
 
-        // Five records, and the leaf stayed within its page.
-        assert_eq!(names.len(), 5);
+        // Six records, and the leaf stayed within its page.
+        assert_eq!(names.len(), 6);
         assert!(pos as u64 <= LEAF_BLOCK_END);
 
         // Collation: "." before "Applications" before "MyApp.app".
