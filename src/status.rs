@@ -118,7 +118,9 @@ fn global_config_section() -> Result<()> {
     let path = GlobalConfig::xdg_path()?;
     header("Global config", Some(&path));
     if !path.exists() {
-        cprintln!("  <dim>not found (using defaults; run `strudel config edit` to create)</dim>");
+        cprintln!(
+            "  <dim>not found (using defaults; run `strudel config global edit` to create)</dim>"
+        );
         return Ok(());
     }
     let g = GlobalConfig::load()?;

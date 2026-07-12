@@ -373,7 +373,7 @@ fn print_signing() {
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
         {ANSI_RESET}
-        Edit the global config: {ANSI_BLUE}strudel config edit{ANSI_RESET}
+        Edit the global config: {ANSI_BLUE}strudel config global edit{ANSI_RESET}
         See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
 
         The identity string must match exactly what {ANSI_BLUE}security find-identity -v -p codesigning{ANSI_RESET}
@@ -445,7 +445,7 @@ fn print_notarize() {
         [apple]
         api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
         {ANSI_RESET}
-        Edit the global config: {ANSI_BLUE}strudel config edit{ANSI_RESET}
+        Edit the global config: {ANSI_BLUE}strudel config global edit{ANSI_RESET}
         See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
 
         ## Key role
@@ -811,7 +811,7 @@ fn print_global_config() {
 
         ## Editing
         {ANSI_BLUE}
-        strudel config edit
+        strudel config global edit
         {ANSI_RESET}
         Opens the file in {ANSI_GREEN}$VISUAL{ANSI_RESET} / {ANSI_GREEN}$EDITOR{ANSI_RESET}, creating it with a template if it doesn't
         exist yet. The XDG_CONFIG_HOME env var overrides the default location.

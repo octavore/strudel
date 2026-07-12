@@ -79,7 +79,7 @@ Commands:
   devices    Manage tracked iOS devices; bare command lists them
   profile    Show provisioning-profile status; `profile fetch` fetches/refreshes it
   clean      Remove the strudel output directory and run `swift package clean`
-  config     Manage global strudel config (~/.config/strudel/config.toml)
+  config     Show/bump the project version, or edit the global config
   status     Show overall status: toolchain, config, session, and per-target state
   help       Show documentation for a topic (run `strudel help` to list topics)
 
@@ -183,6 +183,28 @@ Output artifacts are saved to `build_dir`:
 Notarization may take a while the first time. If it stalls or you lose the
 connection, re-run with `--resume` to pick up the pending submission instead of
 resubmitting. Run `strudel help notarize` for more.
+
+### `config version` / `config increment-version`
+
+`strudel config version` prints the current `app.version` and
+`app.build_number` for each target, without modifying anything.
+
+`strudel config increment-version` bumps `app.version` (major/minor/patch) or
+`app.build_number` (build) in `strudel.toml`, printing the change and
+prompting for confirmation before writing. Comments and formatting elsewhere
+in the file are preserved. In a multi-target config, every target is bumped
+together.
+
+```sh
+strudel config version
+
+strudel config increment-version patch  # 1.2.3 -> 1.2.4
+strudel config increment-version minor  # 1.2.3 -> 1.3.0
+strudel config increment-version major  # 1.2.3 -> 2.0.0
+strudel config increment-version build  # build_number 41 -> 42
+```
+
+See [Global config](#global-config) for `strudel config global edit`.
 
 ## Config file structure
 
@@ -537,7 +559,7 @@ env var  >  strudel.toml  >  ~/.config/strudel/config.toml
 Open it in your editor (creating it with a template if it doesn't exist):
 
 ```sh
-strudel config edit
+strudel config global edit
 ```
 
 Only `[apple]` is supported here — `[app]`, `[build]`, `[ios]`, `[dmg]`, and

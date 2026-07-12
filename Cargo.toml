@@ -43,6 +43,7 @@ shellexpand = "3"
 srp = "=0.7.0-rc.3"
 tempfile = "3"
 toml = "1.1"
+toml_edit = "0.25.12"
 ureq = {version = "3", features = ["json"]}
 xdg = "3.0.0"
 

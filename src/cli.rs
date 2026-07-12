@@ -5,6 +5,7 @@ mod devices;
 mod help;
 mod helpers;
 mod icon;
+mod increment_version;
 mod init;
 mod login;
 mod profile;
@@ -87,7 +88,9 @@ enum Cmd {
     /// Remove the strudel output directory and run `swift package clean`
     Clean(CleanCmd),
 
-    /// Manage global strudel config (~/.config/strudel/config.toml)
+    /// Show or bump the project version (`config version`,
+    /// `config increment-version`); `config global edit` manages the global
+    /// config (~/.config/strudel/config.toml).
     Config(ConfigCmd),
     /// Render each target's configured app icon to a plain PNG (or copy it,
     /// for a path-based icon), for inspecting generated artwork without
@@ -118,7 +121,7 @@ impl Cli {
             Cmd::Devices(c) => c.execute(&config),
             Cmd::Profile(c) => c.execute(&config),
             Cmd::Clean(c) => c.execute(&config),
-            Cmd::Config(c) => c.execute(),
+            Cmd::Config(c) => c.execute(&config),
             Cmd::Icon(c) => c.execute(&config),
             Cmd::Status(c) => c.execute(&config),
             Cmd::Help(c) => c.execute(),
