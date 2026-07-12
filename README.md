@@ -899,6 +899,26 @@ cargo install --path .
 
 🍻 and 🐙 to my Spring 2 '26 batchmates and everyone else at the [Recurse Center](https://www.recurse.com), you're the best!
 
+Additionally, many thanks to the authors of the links below, all of it was invaluable in making strudel as easy-to-use as possible.
+
+### appleid
+
+- https://gist.github.com/JJTech0130/049716196f5f1751b8944d93e73d3452
+- https://theapplewiki.com/wiki/Grand_Slam_Authentication
+- https://github.com/MathewYaldo/Apple-GSA-Protocol
+- https://github.com/SideStore/SideStore/wiki/Anisette-Docs
+
+### dmg
+
+- https://github.com/dmgbuild
+- https://github.com/appdmg
+- https://metacpan.org/dist/Mac-Finder-DSStore/view/DSStoreFormat.pod
+
+### icon
+
+- https://www.paintcodeapp.com/news/code-for-ios-7-rounded-rectangles
+- https://liamrosenfeld.com/posts/apple_icon_quest/
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
