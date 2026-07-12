@@ -15,10 +15,24 @@ jobs:
         env:
           HOMEBREW_PAT: ${{ secrets.HOMEBREW_PAT }}
           TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           VERSION="${TAG#v}"
           ARCHIVE="strudel-${TAG}-aarch64-apple-darwin.tar.gz"
           URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${ARCHIVE}"
+
+          # Pre-releases (e.g. v1.2.4-beta.1) update the separate
+          # strudel-beta formula instead of the stable strudel formula, so
+          # `brew install` of the stable formula is never pointed at a beta.
+          if [[ "$PRERELEASE" == "true" ]]; then
+            TEMPLATE=".github/formula/strudel-beta.rb"
+            FORMULA_PATH="Formula/strudel-beta.rb"
+            COMMIT_SUBJECT="strudel-beta"
+          else
+            TEMPLATE=".github/formula/strudel.rb"
+            FORMULA_PATH="Formula/strudel.rb"
+            COMMIT_SUBJECT="strudel"
+          fi
 
           # The asset is now public; fetch it and recompute the hash so the
           # formula's sha256 matches exactly what users will download.
@@ -29,22 +43,22 @@ jobs:
             -e "s/__VERSION__/${VERSION}/g" \
             -e "s/__SHA256__/${SHA256}/g" \
             -e "s/__ARCHIVE__/${ARCHIVE}/g" \
-            .github/formula/strudel.rb)
+            "$TEMPLATE")
 
           CURRENT_SHA=$(curl -sL \
             -H "Authorization: Bearer ${HOMEBREW_PAT}" \
-            "https://api.github.com/repos/octavore/homebrew-tools/contents/Formula/strudel.rb" \
+            "https://api.github.com/repos/octavore/homebrew-tools/contents/${FORMULA_PATH}" \
             | jq -r '.sha // empty')
 
           CONTENT_B64=$(printf '%s\n' "$FORMULA" | base64)
 
           jq -n \
-            --arg message "strudel: update to v${VERSION}" \
+            --arg message "${COMMIT_SUBJECT}: update to v${VERSION}" \
             --arg content "$CONTENT_B64" \
             --arg sha "$CURRENT_SHA" \
             '{message: $message, content: $content, committer: {name: "github-actions[bot]", email: "github-actions[bot]@users.noreply.github.com"}} + (if $sha != "" then {sha: $sha} else {} end)' \
           | curl -sL --fail-with-body -X PUT \
             -H "Authorization: Bearer ${HOMEBREW_PAT}" \
             -H "Content-Type: application/json" \
-            "https://api.github.com/repos/octavore/homebrew-tools/contents/Formula/strudel.rb" \
+            "https://api.github.com/repos/octavore/homebrew-tools/contents/${FORMULA_PATH}" \
             --data-binary @-

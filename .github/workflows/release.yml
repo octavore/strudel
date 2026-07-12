@@ -46,11 +46,14 @@ jobs:
 
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
 
-      # see homebrew.yml for updating the Homebrew formula on draft publish
+      # see homebrew.yml for updating the Homebrew formula on draft publish.
+      # tags with a "-" suffix (e.g. v1.2.4-beta.1) are marked pre-release,
+      # which routes the formula update to strudel-beta instead of strudel.
       - name: Create draft release
         uses: softprops/action-gh-release@v3
         with:
           files: ${{ steps.package.outputs.archive }}
           generate_release_notes: true
           draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
