@@ -339,7 +339,7 @@ section to override individual fields or opt out entirely with `plain = true`.
 | Key              | Type    | Default  | Description                                                      |
 | ---------------- | ------- | -------- | ---------------------------------------------------------------- |
 | `plain`          | bool    | `false`  | Skip the styled window; produce a plain compressed DMG instead   |
-| `background`     | string  | *(none)* | Path to a PNG or JPEG background image (relative to config file) |
+| `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, Finder uses its own default |
 | `window_width`   | integer | `660`    | Finder window width in pixels                                    |
 | `window_height`  | integer | `400`    | Finder window height in pixels                                   |
 | `icon_size`      | integer | `128`    | Icon size in pixels                                              |

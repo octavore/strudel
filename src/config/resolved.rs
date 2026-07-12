@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
+use dmg::DmgBackground;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::build_config::NotaryAuth;
@@ -14,7 +15,7 @@ use crate::config::extension::ExtensionKind;
 /// are applied and the styled window (a generated `.DS_Store`) is produced.
 #[derive(Debug, Clone)]
 pub struct ResolvedDmg {
-    pub background: Option<PathBuf>,
+    pub background: DmgBackground,
     pub window_width: u32,
     pub window_height: u32,
     pub icon_size: u32,
@@ -27,7 +28,7 @@ pub struct ResolvedDmg {
 impl Default for ResolvedDmg {
     fn default() -> Self {
         ResolvedDmg {
-            background: None,
+            background: DmgBackground::default(),
             window_width: 660,
             window_height: 400,
             icon_size: 128,

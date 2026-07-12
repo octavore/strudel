@@ -323,7 +323,7 @@ fn print_config() {
         {ANSI_PURPLE}
         [dmg]
         plain          = false                         # set true for a plain UDZO DMG
-        background     = "assets/dmg-background.png"  # PNG/JPEG background image; optional
+        background     = "assets/dmg-background.png"  # PNG/JPEG image or "#rrggbb" color; optional
         window_width   = 660                           # Finder window width (default shown)
         window_height  = 400                           # Finder window height (default shown)
         icon_size      = 128                           # icon size in pixels (default shown)

@@ -13,8 +13,18 @@ pub struct DsStoreSpec<'a> {
     pub app_y: u32,
     pub applications_x: u32,
     pub applications_y: u32,
-    /// Raw macOS Alias record bytes for the background image, if any.
-    pub background_alias: Option<Vec<u8>>,
+    pub background: Background,
+}
+
+/// A Finder-window background, in the form the `.DS_Store` `icvp` record
+/// needs it.
+pub enum Background {
+    Color(u8, u8, u8),
+    /// Raw macOS Alias record bytes for the background image.
+    Image(Vec<u8>),
+    /// No `backgroundType`/color/image keys are written; Finder falls back to
+    /// its own default.
+    None,
 }
 
 pub fn build(spec: &DsStoreSpec<'_>) -> Result<Vec<u8>> {
@@ -166,17 +176,24 @@ fn build_icvp_plist(spec: &DsStoreSpec<'_>) -> Result<Vec<u8>> {
     d.insert("showItemInfo".into(), Value::Boolean(false));
     d.insert("arrangeBy".into(), "none".into());
 
-    if let Some(alias_bytes) = &spec.background_alias {
-        d.insert("backgroundType".into(), Value::Integer(2.into()));
-        d.insert(
-            "backgroundImageAlias".into(),
-            Value::Data(alias_bytes.clone()),
-        );
-    } else {
-        d.insert("backgroundType".into(), Value::Integer(1.into()));
-        d.insert("backgroundColorRed".into(), Value::Real(1.0));
-        d.insert("backgroundColorGreen".into(), Value::Real(1.0));
-        d.insert("backgroundColorBlue".into(), Value::Real(1.0));
+    match &spec.background {
+        Background::Image(alias_bytes) => {
+            d.insert("backgroundType".into(), Value::Integer(2.into()));
+            d.insert(
+                "backgroundImageAlias".into(),
+                Value::Data(alias_bytes.clone()),
+            );
+        },
+        Background::Color(r, g, b) => {
+            d.insert("backgroundType".into(), Value::Integer(1.into()));
+            d.insert("backgroundColorRed".into(), Value::Real(*r as f64 / 255.0));
+            d.insert(
+                "backgroundColorGreen".into(),
+                Value::Real(*g as f64 / 255.0),
+            );
+            d.insert("backgroundColorBlue".into(), Value::Real(*b as f64 / 255.0));
+        },
+        Background::None => {},
     }
 
     plist_to_bytes(Value::Dictionary(d))
@@ -339,7 +356,7 @@ mod tests {
             app_y: 200,
             applications_x: 450,
             applications_y: 200,
-            background_alias: None,
+            background: Background::Color(255, 255, 255),
         }
     }
 

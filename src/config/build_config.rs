@@ -210,7 +210,7 @@ fn resolve_target(
     let target_platform = match target.platform {
         TargetPlatform::Macos { dmg } => ResolvedMacOsSection {
             dmg: match dmg {
-                Some(d) => d.resolve(config_dir),
+                Some(d) => d.resolve(config_dir)?,
                 None => Some(ResolvedDmg::default()),
             },
         }
@@ -488,6 +488,7 @@ mod tests {
     use std::assert_matches;
     use std::path::Path;
 
+    use dmg::DmgBackground;
     use indoc::indoc;
 
     use super::*;
@@ -664,7 +665,10 @@ mod tests {
             panic!("FULL fixture is a macOS target");
         };
         let dmg = macos.dmg.as_ref().expect("FULL fixture has [dmg]");
-        assert_eq!(dmg.background, Some(PathBuf::from("/cfg/dmg-bg.png")));
+        assert_eq!(
+            dmg.background,
+            DmgBackground::Path(PathBuf::from("/cfg/dmg-bg.png"))
+        );
     }
 
     #[test]
@@ -720,7 +724,10 @@ mod tests {
             panic!("expected a macOS target");
         };
         let dmg = macos.dmg.as_ref().expect("[dmg] section is present");
-        assert_eq!(dmg.background, Some(PathBuf::from("/abs/bg.png")));
+        assert_eq!(
+            dmg.background,
+            DmgBackground::Path(PathBuf::from("/abs/bg.png"))
+        );
     }
 
     #[test]
@@ -815,7 +822,7 @@ mod tests {
         assert_eq!(dmg.window_width, 660);
         assert_eq!(dmg.window_height, 400);
         assert_eq!(dmg.icon_size, 128);
-        assert!(dmg.background.is_none());
+        assert_eq!(dmg.background, DmgBackground::default());
     }
 
     #[test]
@@ -866,7 +873,10 @@ mod tests {
             panic!("expected a macOS target");
         };
         let dmg = macos.dmg.as_ref().expect("dmg should be Some");
-        assert_eq!(dmg.background, Some(PathBuf::from("/cfg/assets/bg.png")));
+        assert_eq!(
+            dmg.background,
+            DmgBackground::Path(PathBuf::from("/cfg/assets/bg.png"))
+        );
         assert_eq!(dmg.window_width, 800);
         assert_eq!(dmg.window_height, 500);
         assert_eq!(dmg.icon_size, 100);
@@ -874,6 +884,64 @@ mod tests {
         assert_eq!(dmg.app_y, 200);
         assert_eq!(dmg.applications_x, 600);
         assert_eq!(dmg.applications_y, 200);
+    }
+
+    #[test]
+    fn dmg_background_hex_color_resolves_to_color_variant() {
+        let cfg = parse_build_config(indoc! { r##"
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+
+            [dmg]
+            background = "#fefefe"
+        "##})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        let ResolvedTargetPlatform::Mac(macos) = &r.target_platform else {
+            panic!("expected a macOS target");
+        };
+        let dmg = macos.dmg.as_ref().expect("dmg should be Some");
+        assert_eq!(dmg.background, DmgBackground::Color(0xfe, 0xfe, 0xfe));
+    }
+
+    #[test]
+    fn dmg_background_invalid_hex_color_is_rejected() {
+        let cfg = parse_build_config(indoc! { r##"
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+
+            [dmg]
+            background = "#zzzzzz"
+        "##})
+        .unwrap();
+        assert!(cfg.resolve(Path::new("/cfg"), None).is_err());
+    }
+
+    #[test]
+    fn dmg_background_absent_resolves_to_none_variant() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+
+            [dmg]
+            window_width = 800
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        let ResolvedTargetPlatform::Mac(macos) = &r.target_platform else {
+            panic!("expected a macOS target");
+        };
+        let dmg = macos.dmg.as_ref().expect("dmg should be Some");
+        assert_eq!(dmg.background, DmgBackground::None);
     }
 
     #[test]
@@ -896,7 +964,7 @@ mod tests {
             .dmg
             .as_ref()
             .expect("empty [dmg] section should use defaults");
-        assert!(dmg.background.is_none());
+        assert_eq!(dmg.background, DmgBackground::default());
         assert_eq!(dmg.window_width, 660);
         assert_eq!(dmg.window_height, 400);
         assert_eq!(dmg.icon_size, 128);

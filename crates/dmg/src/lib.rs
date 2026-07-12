@@ -7,14 +7,26 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
+/// DMG Finder-window background: a solid color, an image, or left unset.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DmgBackground {
+    /// Solid RGB color.
+    Color(u8, u8, u8),
+    /// Path to a background image (PNG or TIFF).
+    Path(PathBuf),
+    /// No background configuration is written; Finder uses its own default.
+    #[default]
+    None,
+}
+
 pub struct DmgSpec {
     pub vol_name: String,
     pub app_name: String,
     /// Fully-resolved path to the signed `.app` bundle to embed.
     pub source_app: PathBuf,
-    /// Optional background image (PNG or TIFF).  When `None` the window gets
-    /// a plain white background.
-    pub background: Option<PathBuf>,
+    /// DMG Finder-window background. Defaults to unconfigured (Finder's own
+    /// default).
+    pub background: DmgBackground,
     pub window_width: u32,
     pub window_height: u32,
     pub icon_size: u32,
@@ -78,25 +90,27 @@ fn populate(spec: &DmgSpec, staging: &Path) -> Result<()> {
     std::os::unix::fs::symlink("/Applications", staging.join("Applications"))
         .context("creating Applications symlink")?;
 
-    // Background image + alias record
-    let background_alias = if let Some(bg_src) = &spec.background {
-        let bg_dir = staging.join(".background");
-        fs::create_dir_all(&bg_dir).context("creating .background dir")?;
+    // Background image + alias record, or a solid color.
+    let background = match &spec.background {
+        DmgBackground::Path(bg_src) => {
+            let bg_dir = staging.join(".background");
+            fs::create_dir_all(&bg_dir).context("creating .background dir")?;
 
-        let bg_name = bg_src
-            .file_name()
-            .context("background image has no filename")?;
-        let bg_dest = bg_dir.join(bg_name);
-        fs::copy(bg_src, &bg_dest).context("copying background image")?;
+            let bg_name = bg_src
+                .file_name()
+                .context("background image has no filename")?;
+            let bg_dest = bg_dir.join(bg_name);
+            fs::copy(bg_src, &bg_dest).context("copying background image")?;
 
-        // The alias is built from the staging paths, so its CNIDs won't match
-        // the final volume. Finder resolves it by name/relative path instead,
-        // which is stable (`<vol>/.background/<name>`).
-        let alias_bytes =
-            alias::build(&spec.vol_name, staging, &bg_dest).context("building alias record")?;
-        Some(alias_bytes)
-    } else {
-        None
+            // The alias is built from the staging paths, so its CNIDs won't
+            // match the final volume. Finder resolves it by name/relative
+            // path instead, which is stable (`<vol>/.background/<name>`).
+            let alias_bytes = alias::build(&spec.vol_name, staging, &bg_dest)
+                .context("building alias record")?;
+            ds_store::Background::Image(alias_bytes)
+        },
+        DmgBackground::Color(r, g, b) => ds_store::Background::Color(*r, *g, *b),
+        DmgBackground::None => ds_store::Background::None,
     };
 
     // Write .DS_Store
@@ -109,7 +123,7 @@ fn populate(spec: &DmgSpec, staging: &Path) -> Result<()> {
         app_y: spec.app_y,
         applications_x: spec.applications_x,
         applications_y: spec.applications_y,
-        background_alias,
+        background,
     };
     let ds_bytes = ds_store::build(&ds_spec).context("building .DS_Store")?;
     fs::write(staging.join(".DS_Store"), &ds_bytes).context("writing .DS_Store")?;

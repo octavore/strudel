@@ -1,5 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use anyhow::Result;
+use dmg::DmgBackground;
+use icon::parse_hex_color;
 use serde::Deserialize;
 
 use crate::config::resolved::ResolvedDmg;
@@ -17,8 +20,10 @@ pub struct DmgSection {
     /// DMG directly (no Finder window configuration). Default: `false`.
     #[serde(default)]
     pub plain: bool,
-    /// Path to a PNG or JPEG background image for the DMG Finder window.
-    pub background: Option<PathBuf>,
+    /// Background for the DMG Finder window: a `#RRGGBB` hex color, or a path
+    /// to a PNG or JPEG background image. When absent, no background is
+    /// configured and Finder uses its own default.
+    pub background: Option<String>,
     /// Finder window width in pixels. Default: 660.
     pub window_width: Option<u32>,
     /// Finder window height in pixels. Default: 400.
@@ -38,12 +43,16 @@ pub struct DmgSection {
 impl DmgSection {
     /// Returns `None` when `plain = true` (simple UDZO path); otherwise
     /// returns the resolved config with defaults filled in.
-    pub fn resolve(self, config_dir: &Path) -> Option<ResolvedDmg> {
+    pub fn resolve(self, config_dir: &Path) -> Result<Option<ResolvedDmg>> {
         if self.plain {
-            return None;
+            return Ok(None);
         }
-        Some(ResolvedDmg {
-            background: self.background.map(|p| resolve_to(config_dir, p)),
+        let background = match self.background {
+            Some(s) => resolve_background(&s, config_dir)?,
+            None => DmgBackground::default(),
+        };
+        Ok(Some(ResolvedDmg {
+            background,
             window_width: self.window_width.unwrap_or(660),
             window_height: self.window_height.unwrap_or(400),
             icon_size: self.icon_size.unwrap_or(128),
@@ -51,6 +60,16 @@ impl DmgSection {
             app_y: self.app_y.unwrap_or(192),
             applications_x: self.applications_x.unwrap_or(468),
             applications_y: self.applications_y.unwrap_or(192),
-        })
+        }))
     }
+}
+
+/// A `#RRGGBB` string is a color; anything else is a path to a background
+/// image, resolved relative to the config file's directory.
+fn resolve_background(s: &str, config_dir: &Path) -> Result<DmgBackground> {
+    if s.starts_with('#') {
+        let rgba = parse_hex_color(s)?;
+        return Ok(DmgBackground::Color(rgba[0], rgba[1], rgba[2]));
+    }
+    Ok(DmgBackground::Path(resolve_to(config_dir, s.into())))
 }
