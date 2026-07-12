@@ -39,7 +39,7 @@ impl BuildCmd {
         let targets = all_or_named(&project, self.target.as_deref())?;
         run_for_targets(targets, |cfg| match &cfg.target_platform {
             ResolvedTargetPlatform::Mac(_) => {
-                let builder = MacosBuilder::new(
+                let mut builder = MacosBuilder::new(
                     cfg.clone(),
                     self.dry_run,
                     self.open,

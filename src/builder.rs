@@ -231,16 +231,19 @@ impl MacosBuilder {
     /// signed `.app`. Uses the configured signing identity if set, otherwise
     /// signs ad-hoc (can test entitlements and the hardened runtime
     /// without an Apple Developer account, but can't be notarized).
-    pub fn build(&self) -> Result<()> {
-        // No-op unless APPLE_CERTIFICATE is set; supports signing with an
-        // imported Developer ID identity here too, but ad-hoc needs nothing.
-        // let _keychain = self.import_certificate()?;
+    pub fn build(&mut self) -> Result<()> {
         self.clean()?;
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
         let app_bundle = self.assemble_bundle(&host_binary)?;
         self.embed_libraries(&app_bundle)?;
         self.assemble_extensions(&bin_dir)?;
+        // No-op unless APPLE_CERTIFICATE is set; supports signing with an
+        // imported Developer ID identity here too, but ad-hoc needs nothing.
+        let _keychain = self.import_certificate()?.map(|(keychain, identity)| {
+            self.core.cfg.sign_identity = identity;
+            keychain
+        });
         self.sign(false)?;
 
         println!();
@@ -313,7 +316,7 @@ impl MacosBuilder {
     /// DMG -> notarize. With `--resume`, skips the build and resumes a
     /// pending notarization instead. With `--skip-notarization`, stops
     /// after packaging the DMG.
-    pub fn release(&self) -> Result<()> {
+    pub fn release(&mut self) -> Result<()> {
         if let Some(ref uuid_hint) = self.resume {
             return self.resume_notarization(uuid_hint);
         }
@@ -321,16 +324,19 @@ impl MacosBuilder {
         if !self.skip_notarization {
             self.preflight_credentials()?;
         }
-        // Held for the whole build: the imported identity must remain available
-        // to both `sign` and the DMG signing in `package_dmg`. Dropped at the
-        // end of this function, which tears the temporary keychain back down.
-        // let _keychain = self.import_certificate()?;
         self.clean()?;
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
         let app_bundle = self.assemble_bundle(&host_binary)?;
         self.embed_libraries(&app_bundle)?;
         self.assemble_extensions(&bin_dir)?;
+        // Held through both `sign` and the DMG signing in `package_dmg`, the
+        // only steps that need it. Dropped at the end of this function, which
+        // tears the temporary keychain back down.
+        let _keychain = self.import_certificate()?.map(|(keychain, identity)| {
+            self.core.cfg.sign_identity = identity;
+            keychain
+        });
         self.sign(true)?;
         self.package_dmg()?;
 

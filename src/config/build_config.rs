@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow, bail};
 use indoc::formatdoc;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
@@ -155,6 +156,26 @@ fn ensure_unique_target_ids(targets: &[ResolvedConfig]) -> Result<()> {
     Ok(())
 }
 
+/// `APPLE_SIGNING_IDENTITY` and `APPLE_CERTIFICATE` are mutually exclusive:
+/// when a certificate is supplied, strudel imports it into a temporary
+/// keychain and derives the signing identity from it, so an explicit
+/// identity env var alongside it is an ambiguous, likely-accidental input.
+fn reject_conflicting_signing_inputs(
+    has_certificate: bool,
+    identity_env_is_set: bool,
+) -> Result<()> {
+    if has_certificate && identity_env_is_set {
+        bail!(
+            "APPLE_SIGNING_IDENTITY and APPLE_CERTIFICATE are mutually exclusive: when \
+             APPLE_CERTIFICATE is set, strudel imports it into a temporary keychain and \
+             derives the signing identity from it automatically. Unset APPLE_SIGNING_IDENTITY \
+             to sign with the imported certificate, or unset APPLE_CERTIFICATE to sign with an \
+             identity already present in your keychain."
+        );
+    }
+    Ok(())
+}
+
 fn resolve_target(
     target: BuildTarget,
     apple: &AppleSection,
@@ -232,6 +253,37 @@ fn resolve_target(
         .map(|ext| ext.resolve(config_dir))
         .collect::<Result<Vec<_>>>()?;
 
+    // Secrets: environment only. These are never deserialized from the file.
+    let apple_certificate: SecretString = std::env::var("APPLE_CERTIFICATE")
+        .unwrap_or_default()
+        .into();
+    let apple_certificate_password: SecretString = std::env::var("APPLE_CERTIFICATE_PASSWORD")
+        .unwrap_or_default()
+        .into();
+    let has_certificate = !apple_certificate.expose_secret().is_empty();
+
+    // Only an *explicit* env var conflicts with APPLE_CERTIFICATE - a
+    // project/global `identity` default is meant for local builds without a
+    // certificate, and is silently overridden (not fought over) once a
+    // certificate is supplied.
+    reject_conflicting_signing_inputs(
+        has_certificate,
+        std::env::var("APPLE_SIGNING_IDENTITY").is_ok(),
+    )?;
+
+    // Identifiers: env var > strudel.toml > global config. A certificate
+    // (env-only) always wins over any project/global identity default: the
+    // real identity is derived from the imported certificate at build time.
+    let sign_identity = if has_certificate {
+        String::new()
+    } else {
+        env_or_global(
+            apple.identity.clone(),
+            global.signing_identity.clone(),
+            "APPLE_SIGNING_IDENTITY",
+        )
+    };
+
     Ok(ResolvedConfig {
         platform: Some(platform),
         target_id,
@@ -250,12 +302,7 @@ fn resolve_target(
             };
             vec![arch.to_string()]
         }),
-        // Identifiers: env var > strudel.toml > global config.
-        sign_identity: env_or_global(
-            apple.identity.clone(),
-            global.signing_identity.clone(),
-            "APPLE_SIGNING_IDENTITY",
-        ),
+        sign_identity,
         team_id: env_or_global(
             apple.team_id.clone(),
             global.signing_team_id.clone(),
@@ -279,13 +326,8 @@ fn resolve_target(
             .or_else(|| apple.api_key_path.clone())
             .map(|p| resolve_to(config_dir, p))
             .or_else(|| global.notarize_api_key_path.clone()),
-        // Secrets: environment only. These are never deserialized from the file.
-        apple_certificate: std::env::var("APPLE_CERTIFICATE")
-            .unwrap_or_default()
-            .into(),
-        apple_certificate_password: std::env::var("APPLE_CERTIFICATE_PASSWORD")
-            .unwrap_or_default()
-            .into(),
+        apple_certificate,
+        apple_certificate_password,
         notarize_timeout: apple.notarize_timeout.unwrap_or(600),
         build_env: build.build_env.unwrap_or_default(),
         embed_libs: build
@@ -898,6 +940,27 @@ mod tests {
                 assert_eq!(r.apple_api_key_path, Some(PathBuf::from("/env/AuthKey.p8")));
             },
         );
+    }
+
+    // Exercises the pure conflict check directly rather than through
+    // `resolve()` + real env vars: ~40 other tests in this module call
+    // `resolve()` unguarded (no `temp_env`), and process env vars are
+    // process-global, not thread-local - setting `APPLE_SIGNING_IDENTITY`
+    // and `APPLE_CERTIFICATE` for real would leak into those tests and
+    // intermittently fail them, since a `bail!` (unlike a silently-wrong
+    // assertion) is a hard failure however briefly the window overlaps.
+    #[test]
+    fn rejects_identity_env_var_alongside_certificate() {
+        let err = reject_conflicting_signing_inputs(true, true)
+            .expect_err("identity env var + certificate should be rejected");
+        assert!(err.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn non_conflicting_signing_inputs_are_fine() {
+        reject_conflicting_signing_inputs(true, false).unwrap();
+        reject_conflicting_signing_inputs(false, true).unwrap();
+        reject_conflicting_signing_inputs(false, false).unwrap();
     }
 
     #[test]

@@ -7,6 +7,7 @@ use color_print::cprintln;
 use crate::apple::provisioning::{self, ensure_keychain_ready};
 use crate::builder::ios::IosTarget;
 use crate::builder::ios::profile::decode_profile;
+use crate::builder::keychain::parse_identity_line;
 use crate::builder::{IosBuilder, step};
 use crate::config::IosProvisioningBackend;
 use crate::shell::ShellCommand;
@@ -227,11 +228,7 @@ impl IosBuilder {
         let valid_stdout = String::from_utf8_lossy(&valid_out.stdout);
 
         if let Some(line) = valid_stdout.lines().find(|l| l.contains(identity)) {
-            // Extract cert name between quotes: `  N) HASH "Cert Name"`
-            let cert_name = line
-                .find('"')
-                .and_then(|s| line.rfind('"').filter(|&e| e > s).map(|e| &line[s + 1..e]))
-                .unwrap_or("");
+            let cert_name = parse_identity_line(line).map_or("", |(_, name)| name);
             if cert_name.starts_with("Apple Distribution")
                 || cert_name.starts_with("iPhone Distribution")
             {
@@ -286,15 +283,10 @@ impl IosBuilder {
             .context("Failed to run `security find-identity`")?;
         let id_stdout = String::from_utf8_lossy(&id_out.stdout);
 
-        // Lines look like: `  1) AABB...EE "Apple Development: Name (TEAM)"`
         let Some(signing_fp) = id_stdout
             .lines()
             .find(|l| l.contains(identity))
-            .and_then(|l| {
-                l.split_whitespace()
-                    .find(|t| t.len() == 40 && t.chars().all(|c| c.is_ascii_hexdigit()))
-            })
-            .map(str::to_ascii_uppercase)
+            .and_then(|l| parse_identity_line(l).map(|(hash, _)| hash.to_ascii_uppercase()))
         else {
             return Ok(());
         };

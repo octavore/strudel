@@ -4,16 +4,24 @@
 
 use std::fs;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as b64;
 use color_print::cprintln;
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::builder::keychain::parse_identity_line;
 use crate::builder::{MacosBuilder, step};
 use crate::shell::{Shell, ShellCommand};
 
-#[allow(dead_code)]
+/// Extract the quoted identity names from `security find-identity` output.
+fn identity_names(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|l| Some(parse_identity_line(l)?.1.to_string()))
+        .collect()
+}
+
 impl MacosBuilder {
     /// The user's current keychain search list (absolute paths).
     fn user_keychains(&self) -> Result<Vec<String>> {
@@ -37,14 +45,12 @@ impl MacosBuilder {
         }
     }
 
-    /// If a signing certificate is provided via `APPLE_CERTIFICATE`, decode it
-    /// into a throwaway keychain and add that keychain to the user search list
-    /// so `codesign` can find the identity. The returned guard removes the
-    /// keychain and restores the search list on drop, so a build leaves no
-    /// credentials behind - useful on a fresh CI runner. When no certificate is
-    /// configured (the common local case, where the identity already lives in
-    /// the login keychain), this is a no-op returning `None`.
-    pub(in crate::builder) fn import_certificate(&self) -> Result<Option<TempKeychain>> {
+    /// If `APPLE_CERTIFICATE` is set, import it into a throwaway keychain,
+    /// add that keychain to the user search list, and return its guard plus
+    /// the imported identity's name (for the caller to sign with). Returns
+    /// `None` when no certificate is configured (the common local case,
+    /// where the identity already lives in the login keychain).
+    pub(in crate::builder) fn import_certificate(&self) -> Result<Option<(TempKeychain, String)>> {
         let Some((cert_b64, cert_password)) = self.cfg.signing_cert() else {
             return Ok(None);
         };
@@ -80,13 +86,17 @@ impl MacosBuilder {
             cprintln!(
                 "<dim>[dry-run]</dim> security list-keychains -d user -s {keychain} <<existing...>>"
             );
-            return Ok(Some(TempKeychain {
-                sh: self.sh,
-                path: keychain,
-                original_list: Vec::new(),
-                dry_run: true,
-                _temp_dir: temp_dir,
-            }));
+            cprintln!("<dim>[dry-run]</dim> security find-identity -v -p codesigning {keychain}");
+            return Ok(Some((
+                TempKeychain {
+                    sh: self.sh,
+                    path: keychain,
+                    original_list: Vec::new(),
+                    dry_run: true,
+                    _temp_dir: temp_dir,
+                },
+                "<identity imported from APPLE_CERTIFICATE>".to_string(),
+            )));
         }
 
         // Decode the PKCS#12 bundle to a temp file for `security import`.
@@ -147,20 +157,59 @@ impl MacosBuilder {
         // The decoded cert has been imported; don't leave it on disk.
         let _ = fs::remove_file(&p12_path);
 
-        Ok(Some(TempKeychain {
-            sh: self.sh,
-            path: keychain,
-            original_list,
-            dry_run: false,
-            _temp_dir: temp_dir,
-        }))
+        // Scoping `find-identity` to just this keychain means whatever comes
+        // back is exactly (and only) what we just imported.
+        let mut names = identity_names(&self.sh.run(&[
+            "security",
+            "find-identity",
+            "-v",
+            "-p",
+            "codesigning",
+            &keychain,
+        ])?);
+        if names.is_empty() {
+            // Not yet trusted (e.g. missing the Apple WWDR intermediate) -
+            // fall back to the unfiltered list so a usable, if untrusted,
+            // identity is still found.
+            names = identity_names(&self.sh.run(&[
+                "security",
+                "find-identity",
+                "-p",
+                "codesigning",
+                &keychain,
+            ])?);
+        }
+        let identity = match names.as_slice() {
+            [name] => name.clone(),
+            [] => bail!(
+                "No codesigning identity found in the certificate imported from \
+                 APPLE_CERTIFICATE."
+            ),
+            _ => bail!(
+                "APPLE_CERTIFICATE contains {} codesigning identities ({}); it must contain \
+                 exactly one. Export a .p12 with a single identity.",
+                names.len(),
+                names.join(", ")
+            ),
+        };
+
+        Ok(Some((
+            TempKeychain {
+                sh: self.sh,
+                path: keychain,
+                original_list,
+                dry_run: false,
+                _temp_dir: temp_dir,
+            },
+            identity,
+        )))
     }
 }
 
 /// A throwaway keychain holding an imported signing identity. On drop it
 /// restores the original keychain search list and deletes the keychain, so a
-/// build never leaves credentials behind on the machine. Cleanup is
-/// best-effort: we're tearing down, so failures are ignored.
+/// build never leaves credentials behind on the machine. Note: cleanup is
+/// best-effort, failures are ignored.
 pub(in crate::builder) struct TempKeychain {
     sh: Shell,
     path: String,

@@ -14,8 +14,12 @@ impl MacosBuilder {
     /// incomplete. Empty means a real `run` has everything it needs.
     pub(in crate::builder) fn credential_problems(&self) -> Vec<String> {
         let mut problems = Vec::new();
-        if self.cfg.sign_identity.is_empty() {
-            problems.push("APPLE_SIGNING_IDENTITY (signing identity) is not set".to_string());
+        if self.cfg.sign_identity.is_empty() && self.cfg.signing_cert().is_none() {
+            problems.push(
+                "neither APPLE_SIGNING_IDENTITY (an identity already in the keychain) nor \
+                 APPLE_CERTIFICATE (a certificate to import) is set"
+                    .to_string(),
+            );
         }
         if self.cfg.notary_auth().is_none() {
             problems.push(
@@ -232,6 +236,17 @@ mod tests {
     fn problems_empty_when_api_key_set() {
         let mut cfg = resolved_macos();
         cfg.sign_identity = "Developer ID Application: X (TEAM)".into();
+        cfg.apple_api_key_path = Some(PathBuf::from("/k.p8"));
+        cfg.apple_api_key = "KID".into();
+        cfg.apple_api_issuer = "ISS".into();
+        assert!(builder(cfg).credential_problems().is_empty());
+    }
+
+    #[test]
+    fn problems_empty_when_certificate_set_instead_of_identity() {
+        let mut cfg = resolved_macos();
+        cfg.apple_certificate = "base64cert".to_string().into();
+        cfg.apple_certificate_password = "pw".to_string().into();
         cfg.apple_api_key_path = Some(PathBuf::from("/k.p8"));
         cfg.apple_api_key = "KID".into();
         cfg.apple_api_issuer = "ISS".into();
