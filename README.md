@@ -285,15 +285,15 @@ For iOS apps, this contains settings for `strudel run --sim` and `strudel run --
 > [iOS device builds](#ios-device-builds) for the full workflow, or set
 > `provisioning_profile` in `[build]` to manage the profile yourself.
 
-| Key                 | Type   | Default                        | Description                                                                                      |
-| ------------------- | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles) |
-| `apple_id`          | string | *(none)*                       | Apple ID email; pre-fills the login prompt for the `"free"` path                                 |
-| `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                              |
-| `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                            |
-| `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                             |
+| Key                 | Type   | Default                        | Description                                                                                                              |
+| ------------------- | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles)                         |
+| `apple_id`          | string | *(none)*                       | Apple ID email; pre-fills the login prompt for the `"free"` path                                                         |
+| `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                                                     |
+| `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                                                   |
+| `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                                                     |
 | `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`. Takes precedence over `[build.icon]` if both are set |
-| `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                |
+| `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                                        |
 
 ### `[[extensions]]` (optional)
 
@@ -337,17 +337,18 @@ default (no `[dmg]` section), strudel generates a styled drag-to-install window
 with the app icon on the left and an Applications symlink on the right. Add the
 section to override individual fields or opt out entirely with `plain = true`.
 
-| Key              | Type    | Default  | Description                                                      |
-| ---------------- | ------- | -------- | ---------------------------------------------------------------- |
-| `plain`          | bool    | `false`  | Skip the styled window; produce a plain compressed DMG instead   |
+| Key              | Type    | Default   | Description                                                                                                                       |
+| ---------------- | ------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `plain`          | bool    | `false`   | Skip the styled window; produce a plain compressed DMG instead                                                                    |
 | `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, Finder uses its own default |
-| `window_width`   | integer | `660`    | Finder window width in pixels                                    |
-| `window_height`  | integer | `400`    | Finder window height in pixels                                   |
-| `icon_size`      | integer | `128`    | Icon size in pixels                                              |
-| `app_x`          | integer | `192`    | Horizontal position of the `.app` icon                           |
-| `app_y`          | integer | `192`    | Vertical position of the `.app` icon                             |
-| `applications_x` | integer | `468`    | Horizontal position of the Applications symlink                  |
-| `applications_y` | integer | `192`    | Vertical position of the Applications symlink                    |
+| `window_width`   | integer | `660`     | Finder window width in pixels                                                                                                     |
+| `window_height`  | integer | `400`     | Finder window height in pixels                                                                                                    |
+| `icon_size`      | integer | `128`     | Icon size in pixels                                                                                                               |
+| `app_x`          | integer | `192`     | Horizontal position of the `.app` icon                                                                                            |
+| `app_y`          | integer | `192`     | Vertical position of the `.app` icon                                                                                              |
+| `applications_x` | integer | `468`     | Horizontal position of the Applications symlink                                                                                   |
+| `applications_y` | integer | `192`     | Vertical position of the Applications symlink                                                                                     |
+| `icon_text_size` | float   | `12.0`    | Icon label point size                                                                                                             |
 
 Example (custom background and larger icons):
 

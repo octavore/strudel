@@ -23,6 +23,7 @@ pub struct ResolvedDmg {
     pub app_y: u32,
     pub applications_x: u32,
     pub applications_y: u32,
+    pub icon_text_size: f64,
 }
 
 impl Default for ResolvedDmg {
@@ -36,6 +37,7 @@ impl Default for ResolvedDmg {
             app_y: 162,
             applications_x: 468,
             applications_y: 162,
+            icon_text_size: 12.0,
         }
     }
 }

@@ -14,6 +14,8 @@ pub struct DsStoreSpec<'a> {
     pub applications_x: u32,
     pub applications_y: u32,
     pub background: Background,
+    /// Icon label point size (`icvp.textSize`).
+    pub icon_text_size: f64,
 }
 
 /// A Finder-window background, in the form the `.DS_Store` `icvp` record
@@ -167,7 +169,7 @@ fn build_icvp_plist(spec: &DsStoreSpec<'_>) -> Result<Vec<u8>> {
     let mut d = Dictionary::new();
     d.insert("viewOptionsVersion".into(), Value::Integer(1.into()));
     d.insert("iconSize".into(), Value::Real(spec.icon_size as f64));
-    d.insert("textSize".into(), Value::Real(12.0));
+    d.insert("textSize".into(), Value::Real(spec.icon_text_size));
     d.insert("gridSpacing".into(), Value::Real(100.0));
     d.insert("gridOffsetX".into(), Value::Real(0.0));
     d.insert("gridOffsetY".into(), Value::Real(0.0));
@@ -357,6 +359,7 @@ mod tests {
             applications_x: 450,
             applications_y: 200,
             background: Background::Color(255, 255, 255),
+            icon_text_size: 12.0,
         }
     }
 

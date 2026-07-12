@@ -34,6 +34,7 @@ pub struct DmgSpec {
     pub app_y: u32,
     pub applications_x: u32,
     pub applications_y: u32,
+    pub icon_text_size: f64,
 }
 
 /// Create a compressed, styled DMG at `output`.
@@ -105,8 +106,8 @@ fn populate(spec: &DmgSpec, staging: &Path) -> Result<()> {
             // The alias is built from the staging paths, so its CNIDs won't
             // match the final volume. Finder resolves it by name/relative
             // path instead, which is stable (`<vol>/.background/<name>`).
-            let alias_bytes = alias::build(&spec.vol_name, staging, &bg_dest)
-                .context("building alias record")?;
+            let alias_bytes =
+                alias::build(&spec.vol_name, staging, &bg_dest).context("building alias record")?;
             ds_store::Background::Image(alias_bytes)
         },
         DmgBackground::Color(r, g, b) => ds_store::Background::Color(*r, *g, *b),
@@ -124,6 +125,7 @@ fn populate(spec: &DmgSpec, staging: &Path) -> Result<()> {
         applications_x: spec.applications_x,
         applications_y: spec.applications_y,
         background,
+        icon_text_size: spec.icon_text_size,
     };
     let ds_bytes = ds_store::build(&ds_spec).context("building .DS_Store")?;
     fs::write(staging.join(".DS_Store"), &ds_bytes).context("writing .DS_Store")?;

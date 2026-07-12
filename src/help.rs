@@ -331,6 +331,7 @@ fn print_config() {
         app_y          = 192                           # .app icon Y position (default shown)
         applications_x = 468                           # Applications symlink X (default shown)
         applications_y = 192                           # Applications symlink Y (default shown)
+        icon_text_size = 12.0                         # icon label point size (default shown)
         {ANSI_RESET}
         By default (even with no `[dmg]` section), strudel stages the app, an
         Applications symlink, and a generated `.DS_Store` that lays out the Finder

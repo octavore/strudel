@@ -38,6 +38,8 @@ pub struct DmgSection {
     pub applications_x: Option<u32>,
     /// Vertical position of the Applications symlink. Default: 192.
     pub applications_y: Option<u32>,
+    /// Icon label point size. Default: 12.0.
+    pub icon_text_size: Option<f64>,
 }
 
 impl DmgSection {
@@ -60,6 +62,7 @@ impl DmgSection {
             app_y: self.app_y.unwrap_or(192),
             applications_x: self.applications_x.unwrap_or(468),
             applications_y: self.applications_y.unwrap_or(192),
+            icon_text_size: self.icon_text_size.unwrap_or(12.0),
         }))
     }
 }
