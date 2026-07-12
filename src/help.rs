@@ -8,7 +8,7 @@ const ANSI_BLUE: &str = "\x1b[34m"; // code
 const ANSI_PURPLE: &str = "\x1b[35m"; // toml
 const ANSI_RESET: &str = "\x1b[0m";
 
-const TOPICS: &[(&str, &str)] = &[
+pub(crate) const TOPICS: &[(&str, &str)] = &[
     ("config", "Full strudel.toml reference"),
     (
         "targets",
@@ -75,15 +75,23 @@ pub fn run(topic: Option<&str>, mut app: Command) {
     }
 }
 
+/// Top-level subcommands (name, short about), in clap's declared order,
+/// excluding `help` itself. Shared by `strudel help` and `strudel skill
+/// install`, so neither can drift from the actual command list.
+pub(crate) fn commands(app: &Command) -> Vec<(String, String)> {
+    app.get_subcommands()
+        .filter(|sub| sub.get_name() != "help")
+        .map(|sub| {
+            let about = sub.get_about().map(|s| s.to_string()).unwrap_or_default();
+            (sub.get_name().to_string(), about)
+        })
+        .collect()
+}
+
 fn print_index(app: &Command) {
     println!("Available commands:");
     println!();
-    for sub in app.get_subcommands() {
-        let name = sub.get_name();
-        if name == "help" {
-            continue;
-        }
-        let about = sub.get_about().map(|s| s.to_string()).unwrap_or_default();
+    for (name, about) in commands(app) {
         println!(
             "{}",
             cformat!("  <bold,green>{name:<14}</bold,green> {about}")

@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Strudel release
+        id: strudel
+        uses: octavore/strudel-release-action@v1
+        with:
+          strudel-version: '__STRUDEL_VERSION__'
+          apple-api-key-contents: ${{ secrets.APPLE_API_KEY_CONTENTS }}
+          apple-certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          apple-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          apple-team-id: ${{ vars.APPLE_TEAM_ID }}
+          apple-api-issuer: ${{ vars.APPLE_API_ISSUER }}
+          apple-api-key: ${{ vars.APPLE_API_KEY }}
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: ${{ steps.strudel.outputs.dmg-path }}

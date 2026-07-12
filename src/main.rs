@@ -8,6 +8,7 @@ mod icon;
 mod init;
 mod paths;
 mod shell;
+mod skill;
 mod status;
 
 use color_print::ceprintln;

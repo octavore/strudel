@@ -80,6 +80,7 @@ Commands:
   profile    Show provisioning-profile status; `profile fetch` fetches/refreshes it
   clean      Remove the strudel output directory and run `swift package clean`
   config     Show/bump the project version, or edit the global config
+  skill      Install a skill file that points an AI coding agent at strudel docs or tooling
   status     Show overall status: toolchain, config, session, and per-target state
   help       Show documentation for a topic (run `strudel help` to list topics)
 
@@ -205,6 +206,34 @@ strudel config increment-version build  # build_number 41 -> 42
 ```
 
 See [Global config](#global-config) for `strudel config global edit`.
+
+### `skill install` (experimental)
+
+Writes a supporting skill for coding agents. There are currently two skills: `strudel` and `strudel-release-action`:
+
+- `strudel` - a pointer to `strudel help`/`strudel help <topic>`, with the
+  topic list generated from the installed strudel's own `TOPICS`, so it can't
+  drift out of date.
+- `release-action` - scaffolds the [`octavore/strudel-release-action`](https://github.com/octavore/strudel-release-action) GitHub
+  Actions release workflow (signing, notarization, DMG packaging), including an optional `release.sh` template that bumps the version and tags a release.
+
+```sh
+strudel skill install                    # prompt for which skill(s) to install
+strudel skill install release-action     # install one directly, no prompt
+strudel skill install --preview          # print the SKILL.md instead of writing it
+strudel skill install --force            # overwrite files that already exist
+```
+
+By default, files are installed user-globally under `~/.claude/skills/<name>/`,
+since these are tools/docs for whatever you're working on, not just this one
+project.
+
+```sh
+strudel skill install --project          # .claude/skills/<name>/ in this project, instead of global
+strudel skill install --agents           # ~/.agents/skills/<name>/ instead of ~/.claude/skills
+strudel skill install --project --agents # .agents/skills/<name>/ in this project
+strudel skill install --path ./somewhere/else  # exact base dir; overrides --project/--agents
+```
 
 ## Config file structure
 

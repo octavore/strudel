@@ -11,6 +11,7 @@ mod login;
 mod profile;
 mod release;
 mod run;
+mod skill;
 mod status;
 
 use std::path::PathBuf;
@@ -29,6 +30,7 @@ use crate::cli::login::LoginCmd;
 use crate::cli::profile::ProfileCmd;
 use crate::cli::release::ReleaseCmd;
 use crate::cli::run::RunCmd;
+use crate::cli::skill::SkillCmd;
 use crate::cli::status::StatusCmd;
 
 #[derive(Parser)]
@@ -96,6 +98,9 @@ enum Cmd {
     /// for a path-based icon), for inspecting generated artwork without
     /// running a full build.
     Icon(IconCmd),
+    /// Install a skill file that points an AI coding agent at strudel docs
+    /// or tooling for this project. `skill install` for usage.
+    Skill(SkillCmd),
     /// Show overall status: local toolchain versions, global config, the
     /// logged-in session (for free provisioning, if any), cached dev
     /// credentials, and per-target provisioning state.
@@ -123,6 +128,7 @@ impl Cli {
             Cmd::Clean(c) => c.execute(&config),
             Cmd::Config(c) => c.execute(&config),
             Cmd::Icon(c) => c.execute(&config),
+            Cmd::Skill(c) => c.execute(),
             Cmd::Status(c) => c.execute(&config),
             Cmd::Help(c) => c.execute(),
         }
