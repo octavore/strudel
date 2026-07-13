@@ -16,6 +16,7 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 - [Config file structure](#config-file-structure)
 - [Multiple targets](#multiple-targets)
 - [iOS device builds](#ios-device-builds)
+- [Examples](#examples)
 - [Global config](#global-config)
 - [Signing \& notarization](#signing--notarization)
 - [Safari Web Extensions](#safari-web-extensions)
@@ -391,7 +392,7 @@ section to override individual fields or opt out entirely with `plain = true`.
 | Key              | Type    | Default   | Description                                                                                                                       |
 | ---------------- | ------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `plain`          | bool    | `false`   | Skip the styled window; produce a plain compressed DMG instead                                                                    |
-| `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, Finder uses its own default |
+| `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, defaults to white           |
 | `window_width`   | integer | `660`     | Finder window width in pixels                                                                                                     |
 | `window_height`  | integer | `400`     | Finder window height in pixels                                                                                                    |
 | `icon_size`      | integer | `128`     | Icon size in pixels                                                                                                               |
@@ -509,8 +510,8 @@ and dispatch per target based on its own platform (macOS or iOS). Other
 commands (`devices`, `profile`, `status`, `clean`) take `--target <app name>`
 instead.
 
-With multiple targets, each gets its own build directory (`.build/dist/<name>-macos`,
-`.build/dist/<name>-ios`) to avoid collisions; override per-target with
+With multiple targets, each gets its own build directory (`.build/dist/macos/<name>`,
+`.build/dist/ios/<name>`) to avoid collisions; override per-target with
 `build.build_dir`. See the [`MultiTargetApp`](./examples/MultiTargetApp/strudel.toml)
 example or run `strudel help targets` for more.
 
@@ -575,6 +576,20 @@ strudel profile fetch --force          # recreate the profile even if current
 To opt out of auto-management and supply your own profile, set
 `provisioning_profile` under `[build]`; strudel then uses that file as-is. See
 `strudel help ios-device` for the full workflow.
+
+## Examples
+
+In this repo, under [`examples/`](./examples):
+
+- [`HelloWorldApp`](./examples/HelloWorldApp) - a minimal flat, single-target `strudel.toml`, annotated as a starting-point template.
+- [`MenuBarApp`](./examples/MenuBarApp) - a menu bar app (`Clipspect`) with a custom icon and bundled resources.
+- [`MultiTargetApp`](./examples/MultiTargetApp) - a macOS + iOS app built from one Swift package, using `[[target]]` blocks.
+- [`SafariExtension`](./examples/SafariExtension) - a host app with a Safari Web Extension, showing `[[extensions]]` and the `NSExtensionMain` shim.
+
+Real-world apps built with strudel:
+
+- [floats.app](https://github.com/octavore/floats.app)
+- [tots.app](https://github.com/octavore/tots.app)
 
 ## Global config
 
