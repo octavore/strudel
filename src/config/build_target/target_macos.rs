@@ -21,8 +21,7 @@ pub struct DmgSection {
     #[serde(default)]
     pub plain: bool,
     /// Background for the DMG Finder window: a `#RRGGBB` hex color, or a path
-    /// to a PNG or JPEG background image. When absent, no background is
-    /// configured and Finder uses its own default.
+    /// to a PNG or JPEG background image. When absent, defaults to white.
     pub background: Option<String>,
     /// Finder window width in pixels. Default: 660.
     pub window_width: Option<u32>,
@@ -51,7 +50,11 @@ impl DmgSection {
         }
         let background = match self.background {
             Some(s) => resolve_background(&s, config_dir)?,
-            None => DmgBackground::default(),
+            // An incomplete `icvp` record (missing backgroundType/color) can
+            // cause Finder to discard the whole view-options blob, including
+            // iconSize - so an unset background must still resolve to an
+            // explicit white, not `DmgBackground::None`.
+            None => DmgBackground::Color(255, 255, 255),
         };
         Ok(Some(ResolvedDmg {
             background,

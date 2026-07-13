@@ -29,7 +29,11 @@ pub struct ResolvedDmg {
 impl Default for ResolvedDmg {
     fn default() -> Self {
         ResolvedDmg {
-            background: DmgBackground::default(),
+            // An incomplete `icvp` record (missing backgroundType/color) can
+            // make Finder discard the whole view-options blob, including
+            // iconSize - so the default must be an explicit color, not
+            // `DmgBackground::None`.
+            background: DmgBackground::Color(255, 255, 255),
             window_width: 660,
             window_height: 400,
             icon_size: 128,
