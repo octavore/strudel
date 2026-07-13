@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -68,16 +68,18 @@ impl SkillKind {
 }
 
 impl Display for SkillKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let desc = match self {
-            SkillKind::Strudel => {
-                "points an AI agent at `strudel help` for this project's build/release docs"
-            },
-            SkillKind::ReleaseAction => {
-                "sets up the `octavore/strudel-release-action` GitHub Actions release workflow"
-            },
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let (name, desc) = match self {
+            SkillKind::Strudel => (
+                "strudel",
+                "points an AI agent at `strudel help` for this project's build/release docs",
+            ),
+            SkillKind::ReleaseAction => (
+                "release-action",
+                "sets up the `octavore/strudel-release-action` GitHub Actions release workflow",
+            ),
         };
-        write!(f, "{} - {desc}", self.dir_name())
+        write!(f, "{name} - {desc}")
     }
 }
 
