@@ -26,6 +26,7 @@ strudel release   # a signed, notarized DMG
 - [Configuration](#configuration)
 - [Guides](#guides)
   - [Multiple targets](#multiple-targets)
+  - [Icons](#icons)
   - [iOS device builds](#ios-device-builds)
   - [Signing \& notarization](#signing--notarization)
   - [Safari Web Extensions](#safari-web-extensions)
@@ -93,6 +94,7 @@ Commands:
   profile    Show provisioning-profile status; `profile fetch` fetches/refreshes it
   clean      Remove the strudel output directory and run `swift package clean`
   config     Show/bump the project version, or edit the global config
+  icon       Render each target's app icon to a PNG, to preview it without a full build
   skill      Install a skill file that points an AI coding agent at strudel docs or tooling
   status     Show overall status: toolchain, config, session, and per-target state
   help       Show documentation for a topic (run `strudel help` to list topics)
@@ -214,6 +216,21 @@ strudel config increment-version build  # build_number 41 -> 42
 ```
 
 See [Global config](#global-config) for `strudel config global edit`.
+
+## `icon`
+
+Renders each target's configured `[build.icon]` to a plain PNG (or copies it
+as-is, for `icon.path`) without running a full build, so you can preview
+generated artwork or iterate on `scale`/`background` quickly. See
+[Icons](#icons) for how the icon itself is configured.
+
+```sh
+strudel icon                   # every eligible target, written to the current directory
+strudel icon --target MyApp    # one target only
+strudel icon --out ./tmp       # write elsewhere
+```
+
+Files are named `<target-id>-icon.<ext>`, e.g. `macos-MyApp-icon.png`.
 
 ## `skill install` (experimental)
 
@@ -576,6 +593,41 @@ With multiple targets, each gets its own build directory (`.build/dist/macos/<na
 `.build/dist/ios/<name>`) to avoid collisions; override per-target with
 `build.build_dir`. See the [`MultiTargetApp`](./examples/MultiTargetApp/strudel.toml)
 example or run `strudel help targets` for more.
+
+## Icons
+
+`[build.icon]` gives the app a bundle icon; see the [reference
+table](#buildicon-optional) for every field. It comes in two forms:
+
+- `icon.path = "AppIcon.icns"` (or `.png`) copies an existing icon in unmodified.
+- `icon.src = "art.png"` generates one from a single source image (PNG or SVG)
+  at build time. The generated icon is a squircle with a customizable background.
+
+```toml
+[build.icon]
+src        = "art.png"
+scale      = 1.2           # optional: enlarge/shrink the artwork within the icon
+background = "#fefefe"   # optional: icon fill color, hex; default white
+```
+
+On iOS, the same `[build.icon]` produces a flat opaque square instead (iOS
+applies its own corner mask at render time, so a squircle would double up),
+and `icns` is ignored there. `ios.assets_dir`, if set, takes precedence over
+`[build.icon]` for that target, letting you supply a hand-authored `.xcassets`
+catalog instead.
+
+Also on iOS, `path`/`src` are wrapped in a minimal `.appiconset`/`.xcassets` and
+compiled with `xcrun actool --include-all-app-icons`, which derives every
+required size/idiom from the one image; if `path` points at an Icon Composer
+`.icon` bundle, it's handed to `actool` directly.
+
+Run [`strudel icon`](#icon) to render the configured icon to a PNG and
+preview it without a full build.
+
+> [!TIP]
+> Icon Composer, bundled with Xcode, is a good way to hand-author an icon
+> (including layered/dynamic ones) as a `.icon` bundle instead of generating
+> one from flat art; point `icon.path` at it directly.
 
 ## iOS device builds
 
@@ -941,7 +993,6 @@ extension point (e.g. `NSExtensionAttributes` for certain extension types).
 
 - Use `swift-format` for formatting Swift code
 - `// swift-tools-version: 6.0` in `Package.swift` to use `.v15`
-- IconComposer, which comes bundled with Xcode, is great for making icons.
 
 # Examples
 
