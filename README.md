@@ -4,27 +4,39 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 
 `strudel` uses the standard Apple toolchain (e.g. `swift`, `codesign`, `notarytool`) to build Swift Package Manager-based macOS and iOS apps with a config-driven, easy-to-introspect pipeline. It can produce signed `.app` bundles and notarized DMGs which can be distributed.
 
-> [!IMPORTANT]
-> **Current limitations**
-> - **iOS support is still experimental.** `strudel run --sim` and `strudel run --device` work for local development, but distributing iOS apps is unsupported.
-> - iOS device builds can use either a paid Apple Developer account (App Store Connect API, 1-year profiles) or any free Apple ID (`strudel login`, 7-day profiles, max 3 devices). strudel auto-registers devices and provisions development profiles for both (see [iOS device builds](#ios-device-builds)).
-> - **App Store distribution is not supported yet.** strudel supports direct/notarized distribution (Developer ID) for macOS apps, but there is currently no support for submitting to the Mac App Store or iOS App Store.
+```sh
+brew install octavore/tools/strudel
 
-- [Installation](#installation)
-- [Example strudel build](#example-strudel-build)
-- [Usage](#usage)
-- [Config file structure](#config-file-structure)
-- [Multiple targets](#multiple-targets)
-- [iOS device builds](#ios-device-builds)
+strudel init      # scaffold a strudel.toml
+strudel build     # a signed .app bundle
+strudel release   # a signed, notarized DMG
+```
+
+> [!IMPORTANT]
+> - **App Store distribution is not supported yet.** strudel supports direct/notarized distribution (Developer ID) for macOS apps, but there is currently no support for submitting to the Mac App Store or iOS App Store.
+> - **iOS support is still experimental.** iOS device builds can use either a paid Apple Developer account (App Store Connect API, 1-year profiles) or any free Apple ID (`strudel login`, 7-day profiles, max 3 devices).
+
+## Contents
+
+- [Getting started](#getting-started)
+  - [Installation](#installation)
+  - [Requirements](#requirements)
+  - [Your first build](#your-first-build)
+- [Commands](#commands)
+- [Configuration](#configuration)
+- [Guides](#guides)
+  - [Multiple targets](#multiple-targets)
+  - [iOS device builds](#ios-device-builds)
+  - [Signing \& notarization](#signing--notarization)
+  - [Safari Web Extensions](#safari-web-extensions)
+  - [App Extensions](#app-extensions)
+  - [Tips](#tips)
 - [Examples](#examples)
-- [Global config](#global-config)
-- [Signing \& notarization](#signing--notarization)
-- [Safari Web Extensions](#safari-web-extensions)
-- [App Extensions](#app-extensions)
 - [Development](#development)
-- [Other tips](#other-tips)
 - [Acknowledgements](#acknowledgements)
 - [License](#license)
+
+# Getting started
 
 ## Installation
 
@@ -34,13 +46,13 @@ Install strudel with homebrew:
 brew install octavore/tools/strudel
 ```
 
-### Requirements
+## Requirements
 
 - macOS with the Xcode command line tools installed
-- Swift Package.swift based project
+- Swift `Package.swift` based project
 - For signing/notarization: an Apple Developer account with a "Developer ID Application" certificate
 
-## Example strudel build
+## Your first build
 
 ```sh
 # create strudel.toml and a basic Package.swift file
@@ -66,7 +78,7 @@ strudel release # --dry-run
 
 Note that the env vars above can also be stored in the `strudel.toml` config file.
 
-## Usage
+# Commands
 
 ```raw
 strudel [OPTIONS] <COMMAND>
@@ -91,17 +103,17 @@ Options:
   -V, --version          Print version
 ```
 
-`build`, `run`, and `release` take an optional target name as a positional
-argument (`strudel build MyApp`) to select one target in a multi-target
-config; other commands (`devices`, `profile`, `status`, `clean`) take
-`--target <name>` instead.
+**Selecting a target.** `build`, `run`, and `release` take an optional target name as a
+positional argument (`strudel build MyApp`) to select one target in a multi-target config;
+other commands (`devices`, `profile`, `status`, `clean`) take `--target <name>` instead. See
+[Multiple targets](#multiple-targets).
 
-`strudel help <topic>` has extended documentation for many subjects beyond the
-subcommands above, including `config`, `targets`, `signing`, `notarize`,
-`entitlements`, `extensions`, `ios-device`, `ios-free-provisioning`, and more.
-Run `strudel help` with no argument to list every topic.
+**Extended help.** `strudel help <topic>` has documentation for many subjects beyond the
+subcommands below, including `config`, `targets`, `signing`, `notarize`, `entitlements`,
+`extensions`, `ios-device`, `ios-free-provisioning`, and more. Run `strudel help` with no
+argument to list every topic.
 
-### `init`
+## `init`
 
 Interactively scaffold a config file. Prompts for app name, bundle ID, version,
 and build number, then writes the file into the given directory (defaults to the
@@ -112,7 +124,7 @@ strudel init             # scaffold in the current directory
 strudel init ./myapp     # scaffold in ./myapp
 ```
 
-### `build`
+## `build`
 
 Assemble the app bundle for one target (or all eligible targets, if no target
 name is given). On macOS this cleans the old build, runs `swift build -c
@@ -124,25 +136,21 @@ If a signing identity (`[apple] identity` / `APPLE_SIGNING_IDENTITY`) is set, `s
 otherwise it signs **ad-hoc** (`codesign --sign -`), which needs no certificate
 or Apple account.
 
-Note: Signed app bundles will still fail Gatekeeper checks and cannot be distributed
-easily. For that, you will need to run `strudel release` to have your app notarized.
-
 ```sh
 strudel build
 strudel build MyApp          # select one target by app name
 strudel build --open         # open the .app after a successful build
 strudel build --install      # copy the built .app into /Applications
 strudel build --debug        # build with the debug configuration instead of release
+strudel build --unsigned     # macOS: skip codesigning, leave the bundle as-is
 strudel build --dry-run      # print commands without executing them
 ```
 
-Add `--unsigned` (macOS only) to skip codesigning and leave the bundle as-is.
+> [!NOTE]
+> Signed app bundles will still fail Gatekeeper checks and cannot be distributed
+> easily. For that, run [`strudel release`](#release) to have your app notarized.
 
-```sh
-strudel build --unsigned
-```
-
-### `run`
+## `run`
 
 Build and launch locally. On macOS this signs (same identity/ad-hoc rules as
 `build`) and opens the app. On iOS it installs and launches in the Simulator
@@ -160,12 +168,11 @@ strudel run --debug                   # build with the debug configuration inste
 strudel run --dry-run                 # print commands without executing them
 ```
 
-### `release`
+## `release`
 
-Like `strudel build` but also creates a notarized DMG file so you can
-distribute your app. macOS only — iOS targets error with a pointer to `run
---device`. This step requires valid signing credentials from a paid Apple
-Developer membership (see below).
+(macOS only). Like `strudel build` but also creates a notarized DMG file so you can
+distribute your app. This step requires valid signing credentials from a paid Apple
+Developer membership, see [Signing & notarization](#signing--notarization).
 
 ```sh
 strudel release
@@ -186,7 +193,7 @@ Notarization may take a while the first time. If it stalls or you lose the
 connection, re-run with `--resume` to pick up the pending submission instead of
 resubmitting. Run `strudel help notarize` for more.
 
-### `config version` / `config increment-version`
+## `config version` / `config increment-version`
 
 `strudel config version` prints the current `app.version` and
 `app.build_number` for each target, without modifying anything.
@@ -208,9 +215,9 @@ strudel config increment-version build  # build_number 41 -> 42
 
 See [Global config](#global-config) for `strudel config global edit`.
 
-### `skill install` (experimental)
+## `skill install` (experimental)
 
-Writes a supporting skill for coding agents. There are currently two skills: `strudel` and `strudel-release-action`:
+Writes a supporting skill for coding agents. There are currently two skills:
 
 - `strudel` - a pointer to `strudel help`/`strudel help <topic>`, with the
   topic list generated from the installed strudel's own `TOPICS`, so it can't
@@ -236,14 +243,37 @@ strudel skill install --project --agents # .agents/skills/<name>/ in this projec
 strudel skill install --path ./somewhere/else  # exact base dir; overrides --project/--agents
 ```
 
-## Config file structure
+# Configuration
 
-The config file (`strudel.toml` by default) is TOML, organized into seven
-sections. Relative paths are resolved **relative to the config file's directory**
-unless absolute. Unknown keys are rejected, so typos surface as errors. See the HelloWorldApp
-[`strudel.toml`](./examples/HelloWorldApp/strudel.toml) for an annotated template.
+A project is defined by its `strudel.toml` config file. Relative paths are
+resolved **relative to the config file's directory** unless absolute. See the HelloWorldApp
+[`strudel.toml`](./examples/HelloWorldApp/strudel.toml) for an annotated
+template.
 
-### `[app]` (required)
+A config file comes in one of two kinds:
+
+- **Single target**: a top-level `[app]` section, plus the
+  optional sections below. This is always macOS.
+- **[Multiple targets](#multiple-targets)**: one `[[target]]` block per
+  platform, each holding its own `[app]`, `[build]`, `[[extensions]]`, `[dmg]`,
+  and `[ios]`. This is how you ship an iOS app, or a macOS and an iOS app from
+  the same Swift package.
+
+The sections below describe a single target. In a multi-target config they nest
+inside each `[[target]]` block, except `[apple]`, which is shared and stays
+top-level.
+
+| Section                             | Required | Purpose                                                     |
+| ----------------------------------- | -------- | ----------------------------------------------------------- |
+| [`[app]`](#app-required)            | yes      | Name, bundle ID, version                                    |
+| [`[build]`](#build-optional)        | no       | Sources, output dir, icon, resources, architectures         |
+| [`[build_env]`](#build_env-optional)| no       | Extra env vars for `swift build`                            |
+| [`[ios]`](#ios-optional-experimental)| no      | Simulator, device, and provisioning settings for iOS        |
+| [`[[extensions]]`](#extensions-optional)| no   | Embedded `.appex` bundles                                   |
+| [`[dmg]`](#dmg-optional)            | no       | Finder window layout of the release DMG                     |
+| [`[apple]`](#apple-optional-in-strudeltoml)| no| Signing, notarization, and provisioning identifiers        |
+
+## `[app]` (required)
 
 | Key            | Type   | Description                                          |
 | -------------- | ------ | ---------------------------------------------------- |
@@ -259,7 +289,7 @@ is user-facing, and it may have multiple unique internal tracking build numbers 
 
 `CFBundleVersion` is one to three period-separated integers (e.g. `1`, `1.1`, `1.0.1`)
 
-### `[build]` (optional)
+## `[build]` (optional)
 
 | Key                      | Type     | Default             | Description                                                                                                                                                |
 | ------------------------ | -------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -275,7 +305,7 @@ is user-facing, and it may have multiple unique internal tracking build numbers 
 | `resources`              | string[] | *(none)*            | Individual files to copy into `Contents/Resources/` by filename                                                                                            |
 | `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements                                                      |
 
-#### `[build.icon]` (optional)
+### `[build.icon]` (optional)
 
 The bundle icon, specified one of two ways:
 
@@ -311,7 +341,7 @@ one image. If `path` points to an Icon Composer `.icon` bundle instead of a
 raster image, it's handed to `actool` directly. If `ios.assets_dir` (below) is
 also set, it takes precedence over `[build.icon]` for that target.
 
-### `[build_env]` (optional)
+## `[build_env]` (optional)
 
 Extra environment variables forwarded to `swift build` (e.g. for `pkg-config`).
 Each key/value is passed through to the build environment:
@@ -321,9 +351,19 @@ Each key/value is passed through to the build environment:
 PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 ```
 
-### `[ios]` (optional, experimental)
+## `[ios]` (optional, experimental)
 
 For iOS apps, this contains settings for `strudel run --sim` and `strudel run --device`. iOS support is experimental. All fields are optional except `provisioning`, which is required for device builds.
+
+| Key                 | Type   | Default                        | Description                                                                                                              |
+| ------------------- | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles)                         |
+| `apple_id`          | string | *(none)*                       | Apple ID email; pre-fills the login prompt for the `"free"` path                                                         |
+| `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                                                     |
+| `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                                                   |
+| `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                                                     |
+| `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`. Takes precedence over `[build.icon]` if both are set |
+| `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                                        |
 
 > [!NOTE]
 > The flat, single-target form (a top-level `[app]`, as shown above) is always
@@ -337,17 +377,7 @@ For iOS apps, this contains settings for `strudel run --sim` and `strudel run --
 > [iOS device builds](#ios-device-builds) for the full workflow, or set
 > `provisioning_profile` in `[build]` to manage the profile yourself.
 
-| Key                 | Type   | Default                        | Description                                                                                                              |
-| ------------------- | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles)                         |
-| `apple_id`          | string | *(none)*                       | Apple ID email; pre-fills the login prompt for the `"free"` path                                                         |
-| `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                                                     |
-| `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                                                   |
-| `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                                                     |
-| `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`. Takes precedence over `[build.icon]` if both are set |
-| `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                                        |
-
-### `[[extensions]]` (optional)
+## `[[extensions]]` (optional)
 
 An array of zero or more app extensions embedded under `<app>.app/Contents/PlugIns/`. Each
 entry produces a separate `.appex` bundle, signed with its own entitlements,
@@ -365,7 +395,7 @@ and sealed inside the notarized host app. Two kinds are supported:
 | `target_name`            | string | *(required)*           | Swift `executableTarget` in `Package.swift`                                       |
 | `bundle_id`              | string | *(required)*           | `CFBundleIdentifier`; typically `<host-id>.Extension`                             |
 | `name`                   | string | value of `target_name` | Display name (`CFBundleName` / `CFBundleDisplayName`) and `.appex` directory name |
-| `entitlements_json_path` | string | *(required)*           | JSON entitlements (extensions have their own entitlements                         |
+| `entitlements_json_path` | string | *(required)*           | JSON entitlements; each extension is signed with its own, separate from the host  |
 | `info_json_path`         | string | *(none)*               | Extra `Info.plist` keys merged with strudel's auto-injected ones                  |
 
 **`safari_web_extension`-specific fields:**
@@ -382,7 +412,7 @@ and sealed inside the notarized host app. Two kinds are supported:
 | `extension_point_identifier` | string | *(required)* | `NSExtensionPointIdentifier`, identifies the extension point (e.g. `"com.apple.share-services"`) |
 | `principal_class`            | string | *(none)*     | `NSExtensionPrincipalClass`, required by some extension points                                   |
 
-### `[dmg]` (optional)
+## `[dmg]` (optional)
 
 Controls the Finder window layout of the DMG produced by `strudel release`. By
 default (no `[dmg]` section), strudel generates a styled drag-to-install window
@@ -397,7 +427,7 @@ section to override individual fields or opt out entirely with `plain = true`.
 | `window_height`  | integer | `400`     | Finder window height in pixels                                                                                                    |
 | `icon_size`      | integer | `128`     | Icon size in pixels                                                                                                               |
 | `app_x`          | integer | `192`     | Horizontal position of the `.app` icon                                                                                            |
-| `app_y`          | integer | `192`     | Vertical position of the `.app` icon                                                                                              |
+| `app_y`          | integer | `192`     | Vertical position of the `.app` icon                                                                                             |
 | `applications_x` | integer | `468`     | Horizontal position of the Applications symlink                                                                                   |
 | `applications_y` | integer | `192`     | Vertical position of the Applications symlink                                                                                     |
 | `icon_text_size` | float   | `12.0`    | Icon label point size                                                                                                             |
@@ -414,35 +444,36 @@ app_x         = 200
 applications_x = 600
 ```
 
-To produce a plain compressed DMG with no special styling.
+To produce a plain compressed DMG with no special styling:
 
 ```toml
 [dmg]
 plain = true
 ```
 
-### `[apple]` (optional in strudel.toml)
+## `[apple]` (optional)
 
 Apple developer identifiers, shared by signing, notarization, and
 provisioning-profile management (the App Store Connect API key authenticates
-all three). Required for `release`. Each identifier is resolved in priority
-order: **env var > strudel.toml > [global config](#global-config)**. Secrets
-are environment-only and have no config key. See
-[Signing & notarization](#signing--notarization) for the full reference.
+all three). Required for `release`.
 
-| Key                        | Type    | Env var                  | Description                                               |
-| -------------------------- | ------- | ------------------------ | --------------------------------------------------------- |
-| `[apple] identity`         | string  | `APPLE_SIGNING_IDENTITY` | Signing identity                                          |
-| `[apple] team_id`          | string  | `APPLE_TEAM_ID`          | Apple Developer Team ID                                   |
-| `[apple] api_issuer`       | string  | `APPLE_API_ISSUER`       | App Store Connect issuer UUID                             |
-| `[apple] api_key`          | string  | `APPLE_API_KEY`          | App Store Connect key ID                                  |
-| `[apple] api_key_path`     | string  | `APPLE_API_KEY_PATH`     | Path to the `.p8` key file                                |
-| `[apple] notarize_timeout` | integer | —                        | Seconds to wait for notarization (`notarytool --timeout`) |
+Each identifier is resolved in priority order: **env var > `strudel.toml` > [global config](#global-config)**.
 
-> Secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`)
-> are read from the environment only and have no config key.
+| Key                        | Type    | Env var                  | Description                                                          |
+| -------------------------- | ------- | ------------------------ | -------------------------------------------------------------------- |
+| `identity`                 | string  | `APPLE_SIGNING_IDENTITY` | Signing identity, e.g. `Developer ID Application: You (XXXXXXXXXX)`  |
+| `team_id`                  | string  | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                                 |
+| `api_issuer`               | string  | `APPLE_API_ISSUER`       | App Store Connect issuer UUID (team accounts only)                   |
+| `api_key`                  | string  | `APPLE_API_KEY`          | App Store Connect key ID                                             |
+| `api_key_path`             | string  | `APPLE_API_KEY_PATH`     | Path to the `AuthKey_XXXXXXYYYY.p8` file                             |
+| `notarize_timeout`         | integer | -                        | Seconds to wait for notarization (`notarytool --timeout`)            |
 
-### Supporting files
+> [!WARNING]
+> Secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`) are read from the
+> environment only and have no config key, so they are never written to a file you
+> might commit. See [Signing in CI](#signing-in-ci).
+
+## Supporting files
 
 - **`info.json`** *(optional)*: A JSON object of `Info.plist` keys/values. `strudel`
   overrides `CFBundleShortVersionString`, `CFBundleVersion`, and `CFBundleIdentifier`
@@ -451,6 +482,42 @@ are environment-only and have no config key. See
   from an empty object, so the generated `Info.plist` contains only those injected keys.
 - **`entitlements.json`**: A JSON object of entitlement keys/values, converted to a
   plist and passed to `codesign --entitlements` during signing.
+
+## Global config
+
+`~/.config/strudel/config.toml` stores machine-wide defaults shared across all
+projects. It is the lowest-priority source for each value:
+
+```raw
+env var  >  strudel.toml  >  ~/.config/strudel/config.toml
+```
+
+Open it in your editor (creating it with a template if it doesn't exist):
+
+```sh
+strudel config global edit
+```
+
+Only `[apple]` is supported here. `[app]`, `[build]`, `[ios]`, `[dmg]`, and
+`[[extensions]]` are project-specific and belong only in `strudel.toml`.
+
+```toml
+# ~/.config/strudel/config.toml
+
+[apple]
+identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+team_id      = "XXXXXXXXXX"
+api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+api_key      = "2X9R4HXF34"
+api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
+```
+
+Store your credentials here once and each project's `strudel.toml` stays free
+of machine-specific paths, making it safe to commit. A project `strudel.toml`
+can still override any global value by setting the same key; the env var
+overrides both.
+
+# Guides
 
 ## Multiple targets
 
@@ -466,7 +533,6 @@ notarization credentials.
 - A top-level `[ios]` supplies defaults for iOS targets; a per-target `ios.*`
   field wins over the matching top-level field, field by field (not
   whole-section replacement).
-
 
 ```toml
 # Shared across all targets (top-level only):
@@ -498,17 +564,13 @@ ios.deployment_target = "18.0"
 ```
 
 When multiple targets are eligible for a command, strudel runs them all and
-prints a per-target header. Narrow to one target by name:
+prints a per-target header. Narrow to one target by name, as described in
+[Commands](#commands):
 
 ```sh
 strudel build MyApp
 strudel run   MyApp
 ```
-
-`build`, `run`, and `release` take the target name as a positional argument
-and dispatch per target based on its own platform (macOS or iOS). Other
-commands (`devices`, `profile`, `status`, `clean`) take `--target <app name>`
-instead.
 
 With multiple targets, each gets its own build directory (`.build/dist/macos/<name>`,
 `.build/dist/ios/<name>`) to avoid collisions; override per-target with
@@ -522,10 +584,10 @@ launches it. strudel can auto-manage device registration and a development
 provisioning profile using one of two backends, selected by `[ios]
 provisioning` in `strudel.toml`:
 
-- `"app_store_connect"` — a paid Apple Developer account, driven through the
+- `"app_store_connect"` - a paid Apple Developer account, driven through the
   App Store Connect API using the same credentials as notarization (see
   [Notarization auth](#notarization-auth)). Produces 1-year profiles.
-- `"free"` — any Apple ID, no paid account. Run `strudel login` once to sign
+- `"free"` - any Apple ID, no paid account. Run `strudel login` once to sign
   in, then use the same device workflow below. Produces 7-day profiles, with a
   limit of 3 devices and 10 App IDs per team. Run `strudel help
   ios-free-provisioning` for the full walkthrough.
@@ -577,58 +639,15 @@ To opt out of auto-management and supply your own profile, set
 `provisioning_profile` under `[build]`; strudel then uses that file as-is. See
 `strudel help ios-device` for the full workflow.
 
-## Examples
-
-In this repo, under [`examples/`](./examples):
-
-- [`HelloWorldApp`](./examples/HelloWorldApp) - a minimal flat, single-target `strudel.toml`, annotated as a starting-point template.
-- [`MenuBarApp`](./examples/MenuBarApp) - a menu bar app (`Clipspect`) with a custom icon and bundled resources.
-- [`MultiTargetApp`](./examples/MultiTargetApp) - a macOS + iOS app built from one Swift package, using `[[target]]` blocks.
-- [`SafariExtension`](./examples/SafariExtension) - a host app with a Safari Web Extension, showing `[[extensions]]` and the `NSExtensionMain` shim.
-
-Real-world apps built with strudel:
-
-- [floats.app](https://github.com/octavore/floats.app)
-- [tots.app](https://github.com/octavore/tots.app)
-
-## Global config
-
-`~/.config/strudel/config.toml` stores machine-wide defaults shared across all
-projects. It is the lowest-priority source for each value:
-
-```
-env var  >  strudel.toml  >  ~/.config/strudel/config.toml
-```
-
-Open it in your editor (creating it with a template if it doesn't exist):
-
-```sh
-strudel config global edit
-```
-
-Only `[apple]` is supported here — `[app]`, `[build]`, `[ios]`, `[dmg]`, and
-`[[extensions]]` are project-specific and belong only in `strudel.toml`.
-
-```toml
-# ~/.config/strudel/config.toml
-
-[apple]
-identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
-team_id      = "XXXXXXXXXX"
-api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-api_key      = "2X9R4HXF34"
-api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
-```
-
-Store your credentials here once and each project's `strudel.toml` stays free
-of machine-specific paths, making it safe to commit. A project `strudel.toml`
-can still override any global value by setting the same key; the env var
-overrides both.
-
 ## Signing & notarization
 
-`release` signs the bundle with a certificate and notarizes it with Apple.
+`strudel release` signs the bundle with a certificate and notarizes it with Apple.
 An **App Store Connect API key** is required for notarization.
+
+Every value below is configurable as a `[apple]` key in `strudel.toml`, as an env
+var, or in the [global config](#global-config); see the [`[apple]`
+table](#apple-optional-in-strudeltoml) for the full list and resolution order. The
+only exceptions are the CI secrets, which are environment-only.
 
 ### Signing
 
@@ -639,18 +658,20 @@ Developer membership.
 After downloading and installing the certificate into the keychain on your machine, you
 can verify its presence with `security find-identity -p codesigning`.
 
-Then, either set `identity` in `strudel.toml` under `[apple]`, or pass it via the
-`APPLE_SIGNING_IDENTITY` env var.
+Then set `identity` (and, for a team account, `team_id`) in `strudel.toml` under
+`[apple]`, or pass them via `APPLE_SIGNING_IDENTITY` / `APPLE_TEAM_ID`.
 
-| Config key         | Environment variable     | Description                                             |
-| ------------------ | ------------------------ | ------------------------------------------------------- |
-| `[apple] identity` | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (XXXXXXXXXX)` |
-| `[apple] team_id`  | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                    |
+### Signing in CI
 
-In CI, because the system keychain is not available, you should set the `APPLE_CERTIFICATE`
+In CI the system keychain is not available, so set the `APPLE_CERTIFICATE`
 and `APPLE_CERTIFICATE_PASSWORD` env vars instead. These cannot be stored in `strudel.toml`.
 
-`APPLE_CERTIFICATE` is typically an Developer ID certificate exported as a `.p12` file, then base64-encoded:
+| Environment variable         | Description                        |
+| ---------------------------- | ---------------------------------- |
+| `APPLE_CERTIFICATE`          | Base64-encoded Developer ID `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | Export password for that `.p12`    |
+
+`APPLE_CERTIFICATE` is typically a Developer ID certificate exported as a `.p12` file, then base64-encoded:
 
 1. Open Keychain Access
 2. Select the login keychain and My Certificates category
@@ -660,35 +681,17 @@ and `APPLE_CERTIFICATE_PASSWORD` env vars instead. These cannot be stored in `st
 6. Set a strong password (note it for `APPLE_CERTIFICATE_PASSWORD`)
 7. Save the file
 8. base64-encode, e.g. `base64 -i certificate.p12 | pbcopy` copies the base64 file to the clipboard.
-9. Set the following secrets in your CI environment.
+9. Set both as secrets in your CI environment.
 
-| Environment variable         | Description                        |
-| ---------------------------- | ---------------------------------- |
-| `APPLE_CERTIFICATE`          | Base64-encoded Developer ID `.p12` |
-| `APPLE_CERTIFICATE_PASSWORD` | Export password for that `.p12`    |
+`strudel skill install release-action` scaffolds a GitHub Actions workflow that wires
+these up; see [`skill install`](#skill-install-experimental).
 
 ### Notarization auth
 
-**Identifiers** are non-secret and resolved in this priority order:
-env var > `strudel.toml` > `~/.config/strudel/config.toml` (see [Global config](#global-config)).
-
-| strudel.toml key       | Environment variable     | Description                                             |
-| ---------------------- | ------------------------ | ------------------------------------------------------- |
-| `[apple] identity`     | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (XXXXXXXXXX)` |
-| `[apple] team_id`      | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                    |
-| `[apple] api_issuer`   | `APPLE_API_ISSUER`       | App Store Connect issuer UUID                           |
-| `[apple] api_key`      | `APPLE_API_KEY`          | App Store Connect key ID                                |
-| `[apple] api_key_path` | `APPLE_API_KEY_PATH`     | Path to the `AuthKey_XXXXXXYYYY.p8` file                |
-
-`APPLE_API_ISSUER` is only present for team Apple Developer accounts.
-
-A **Developer**-role API key is enough for notarization alone. If you also use
-strudel's iOS auto-provisioning (`[ios] provisioning = "app_store_connect"`), use
-an **Admin**-role key instead - device registration and profile management via
-the App Store Connect API generally require Admin, and a Developer key fails
-with a 403/`FORBIDDEN_ERROR`.
-
-### Example
+Notarization uses the App Store Connect API key: `api_key`, `api_key_path`, and (for team
+accounts) `api_issuer`. A **Developer**-role key is enough for notarization alone. If you
+also use strudel's iOS auto-provisioning (`[ios] provisioning = "app_store_connect"`), you
+need an **Admin**-role key instead, see [iOS device builds](#ios-device-builds).
 
 ```sh
 export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (XXXXXXXXXX)"
@@ -813,14 +816,13 @@ of any `info_json_path` you provide:
 - `NSExtension` dict with `NSExtensionPointIdentifier = "com.apple.Safari.web-extension"`,
   `NSExtensionPrincipalClass`, and `SFSafariWebExtensionManifestPath = "Resources/manifest.json"`
 
-
 ### 4. Preparing Safari
 
 You will need to enable developer mode in Safari:
 
 1. **Enable Safari's Develop menu**. Go to Safari -> Settings -> Advanced -> "Show
    features for web developers".
-2. **Allow unsigned extensions** Go to Safari -> Develop -> "Allow Unsigned
+2. **Allow unsigned extensions.** Go to Safari -> Develop -> "Allow Unsigned
    Extensions". This resets each time Safari quits, so re-enable per session.
 
 ### 5. Testing in Safari
@@ -837,9 +839,9 @@ this step.
    Ad-hoc signing is fine for local dev. Safari only discovers extensions
    whose host `.app` has been registered with Launch Services, which happens
    the first time the app is opened.
-2. **Enable the extension** Go to Safari -> Settings -> Extensions and enable yours.
+2. **Enable the extension.** Go to Safari -> Settings -> Extensions and enable yours.
 
-#### Debugging
+### Debugging
 
 | Target              | How                                                                                                                           |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -848,9 +850,7 @@ this step.
 | Content scripts     | Web Inspector on the page (⌘⌥I) -> Sources tab -> "Extensions"                                                                |
 | Native handler logs | `Console.app`, filter by your extension's bundle id; or `log stream --predicate 'subsystem == "com.example.myapp.Extension"'` |
 
-
-
-#### Common gotchas
+### Common gotchas
 
 **Extension doesn't show up in Safari's list**
 
@@ -867,9 +867,9 @@ Safari aggressively caches extension resources. Toggle the extension off/on, or 
 
 **Permission prompt repeats**
 
-any change to `permissions` in `manifest.json` re-prompts the user on next enable.
+Any change to `permissions` in `manifest.json` re-prompts the user on next enable.
 
-**`Undefined symbols: "_main"`** at link time
+**`Undefined symbols: "_main"` at link time**
 
 You're missing the `NSExtensionMain` shim from step 1; the extension target needs a
 top-level `main.swift` calling it.
@@ -877,7 +877,7 @@ top-level `main.swift` calling it.
 ## App Extensions
 
 strudel supports generic macOS app extensions (`kind = "app_extension"`) in addition to
-Safari Web Extensions. Use this for any `NSExtension`-based extension type, e.g Share
+Safari Web Extensions. Use this for any `NSExtension`-based extension type, e.g. Share
 Extensions and Network Extensions.
 
 ### 1. App Extension setup in Swift
@@ -937,7 +937,27 @@ strudel auto-injects into the extension's `Info.plist`:
 Use `info_json_path` to supply any additional `Info.plist` keys required by the
 extension point (e.g. `NSExtensionAttributes` for certain extension types).
 
-## Development
+## Tips
+
+- Use `swift-format` for formatting Swift code
+- `// swift-tools-version: 6.0` in `Package.swift` to use `.v15`
+- IconComposer, which comes bundled with Xcode, is great for making icons.
+
+# Examples
+
+In this repo, under [`examples/`](./examples):
+
+- [`HelloWorldApp`](./examples/HelloWorldApp) - a minimal flat, single-target `strudel.toml`, annotated as a starting-point template.
+- [`MenuBarApp`](./examples/MenuBarApp) - a menu bar app (`Clipspect`) with a custom icon and bundled resources.
+- [`MultiTargetApp`](./examples/MultiTargetApp) - a macOS + iOS app built from one Swift package, using `[[target]]` blocks.
+- [`SafariExtension`](./examples/SafariExtension) - a host app with a Safari Web Extension, showing `[[extensions]]` and the `NSExtensionMain` shim.
+
+Real-world apps built with strudel:
+
+- [floats.app](https://github.com/octavore/floats.app)
+- [tots.app](https://github.com/octavore/tots.app)
+
+# Development
 
 `strudel` is built with a standard rust toolchain, e.g.
 
@@ -955,13 +975,7 @@ cargo build --release
 cargo install --path .
 ```
 
-## Other tips
-
-- Use `swift-format` for formatting Swift code
-- `// swift-tools-version: 6.0` in `Package.swift` to use `.v15`
-- IconComposer, which comes bundled with Xcode, is great for making icons.
-
-## Acknowledgements
+# Acknowledgements
 
 🍻 and 🐙 to my Spring 2 '26 batchmates and everyone else at the [Recurse Center](https://www.recurse.com), you're the best!
 
@@ -985,6 +999,6 @@ Additionally, many thanks to the authors of the links below, all of it was inval
 - https://www.paintcodeapp.com/news/code-for-ios-7-rounded-rectangles
 - https://liamrosenfeld.com/posts/apple_icon_quest/
 
-## License
+# License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
