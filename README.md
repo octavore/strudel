@@ -758,9 +758,7 @@ strudel release
 
 strudel can build and sign one or more Safari Web Extensions alongside the host
 app. Each extension becomes an `.appex` bundle under
-`<host>.app/Contents/PlugIns/`, signed inside-out (extension first, with its
-own entitlements; then the host bundle seals over it). Notarizing the host
-`.app` covers the embedded extensions.
+`<host>.app/Contents/PlugIns/`.
 
 ### 1. Swift package setup
 
@@ -778,10 +776,10 @@ let package = Package(
 )
 ```
 
-App extensions are loaded by the host process (Safari) via `NSExtensionMain`,
-not run as standalone programs. Xcode wires this up automatically for bundle
-targets, but SPM produces a regular executable that requires a `main` symbol.
-Add a one-line entry-point shim to the extension's source directory:
+App extensions are loaded by Safari via `NSExtensionMain`, not run as standalone
+programs. Xcode wires this up automatically for bundle targets, but SPM produces
+a regular executable that requires a `main` symbol. Add a one-line entry-point
+shim to the extension's source directory:
 
 ```swift
 // Sources/Extension/main.swift
