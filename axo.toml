@@ -9,5 +9,10 @@ lint = "cargo clippy --workspace --all-targets --locked -- -D warnings"
 ci = [":check", ":lint", ":test"]
 release = "./scripts/release.sh"
 
+"example:hello-world" = "cargo run -- --config examples/HelloWorldApp/strudel.toml run"
+"example:menu-bar" = "cargo run -- --config examples/MenuBarApp/strudel.toml run"
+"example:multi-target" = "cargo run -- --config examples/MultiTargetApp/strudel.toml run"
+"example:safari-extension" = "cargo run -- --config examples/SafariExtension/strudel.toml run"
+
 [global_packages]
 rust = "stable"
