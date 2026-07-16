@@ -124,8 +124,10 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
         std::fs::write(
             &gitignore_path,
             indoc::indoc! {"
-            .build/    # Swift package manager build artifacts
-            .strudel/  # strudel cache and intermediate build outputs
+            # Swift package manager build artifacts
+            .build/
+            # strudel cache and intermediate build outputs
+            .strudel/
         "},
         )?;
         cprintln!("Created <dim>{}</dim>", gitignore_path.display());
