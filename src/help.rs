@@ -25,7 +25,10 @@ pub(crate) const TOPICS: &[(&str, &str)] = &[
         "extensions",
         "App extensions: safari_web_extension, app_extension",
     ),
-    ("dylibs", "Embedding dynamic C libraries in the bundle"),
+    (
+        "dylibs",
+        "Embedding dynamic C libraries and .framework bundles in the bundle",
+    ),
     ("universal", "Universal (fat) binaries for arm64 + x86_64"),
     ("ci", "CI/CD setup: GitHub Actions, secrets, keychain"),
     (
@@ -51,7 +54,7 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                 "notarize" | "notarization" => print_notarize(),
                 "entitlements" => print_entitlements(),
                 "extensions" | "extension" => print_extensions(),
-                "dylibs" | "dylib" => print_dylibs(),
+                "dylibs" | "dylib" | "frameworks" | "framework" => print_dylibs(),
                 "universal" => print_universal(),
                 "ci" => print_ci(),
                 "ios-device" | "ios_device" => print_ios_device(),
@@ -256,7 +259,7 @@ fn print_config() {
         entitlements_json_path = "entitlements.json"       # JSON entitlements
         archs                  = ["arm64", "x86_64"]       # default: host arch only
         target_name            = "MyApp"                   # Swift executableTarget; default: app.name
-        embed_libs             = ["path/to/libFoo.dylib"]  # dylibs copied into Contents/Frameworks
+        embed_libs             = ["path/to/libFoo.dylib"]  # dylibs/.frameworks copied into Contents/Frameworks
         provisioning_profile   = "MyApp.provisionprofile"  # required for some entitlements
 
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
@@ -744,16 +747,18 @@ fn print_ios_device() {
 
 fn print_dylibs() {
     print_help(&formatdoc! {r#"
-        # Embedding dynamic libraries
+        # Embedding dynamic libraries and frameworks
 
-        For C FFI dylibs that must ship inside the bundle:
+        For C FFI dylibs, or .framework bundles (e.g. Sparkle, vendored as a SwiftPM
+        binaryTarget) that must ship inside the app bundle:
         {ANSI_PURPLE}
         [build]
-        embed_libs = ["path/to/libFoo.dylib", "path/to/libBar.dylib"]
+        embed_libs = ["path/to/libFoo.dylib", "path/to/Sparkle.framework"]
         {ANSI_RESET}
-        Paths are relative to the config file's directory unless absolute.
+        Paths are relative to the config file's directory unless absolute. strudel tells
+        dylibs and frameworks apart by extension (.framework vs. everything else).
 
-        ## What strudel does
+        ## dylibs
 
         For each dylib, strudel:
           1. Copies it into Contents/Frameworks/
@@ -761,15 +766,29 @@ fn print_dylibs() {
           3. Updates the executable's load command to use @rpath/libFoo.dylib
           4. Signs the dylib (before signing the outer bundle)
 
-        strudel also injects -rpath @executable_path/../Frameworks at link time via
-        {ANSI_BLUE}-Xlinker -rpath -Xlinker @executable_path/../Frameworks{ANSI_RESET} in {ANSI_BLUE}swift build{ANSI_RESET}.
+        ## .framework bundles
+
+        For each framework, strudel:
+          1. Copies the whole bundle into Contents/Frameworks/ (preserving the
+             Versions/... symlink structure)
+          2. Signs it with --deep (before signing the outer bundle), so any nested
+             code (e.g. Sparkle's bundled Autoupdate.app / XPC services) carries your
+             own Team ID instead of the vendor's
+
+        No install-name rewrite is done for frameworks: SwiftPM binaryTargets are
+        already linked with an @rpath install name.
+
+        strudel injects -rpath @executable_path/../Frameworks at link time via
+        {ANSI_BLUE}-Xlinker -rpath -Xlinker @executable_path/../Frameworks{ANSI_RESET} in {ANSI_BLUE}swift build{ANSI_RESET}
+        whenever embed_libs is non-empty.
 
         ## Build-time flags
 
         Compile-time flags (-I, -L, -l, module maps) and linker flags still belong in
-        Package.swift (cSettings / linkerSettings). strudel's embed_libs only handles
-        the bundle assembly and signing step; it does not affect how {ANSI_BLUE}swift build{ANSI_RESET} finds
-        or links the library.
+        Package.swift (cSettings / linkerSettings, or a binaryTarget declaration for a
+        vendored .framework/.xcframework). strudel's embed_libs only handles the bundle
+        assembly and signing step; it does not affect how {ANSI_BLUE}swift build{ANSI_RESET} finds or links
+        the library.
 
         ## Static libraries
 

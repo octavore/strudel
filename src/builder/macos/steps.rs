@@ -236,15 +236,16 @@ impl MacosBuilder {
         }
     }
 
-    /// Embed dynamic libraries into `Contents/Frameworks`, fix their install
-    /// names and the executable's rpath, so the bundle is self-contained.
-    /// No-op when `cfg.embed_libs` is empty.
+    /// Embed dynamic libraries and `.framework` bundles into
+    /// `Contents/Frameworks`, fix dylib install names and the executable's
+    /// rpath, so the bundle is self-contained. No-op when `cfg.embed_libs`
+    /// is empty.
     pub fn embed_libraries(&self, app_bundle: &Path) -> Result<()> {
         if self.cfg.embed_libs.is_empty() {
             return Ok(());
         }
 
-        step("Embedding dynamic libraries...");
+        step("Embedding libraries and frameworks...");
 
         let frameworks_dir = app_bundle.join("Contents/Frameworks");
         self.create_dir(&frameworks_dir)?;
@@ -259,6 +260,17 @@ impl MacosBuilder {
                 format!("embed_libs entry has no filename: {}", lib_path.display())
             })?;
             let dest = frameworks_dir.join(file_name);
+
+            if is_framework(lib_path) {
+                // `.framework` bundles (e.g. SwiftPM binaryTargets like
+                // Sparkle) are directory bundles already linked with an
+                // @rpath install name; copy the tree (via `ditto`, which
+                // preserves the Versions/... symlink structure) and skip
+                // the install-name rewrite done below for flat dylibs.
+                self.copy_tree(lib_path, &dest)?;
+                continue;
+            }
+
             let file_name_str = file_name.to_str().context("embed: Invalid file name.")?;
             let rpath_entry = format!("@rpath/{file_name_str}");
             self.copy_file(lib_path, &dest)?;
@@ -306,7 +318,15 @@ impl MacosBuilder {
 
         Ok(())
     }
+}
 
+/// Whether an `embed_libs` entry is a `.framework` directory bundle rather
+/// than a flat dylib.
+fn is_framework(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()) == Some("framework")
+}
+
+impl MacosBuilder {
     /// Assemble one app extension `.appex` bundle under the host's
     /// `Contents/PlugIns/`:
     /// 1. Builds the extension `Info.plist` (injecting kind-specific
@@ -446,15 +466,22 @@ impl MacosBuilder {
             codesign_cmd = codesign_cmd.args(["--options", "runtime", "--timestamp"]);
         }
 
-        // Sign each embedded dylib individually before signing the bundle.
-        // codesign --verify --deep --strict and notarization both require nested
-        // Mach-O files to carry valid signatures.
+        // Sign each embedded dylib/framework individually before signing the
+        // bundle. codesign --verify --deep --strict and notarization both
+        // require nested Mach-O files to carry valid signatures.
         if !self.cfg.embed_libs.is_empty() {
             step(&format!("Signing embedded libraries...{msg}"));
             let frameworks_dir = self.paths.app_bundle.join("Contents/Frameworks");
             for lib_path in &self.cfg.embed_libs {
                 if let Some(file_name) = lib_path.file_name() {
                     let mut lib_codesign_cmd = codesign_cmd.clone();
+                    if is_framework(lib_path) {
+                        // Re-sign nested code (e.g. Sparkle's bundled
+                        // Autoupdate.app / XPC services) with our own
+                        // identity so it shares the outer app's Team ID;
+                        // vendor signatures alone would fail Gatekeeper.
+                        lib_codesign_cmd = lib_codesign_cmd.arg("--deep");
+                    }
                     let dylib = frameworks_dir.join(file_name);
                     let dylib_str = dylib.to_str().unwrap();
                     lib_codesign_cmd = lib_codesign_cmd.arg(dylib_str);

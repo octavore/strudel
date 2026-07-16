@@ -63,7 +63,8 @@ pub struct BuildSection {
     pub target_name: Option<String>,
     /// Extra environment variables forwarded to `swift build`.
     pub build_env: Option<HashMap<String, String>>,
-    /// Dynamic libraries to embed in `Contents/Frameworks` and sign.
+    /// Dynamic libraries and `.framework` bundles (e.g. Sparkle) to embed in
+    /// `Contents/Frameworks` and sign.
     pub embed_libs: Option<Vec<PathBuf>>,
     /// Provisioning profile to embed as `Contents/embedded.provisionprofile`.
     pub provisioning_profile: Option<PathBuf>,
