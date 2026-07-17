@@ -199,7 +199,7 @@ pub struct ResolvedConfig {
     pub extensions: Vec<ResolvedExtension>,
     /// Directory whose contents are merged into `Contents/Resources/`.
     pub resources_dir: Option<PathBuf>,
-    /// Individual files to copy into `Contents/Resources/`.
+    /// Individual files or folders to copy into `Contents/Resources/`.
     pub resources: Vec<PathBuf>,
 
     pub target_platform: ResolvedTargetPlatform,

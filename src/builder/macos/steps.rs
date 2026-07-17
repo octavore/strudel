@@ -165,14 +165,20 @@ impl MacosBuilder {
             self.copy_tree(rdir, &app_bundle_resources_dir)?;
         }
 
-        // Copy individual user-configured resource files into Contents/Resources/.
+        // Copy individual user-configured resource files and folders into
+        // Contents/Resources/.
         if !self.cfg.resources.is_empty() {
             step("Copying resources...");
             for resource in &self.cfg.resources {
                 let name = resource.file_name().with_context(|| {
                     format!("Resource path has no filename: {}", resource.display())
                 })?;
-                self.copy_file(resource, &app_bundle_resources_dir.join(name))?;
+                let dest = app_bundle_resources_dir.join(name);
+                if resource.is_dir() {
+                    self.copy_tree(resource, &dest)?;
+                } else {
+                    self.copy_file(resource, &dest)?;
+                }
             }
         }
 

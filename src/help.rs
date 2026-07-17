@@ -263,7 +263,7 @@ fn print_config() {
         provisioning_profile   = "MyApp.provisionprofile"  # required for some entitlements
 
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
-        resources              = ["Assets/logo.png"]       # individual files to copy into Contents/Resources/
+        resources              = ["Assets/logo.png"]       # individual files/folders to copy into Contents/Resources/
         {ANSI_RESET}
         ## [build.icon] optional; no icon if unset
         # Either a png or icns file copied in unmodified (set icon.path), or

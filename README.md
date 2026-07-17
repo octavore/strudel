@@ -319,7 +319,7 @@ is user-facing, and it may have multiple unique internal tracking build numbers 
 | `target_name`            | string   | value of `app.name` | Swift executable target name, if it differs from the app name                                                                                              |
 | `embed_libs`             | string[] | *(none)*            | Dynamic C FFI libraries to embed in `Contents/Frameworks` and sign. Paths relative to config file                                                          |
 | `resources_dir`          | string   | *(none)*            | Directory whose contents are copied wholesale into `Contents/Resources/`                                                                                   |
-| `resources`              | string[] | *(none)*            | Individual files to copy into `Contents/Resources/` by filename                                                                                            |
+| `resources`              | string[] | *(none)*            | Individual files or folders to copy into `Contents/Resources/` by filename                                                                                 |
 | `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements                                                      |
 
 ### `[build.icon]` (optional)
