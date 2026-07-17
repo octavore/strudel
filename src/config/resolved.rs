@@ -279,6 +279,10 @@ pub enum ResolvedTargetPlatform {
 #[derive(Debug, Clone)]
 pub struct ResolvedMacOsSection {
     pub dmg: Option<ResolvedDmg>,
+    /// Path to a `.xcassets` directory to compile into
+    /// `Contents/Resources/Assets.car` with `xcrun actool`. Optional;
+    /// skipped when unset.
+    pub assets_dir: Option<PathBuf>,
 }
 
 impl From<ResolvedMacOsSection> for ResolvedTargetPlatform {

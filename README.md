@@ -287,6 +287,7 @@ top-level.
 | [`[build_env]`](#build_env-optional)| no       | Extra env vars for `swift build`                            |
 | [`[ios]`](#ios-optional-experimental)| no      | Simulator, device, and provisioning settings for iOS        |
 | [`[[extensions]]`](#extensions-optional)| no   | Embedded `.appex` bundles                                   |
+| [`assets_dir`](#assets_dir-optional-macos)| no | `.xcassets` catalog compiled into `Contents/Resources/Assets.car` |
 | [`[dmg]`](#dmg-optional)            | no       | Finder window layout of the release DMG                     |
 | [`[apple]`](#apple-optional-in-strudeltoml)| no| Signing, notarization, and provisioning identifiers        |
 
@@ -428,6 +429,23 @@ and sealed inside the notarized host app. Two kinds are supported:
 | ---------------------------- | ------ | ------------ | ------------------------------------------------------------------------------------------------ |
 | `extension_point_identifier` | string | *(required)* | `NSExtensionPointIdentifier`, identifies the extension point (e.g. `"com.apple.share-services"`) |
 | `principal_class`            | string | *(none)*     | `NSExtensionPrincipalClass`, required by some extension points                                   |
+
+## `assets_dir` (optional, macOS)
+
+A top-level key (like `[dmg]`, not nested under `[build]`) pointing at a
+`.xcassets` directory to compile into `Contents/Resources/Assets.car` via
+`xcrun actool`. Useful for image sets, color sets, and other asset-catalog
+content used from Swift via `NSImage(named:)`/`Color(...)`. Unlike
+`ios.assets_dir`, this does not contain the app icon, which is provided by
+`[build.icon]`.
+
+```toml
+assets_dir = "Sources/App/Assets.xcassets"
+```
+
+`actool`'s `--minimum-deployment-target` is read from `Package.swift`'s
+`platforms: [.macOS(.vXX)]` entry (via `swift package dump-package`); if the
+manifest declares no macOS platform minimum, it falls back to `11.0`.
 
 ## `[dmg]` (optional)
 

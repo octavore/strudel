@@ -63,6 +63,10 @@ pub struct SingleBuildConfig {
 
     pub dmg: Option<DmgSection>,
 
+    /// Path to a `.xcassets` directory to compile into
+    /// `Contents/Resources/Assets.car` with `xcrun actool`.
+    pub assets_dir: Option<PathBuf>,
+
     #[serde(default)]
     pub apple: AppleSection,
 }
@@ -103,13 +107,14 @@ impl BuildConfig {
                     build,
                     extensions,
                     dmg,
+                    assets_dir,
                     apple,
                 } = single;
                 let target = BuildTarget {
                     app,
                     build,
                     extensions,
-                    platform: TargetPlatform::Macos { dmg },
+                    platform: TargetPlatform::Macos { dmg, assets_dir },
                 };
                 vec![resolve_target(
                     target, &apple, None, true, config_dir, global,
@@ -208,11 +213,12 @@ fn resolve_target(
 
     let target_name = build.target_name.unwrap_or_else(|| app.name.clone());
     let target_platform = match target.platform {
-        TargetPlatform::Macos { dmg } => ResolvedMacOsSection {
+        TargetPlatform::Macos { dmg, assets_dir } => ResolvedMacOsSection {
             dmg: match dmg {
                 Some(d) => d.resolve(config_dir)?,
                 None => Some(ResolvedDmg::default()),
             },
+            assets_dir: assets_dir.map(|p| resolve_to(config_dir, p)),
         }
         .into(),
         TargetPlatform::Ios { ios } => ResolvedIosSection {
@@ -823,6 +829,39 @@ mod tests {
         assert_eq!(dmg.window_height, 400);
         assert_eq!(dmg.icon_size, 128);
         assert_eq!(dmg.background, DmgBackground::Color(255, 255, 255));
+    }
+
+    #[test]
+    fn macos_assets_dir_absent_is_none() {
+        let t = generate_initial_toml("MyApp", "com.example.myapp", "1.0");
+        let cfg: BuildConfig = toml::from_str(&t).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        let ResolvedTargetPlatform::Mac(macos) = &r.target_platform else {
+            panic!("expected a macOS target");
+        };
+        assert!(macos.assets_dir.is_none());
+    }
+
+    #[test]
+    fn macos_assets_dir_resolves_relative_to_config_dir() {
+        let cfg = parse_build_config(indoc! { r#"
+            assets_dir = "Sources/Assets.xcassets"
+
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        let ResolvedTargetPlatform::Mac(macos) = &r.target_platform else {
+            panic!("expected a macOS target");
+        };
+        assert_eq!(
+            macos.assets_dir,
+            Some(PathBuf::from("/cfg/Sources/Assets.xcassets"))
+        );
     }
 
     #[test]

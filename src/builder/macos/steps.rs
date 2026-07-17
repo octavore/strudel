@@ -182,7 +182,69 @@ impl MacosBuilder {
             }
         }
 
+        // Compile a user-configured `.xcassets` catalog into
+        // `Contents/Resources/Assets.car`.
+        if let Some(assets_dir) = &self.macos.assets_dir {
+            self.compile_macos_assets(assets_dir, &app_bundle_resources_dir)?;
+        }
+
         Ok(app_bundle.clone())
+    }
+
+    /// Compile `assets_dir` (a `.xcassets` catalog) into
+    /// `Assets.car` inside `resources_dir` via `xcrun actool`.
+    fn compile_macos_assets(&self, assets_dir: &Path, resources_dir: &Path) -> Result<()> {
+        step("Compiling asset catalog...");
+
+        let deployment_target = self.macos_deployment_target()?;
+        let assets_str = assets_dir
+            .to_str()
+            .with_context(|| format!("Invalid assets_dir path: {}", assets_dir.display()))?;
+        let resources_str = resources_dir.to_str().context(
+            "Contents/Resources path is not valid UTF-8, cannot pass to `actool --compile`",
+        )?;
+        let partial_plist_path = resources_dir
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("actool-partial-info.plist");
+        let partial_plist_str = partial_plist_path.to_str().unwrap();
+
+        self.sh.run(ShellCommand::new("xcrun").args([
+            "actool",
+            assets_str,
+            "--compile",
+            resources_str,
+            "--platform",
+            "macosx",
+            "--minimum-deployment-target",
+            &deployment_target,
+            "--output-partial-info-plist",
+            partial_plist_str,
+        ]))?;
+
+        let _ = fs::remove_file(&partial_plist_path);
+        Ok(())
+    }
+
+    /// The macOS deployment target `actool` should compile assets for, read
+    /// from `Package.swift`'s `platforms: [.macOS(.vXX)]` declaration via
+    /// `swift package dump-package`. Falls back to `"14.0"` when the
+    /// manifest declares no macOS platform minimum (a valid, common case).
+    fn macos_deployment_target(&self) -> Result<String> {
+        if self.dry_run {
+            return Ok("<package.swift:macos>".to_string());
+        }
+
+        let source = self
+            .cfg
+            .source_dir
+            .to_str()
+            .context("source_dir is not valid UTF-8")?;
+        let out = ShellCommand::new("swift")
+            .args(["package", "dump-package", "--package-path", source])
+            .hide_dry_run()
+            .run(&self.sh)?;
+        parse_macos_deployment_target(&out)
     }
 
     /// Produce the bundle's `AppIcon.icns` at `dest`. For
@@ -330,6 +392,21 @@ impl MacosBuilder {
 /// than a flat dylib.
 fn is_framework(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("framework")
+}
+
+/// Pull the macOS deployment target out of `swift package dump-package`'s
+/// JSON output (its `platforms: [{platformName, version}]` array). Falls
+/// back to `"14.0"` when the manifest declares no macOS platform minimum.
+fn parse_macos_deployment_target(dump_package_json: &str) -> Result<String> {
+    let manifest: Value = serde_json::from_str(dump_package_json)
+        .context("Failed to parse `swift package dump-package` output as JSON")?;
+    let version = manifest["platforms"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["platformName"] == "macos")
+        .and_then(|p| p["version"].as_str());
+    Ok(version.unwrap_or("14.0").to_string())
 }
 
 impl MacosBuilder {
@@ -765,5 +842,33 @@ impl MacosBuilder {
             json!(self.cfg.build_number.clone()),
         );
         Ok(info_json)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_macos_deployment_target;
+
+    #[test]
+    fn deployment_target_reads_macos_platform_version() {
+        let json = r#"{"platforms":[{"platformName":"macos","version":"13.0","options":[]}]}"#;
+        assert_eq!(parse_macos_deployment_target(json).unwrap(), "13.0");
+    }
+
+    #[test]
+    fn deployment_target_ignores_other_platforms() {
+        let json = r#"{"platforms":[{"platformName":"ios","version":"17.0","options":[]}]}"#;
+        assert_eq!(parse_macos_deployment_target(json).unwrap(), "11.0");
+    }
+
+    #[test]
+    fn deployment_target_falls_back_when_platforms_absent() {
+        let json = r#"{"platforms":[]}"#;
+        assert_eq!(parse_macos_deployment_target(json).unwrap(), "11.0");
+    }
+
+    #[test]
+    fn deployment_target_rejects_invalid_json() {
+        assert!(parse_macos_deployment_target("not json").is_err());
     }
 }

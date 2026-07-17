@@ -265,6 +265,12 @@ fn print_config() {
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
         resources              = ["Assets/logo.png"]       # individual files/folders to copy into Contents/Resources/
         {ANSI_RESET}
+        ## assets_dir optional; top-level key (like [dmg]), not under [build]
+        # xcassets catalog compiled into Contents/Resources/Assets.car via actool.
+        # Deployment target is read from Package.swift's platforms entry; defaults to 14.0 if none.
+        {ANSI_PURPLE}
+        assets_dir = "Sources/App/Assets.xcassets"
+        {ANSI_RESET}
         ## [build.icon] optional; no icon if unset
         # Either a png or icns file copied in unmodified (set icon.path), or
         # generate an icon from a png or svg at build time (icon.src). For iOS

@@ -71,7 +71,7 @@ pub struct BuildSection {
 
     /// Directory whose contents are merged into `Contents/Resources/`.
     pub resources_dir: Option<PathBuf>,
-    /// Individual files to copy into `Contents/Resources/`.
+    /// Individual files or folders to copy into `Contents/Resources/`.
     pub resources: Option<Vec<PathBuf>>,
 }
 
@@ -80,6 +80,9 @@ pub struct BuildSection {
 pub enum TargetPlatform {
     Macos {
         dmg: Option<DmgSection>,
+        /// Path to a `.xcassets` directory to compile into
+        /// `Contents/Resources/Assets.car` with `xcrun actool`.
+        assets_dir: Option<PathBuf>,
     },
     Ios {
         #[serde(default)]

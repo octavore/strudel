@@ -111,7 +111,13 @@ pub fn resolved_ios() -> ResolvedConfig {
 
 /// [`resolved`] with a macOS target platform and no DMG styling.
 pub fn resolved_macos() -> ResolvedConfig {
-    resolved(ResolvedMacOsSection { dmg: None }.into())
+    resolved(
+        ResolvedMacOsSection {
+            dmg: None,
+            assets_dir: None,
+        }
+        .into(),
+    )
 }
 
 pub fn parse_build_config(s: &str) -> Result<BuildConfig, toml::de::Error> {
