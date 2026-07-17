@@ -1,6 +1,7 @@
 project_name = "strudel-build"
 
 [tasks]
+build = "cargo build"
 install = "cargo install --path ."
 fmt = ["cargo clippy", "cargo +nightly fmt"]
 check = "cargo +nightly fmt -- --check"
