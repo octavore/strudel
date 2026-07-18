@@ -370,13 +370,13 @@ mod tests {
     #[test]
     fn deployment_target_ignores_other_platforms() {
         let json = r#"{"platforms":[{"platformName":"ios","version":"17.0","options":[]}]}"#;
-        assert_eq!(parse_macos_deployment_target(json).unwrap(), "11.0");
+        assert_eq!(parse_macos_deployment_target(json).unwrap(), "14.0");
     }
 
     #[test]
     fn deployment_target_falls_back_when_platforms_absent() {
         let json = r#"{"platforms":[]}"#;
-        assert_eq!(parse_macos_deployment_target(json).unwrap(), "11.0");
+        assert_eq!(parse_macos_deployment_target(json).unwrap(), "14.0");
     }
 
     #[test]
