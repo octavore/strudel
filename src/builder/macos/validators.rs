@@ -61,6 +61,129 @@ impl MacosBuilder {
         }
     }
 
+    /// Describe any MAS (Mac App Store) credentials that are missing or
+    /// incomplete. Empty means a real `release --mas` has everything it
+    /// needs.
+    pub(in crate::builder) fn mas_credential_problems(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if self.cfg.mas_sign_identity.is_none() {
+            problems.push(
+                "no [apple.mas] identity set (an \"Apple Distribution: ...\" identity)".to_string(),
+            );
+        }
+        if self.cfg.mas_installer_identity.is_none() {
+            problems.push(
+                "no [apple.mas] installer_identity set (a \"3rd Party Mac Developer Installer: \
+                 ...\" or \"Apple Distribution Installer: ...\" identity)"
+                    .to_string(),
+            );
+        }
+        if self.cfg.mas_app_apple_id.is_none() {
+            problems.push(
+                "no [apple.mas] app_apple_id set (the numeric App Store Connect app id, shown \
+                 under App Information)"
+                    .to_string(),
+            );
+        }
+        if self.cfg.notary_auth().is_none() {
+            problems.push(
+                "no complete App Store Connect API key credentials (APPLE_API_KEY_PATH, \
+                 APPLE_API_KEY, APPLE_API_ISSUER) - the same key used for notarization also \
+                 authenticates altool."
+                    .to_string(),
+            );
+        }
+        problems
+    }
+
+    /// Verify the credentials required for MAS signing and upload are
+    /// present. In dry-run, only warns.
+    pub(in crate::builder) fn preflight_mas_credentials(&self) -> Result<()> {
+        let problems = self.mas_credential_problems();
+        if problems.is_empty() {
+            return Ok(());
+        }
+
+        let hint = "Set [apple.mas] identity/installer_identity/app_apple_id in strudel.toml, \
+                    and App Store Connect API key credentials in strudel.toml or the \
+                    environment. See `strudel help app-store`.";
+
+        if self.dry_run {
+            for p in &problems {
+                cprintln!("<yellow>[warning]</yellow> {p}");
+            }
+            cprintln!("<yellow>[warning]</yellow> {hint}");
+            Ok(())
+        } else {
+            let mut msg = String::from("Cannot run MAS signing/upload:");
+            for p in &problems {
+                msg.push_str(&format!("\n  - {p}"));
+            }
+            msg.push_str(&format!("\n{hint}"));
+            bail!(msg);
+        }
+    }
+
+    /// Warn (not bail: a very small number of legitimate cases omit it) when
+    /// the entitlements that will be used for `--mas` signing lack
+    /// `com.apple.security.app-sandbox`, since Apple review rejects Mac App
+    /// Store submissions without it.
+    pub(in crate::builder) fn warn_if_mas_entitlements_missing_sandbox(&self) {
+        let has_sandbox = self
+            .cfg
+            .entitlements_json_path
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .and_then(|v| {
+                v.get("com.apple.security.app-sandbox")
+                    .and_then(Value::as_bool)
+            })
+            == Some(true);
+        if !has_sandbox {
+            cprintln!(
+                "<yellow>warning:</yellow> MAS entitlements do not set \
+                 com.apple.security.app-sandbox = true. App Store review requires the sandbox \
+                 entitlement for Mac App Store submissions."
+            );
+        }
+    }
+
+    /// Check that the configured MAS installer identity exists in the
+    /// keychain via `security find-identity -v` (no policy filter - the
+    /// installer identity isn't a `codesigning`-policy identity, so
+    /// [`Self::validate_sign_identity`]'s check doesn't apply to it).
+    /// Skipped in dry-run.
+    pub(crate) fn validate_installer_identity(&self) -> Result<()> {
+        if self.dry_run {
+            return Ok(());
+        }
+        step("Validating installer identity...");
+        let identity = self
+            .cfg
+            .mas_installer_identity
+            .as_deref()
+            .context("mas_installer_identity is required for --mas")?;
+
+        let out = Command::new("security")
+            .args(["find-identity", "-v"])
+            .output()
+            .context("Failed to run `security find-identity`")?;
+        let found = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .any(|line| line.contains(&format!("\"{identity}\"")));
+
+        if found {
+            cprintln!("<green>✔</green> Installer identity found");
+            Ok(())
+        } else {
+            bail!(
+                "Installer identity \"{identity}\" was not found in the keychain.\n\
+                 Run `security find-identity -v` to see available identities."
+            );
+        }
+    }
+
     /// Check that the configured signing identity exists in the keychain by
     /// running `security find-identity -v -p codesigning` and looking for
     /// the identity name in the output. Skipped in dry-run.
@@ -212,7 +335,7 @@ mod tests {
     use crate::config::fixtures::resolved_macos;
 
     fn builder(cfg: ResolvedConfig) -> MacosBuilder {
-        MacosBuilder::new(cfg, true, false, false, None, false, false).unwrap()
+        MacosBuilder::new(cfg, true, false, false, None, false, false, false).unwrap()
     }
 
     #[test]

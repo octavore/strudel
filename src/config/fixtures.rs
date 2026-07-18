@@ -21,6 +21,10 @@ pub const FULL: &str = indoc::indoc! {r#"
   archs = ["arm64", "x86_64"]
   target_name = "MyAppBin"
 
+  [build.mas]
+  provisioning_profile = "mas.provisionprofile"
+  entitlements_json_path = "mas-ent.json"
+
   [apple]
   identity = "Developer ID Application: Me (TEAM123456)"
   team_id = "TEAM123456"
@@ -28,6 +32,11 @@ pub const FULL: &str = indoc::indoc! {r#"
   api_key = "KEYID123"
   api_key_path = "AuthKey.p8"
   notarize_timeout = 1200
+
+  [apple.mas]
+  identity = "Apple Distribution: Me (TEAM123456)"
+  installer_identity = "3rd Party Mac Developer Installer: Me (TEAM123456)"
+  app_apple_id = "1234567890"
 
   [dmg]
   background = "dmg-bg.png"
@@ -90,6 +99,11 @@ fn resolved(target_platform: ResolvedTargetPlatform) -> ResolvedConfig {
         apple_api_key_path: None,
         apple_certificate: String::new().into(),
         apple_certificate_password: String::new().into(),
+        mas_sign_identity: None,
+        mas_installer_identity: None,
+        mas_app_apple_id: None,
+        mas_provisioning_profile: None,
+        mas_entitlements_json_path: None,
     }
 }
 

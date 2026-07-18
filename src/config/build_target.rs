@@ -73,6 +73,20 @@ pub struct BuildSection {
     pub resources_dir: Option<PathBuf>,
     /// Individual files or folders to copy into `Contents/Resources/`.
     pub resources: Option<Vec<PathBuf>>,
+
+    pub mas: Option<MasBuildSection>,
+}
+
+/// `[build.mas]` Mac App Store channel provisioning/entitlements, selected by
+/// `strudel release --mas`. Separate from the flat `[build]` fields (which
+/// always mean the Developer-ID channel): App Store distribution needs a
+/// sandboxed entitlements/provisioning-profile pair distinct from the
+/// Developer-ID ones.
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MasBuildSection {
+    pub provisioning_profile: Option<PathBuf>,
+    pub entitlements_json_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

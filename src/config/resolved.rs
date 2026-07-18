@@ -213,6 +213,15 @@ pub struct ResolvedConfig {
     // Secrets (read from the environment only, never from strudel.toml).
     pub apple_certificate: SecretString,
     pub apple_certificate_password: SecretString,
+
+    // Mac App Store channel (`strudel release --mas`). `None` means the
+    // corresponding `[apple.mas]`/`[build.mas]` field is not configured,
+    // distinct from an empty string/path.
+    pub mas_sign_identity: Option<String>,
+    pub mas_installer_identity: Option<String>,
+    pub mas_app_apple_id: Option<String>,
+    pub mas_provisioning_profile: Option<PathBuf>,
+    pub mas_entitlements_json_path: Option<PathBuf>,
 }
 
 impl ResolvedConfig {

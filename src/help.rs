@@ -20,6 +20,10 @@ pub(crate) const TOPICS: &[(&str, &str)] = &[
     ),
     ("signing", "Code signing: Developer ID, keychain, ad-hoc"),
     ("notarize", "Notarization: App Store Connect API key auth"),
+    (
+        "app-store",
+        "Mac App Store distribution: --mas, Apple Distribution + Installer certs, pkg upload",
+    ),
     ("entitlements", "Entitlements and provisioning profiles"),
     (
         "extensions",
@@ -52,6 +56,7 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                 "global-config" | "global_config" => print_global_config(),
                 "signing" => print_signing(),
                 "notarize" | "notarization" => print_notarize(),
+                "app-store" | "app_store" | "mas" => print_app_store(),
                 "entitlements" => print_entitlements(),
                 "extensions" | "extension" => print_extensions(),
                 "dylibs" | "dylib" | "frameworks" | "framework" => print_dylibs(),
@@ -305,6 +310,12 @@ fn print_config() {
         Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
         See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
 
+        ## [apple.mas] / [build.mas] optional; Mac App Store channel
+
+        A second distribution channel, selected with {ANSI_BLUE}strudel release --mas{ANSI_RESET}: Apple
+        Distribution + Installer certs, a pkg instead of a DMG, altool upload instead of
+        notarization. See: {ANSI_BLUE}strudel help app-store{ANSI_RESET}
+
         ## [[target]] optional, repeatable (multi-target configs)
 
         Replace [app] with one or more [[target]] blocks to build multiple
@@ -424,11 +435,90 @@ fn print_signing() {
         We do not use --deep on the host sign as it would incorrectly re-apply host entitlements
         to nested bundles.
 
+        This is the Developer-ID channel (the default for {ANSI_BLUE}strudel release{ANSI_RESET}). For Mac App
+        Store distribution instead, see {ANSI_BLUE}strudel help app-store{ANSI_RESET}.
+
         ## See also
 
         {ANSI_BLUE}strudel help notarize{ANSI_RESET}
         {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
         {ANSI_BLUE}strudel help ci{ANSI_RESET}
+    "#});
+}
+
+fn print_app_store() {
+    print_help(&formatdoc! {r#"
+        # Mac App Store distribution (--mas)
+
+        {ANSI_BLUE}strudel release --mas{ANSI_RESET} builds a second distribution channel alongside the
+        default Developer-ID release: it signs with an Apple Distribution identity instead of
+        Developer ID, packages a {ANSI_BLUE}.pkg{ANSI_RESET} with {ANSI_BLUE}productbuild{ANSI_RESET} instead of a DMG, and uploads
+        it via {ANSI_BLUE}xcrun altool{ANSI_RESET} instead of notarizing.
+
+        ## How it differs from a Developer-ID release
+
+          Developer-ID (default)              Mac App Store (--mas)
+          ───────────────────────             ──────────────────────
+          Developer ID Application cert       Apple Distribution cert
+          (no installer cert needed)          + Installer cert (productbuild)
+          DMG (hdiutil)                       pkg (productbuild)
+          xcrun notarytool + stapler          xcrun altool --upload-package
+          Resumable with --resume             --resume not supported
+
+        {ANSI_BLUE}--skip-notarization{ANSI_RESET} keeps its meaning for both channels: stop after packaging,
+        before notarization/upload.
+
+        ## Config: [apple.mas] and [build.mas]
+
+        Channel-specific identity lives in {ANSI_PURPLE}[apple.mas]{ANSI_RESET} (account-level, mirrors the flat
+        {ANSI_PURPLE}[apple]{ANSI_RESET} fields); channel-specific profile/entitlements live in {ANSI_PURPLE}[build.mas]{ANSI_RESET}
+        (app-level, mirrors the flat {ANSI_PURPLE}[build]{ANSI_RESET} fields). The flat fields keep meaning the
+        Developer-ID channel unchanged, so an existing strudel.toml needs no migration - fill in
+        one or both sets to support either or both channels.
+        {ANSI_PURPLE}
+        [apple.mas]
+        identity            = "Apple Distribution: Your Name (XXXXXXXXXX)"
+        installer_identity  = "3rd Party Mac Developer Installer: Your Name (XXXXXXXXXX)"
+        app_apple_id        = "1234567890"  # numeric App Store Connect app id (App Information)
+
+        [build.mas]
+        provisioning_profile   = "mas/MyApp.provisionprofile"
+        entitlements_json_path = "mas/entitlements.json"
+        {ANSI_RESET}
+        Notarization credentials ({ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}/{ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}/{ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}, or the
+        matching {ANSI_PURPLE}[apple]{ANSI_RESET} fields) are reused as-is: the same App Store Connect API key
+        authenticates both notarytool and altool.
+
+        ## Certificates needed
+
+        Both are created in the Apple Developer portal (Certificates, Identifiers & Profiles ->
+        Certificates) and must match exactly what {ANSI_BLUE}security find-identity -v{ANSI_RESET} shows:
+
+          "Apple Distribution: ..."                    signs the app bundle
+          "3rd Party Mac Developer Installer: ..."     signs the pkg (productbuild)
+          or "Apple Distribution Installer: ..."       (newer naming for the same role)
+
+        ## Entitlements
+
+        Mac App Store review requires the sandbox entitlement. strudel warns (does not bail -
+        a few legitimate cases omit it) when {ANSI_PURPLE}[build.mas]{ANSI_RESET}'s entitlements don't set:
+        {ANSI_PURPLE}
+        {{ "com.apple.security.app-sandbox": true }}
+        {ANSI_RESET}
+        See {ANSI_BLUE}strudel help entitlements{ANSI_RESET} for the general entitlements/provisioning-profile
+        model this reuses.
+
+        ## Example
+
+        {ANSI_BLUE}
+        strudel release --mas --dry-run   # preview the pkg + altool command sequence
+        strudel release --mas             # sign, package, and upload
+        {ANSI_RESET}
+        ## See also
+
+        {ANSI_BLUE}strudel help signing{ANSI_RESET}
+        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
+        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
     "#});
 }
 

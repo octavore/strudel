@@ -14,6 +14,8 @@ pub struct Paths {
     pub build_dir: PathBuf,
     pub app_bundle: PathBuf,
     pub dmg: PathBuf,
+    /// Mac App Store `.pkg`, built by `strudel release --mas`.
+    pub pkg: PathBuf,
     pub info_plist: PathBuf,
     pub entitlements_plist: PathBuf,
     pub strudel_dir: PathBuf,
@@ -72,6 +74,7 @@ impl Paths {
         } = cfg;
         let app_bundle = build_dir.join(format!("{app_name}.app"));
         let dmg_name = format!("{app_name}-{version}.dmg");
+        let pkg_name = format!("{app_name}-{version}.pkg");
         let strudel_dir = source_dir.join(".strudel");
         let extension_paths = extensions
             .iter()
@@ -83,6 +86,7 @@ impl Paths {
             cached_profile: strudel_dir.join(format!("{bundle_id}.mobileprovision")),
             devices_toml: strudel_dir.join("devices.toml"),
             dmg: build_dir.join(dmg_name),
+            pkg: build_dir.join(pkg_name),
             info_plist: app_bundle.join("Contents/Info.plist"),
             entitlements_plist: build_dir.join("Entitlements.plist"),
             build_dir: build_dir.clone(),
@@ -171,6 +175,7 @@ mod tests {
         let p = Paths::new(&cfg("/out", "MyApp", "1.2.3"));
         assert_eq!(p.app_bundle, PathBuf::from("/out/MyApp.app"));
         assert_eq!(p.dmg, PathBuf::from("/out/MyApp-1.2.3.dmg"));
+        assert_eq!(p.pkg, PathBuf::from("/out/MyApp-1.2.3.pkg"));
         assert_eq!(
             p.info_plist,
             PathBuf::from("/out/MyApp.app/Contents/Info.plist")

@@ -23,7 +23,7 @@ mod macos;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use color_print::{cformat, cprintln};
 use indoc::formatdoc;
 pub(crate) use ios::decode_profile;
@@ -51,6 +51,10 @@ pub struct MacosBuilder {
     open: bool,
     resume: Option<String>,
     skip_notarization: bool,
+    /// Mac App Store channel (`strudel release --mas`): sign with Apple
+    /// Distribution + Installer certs, package a `.pkg`, upload via `altool`
+    /// instead of DMG + notarization.
+    mas: bool,
     /// Trims interactive-only output (e.g. the per-second notarization
     /// countdown) that's noisy in captured CI logs but harmless on a real
     /// terminal.
@@ -175,6 +179,7 @@ pub fn clean(cfg: ResolvedConfig, dry_run: bool) -> Result<()> {
 }
 
 impl MacosBuilder {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: ResolvedConfig,
         dry_run: bool,
@@ -182,6 +187,7 @@ impl MacosBuilder {
         debug: bool,
         resume: Option<String>,
         skip_notarization: bool,
+        mas: bool,
         ci: bool,
     ) -> Result<Self> {
         let ResolvedTargetPlatform::Mac(ref macos) = cfg.target_platform else {
@@ -194,8 +200,36 @@ impl MacosBuilder {
             open,
             resume,
             skip_notarization,
+            mas,
             ci,
         })
+    }
+
+    /// Swap in the MAS signing identity, provisioning profile, and
+    /// entitlements ahead of `sign()`, so the shared signing pipeline signs
+    /// with Apple Distribution instead of Developer ID. `sign()` itself needs
+    /// no MAS-specific logic: it always signs whatever is in
+    /// `self.cfg.sign_identity`/`provisioning_profile`/
+    /// `entitlements_json_path`.
+    fn apply_mas_overrides(&mut self) -> Result<()> {
+        let sign_identity = self.cfg.mas_sign_identity.clone().ok_or_else(|| {
+            anyhow!(
+                "`--mas` requires [apple.mas] identity (an \"Apple Distribution: ...\" \
+                 identity). See `strudel help app-store`."
+            )
+        })?;
+        if self.cfg.mas_installer_identity.is_none() {
+            bail!(
+                "`--mas` requires [apple.mas] installer_identity (a \"3rd Party Mac Developer \
+                 Installer: ...\" or \"Apple Distribution Installer: ...\" identity). See \
+                 `strudel help app-store`."
+            );
+        }
+        self.core.cfg.entitlements_json_path = self.cfg.mas_entitlements_json_path.clone();
+        self.warn_if_mas_entitlements_missing_sandbox();
+        self.core.cfg.sign_identity = sign_identity;
+        self.core.cfg.provisioning_profile = self.cfg.mas_provisioning_profile.clone();
+        Ok(())
     }
 
     /// Assemble every configured app extension under
@@ -319,16 +353,21 @@ impl MacosBuilder {
     }
 
     /// Full release pipeline: clean -> binary -> assemble -> sign -> package
-    /// DMG -> notarize. With `--resume`, skips the build and resumes a
-    /// pending notarization instead. With `--skip-notarization`, stops
-    /// after packaging the DMG.
+    /// DMG -> notarize (or, with `--mas`, package pkg -> upload). With
+    /// `--resume`, skips the build and resumes a pending notarization
+    /// instead (Developer-ID only). With `--skip-notarization`, stops after
+    /// packaging the DMG/pkg, before notarization/upload.
     pub fn release(&mut self) -> Result<()> {
         if let Some(ref uuid_hint) = self.resume {
             return self.resume_notarization(uuid_hint);
         }
 
         if !self.skip_notarization {
-            self.preflight_credentials()?;
+            if self.mas {
+                self.preflight_mas_credentials()?;
+            } else {
+                self.preflight_credentials()?;
+            }
         }
         self.clean()?;
         let bin_dir = self.build_binary()?;
@@ -336,6 +375,9 @@ impl MacosBuilder {
         let app_bundle = self.assemble_bundle(&host_binary)?;
         self.embed_libraries(&app_bundle)?;
         self.assemble_extensions(&bin_dir)?;
+        if self.mas {
+            self.apply_mas_overrides()?;
+        }
         // Held through both `sign` and the DMG signing in `package_dmg`, the
         // only steps that need it. Dropped at the end of this function, which
         // tears the temporary keychain back down.
@@ -344,31 +386,49 @@ impl MacosBuilder {
             keychain
         });
         self.sign()?;
-        self.package_dmg()?;
 
-        if self.skip_notarization {
-            if !self.dry_run {
-                if let Some(parent) = self.paths.dmg.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::rename(&self.paths.strudel_temp_dmg, &self.paths.dmg)?;
+        let artifact_path = if self.mas {
+            self.package_pkg()?;
+            if !self.skip_notarization {
+                self.upload_pkg()?;
             }
+            self.paths.pkg.clone()
         } else {
-            self.notarize()?;
-        }
+            self.package_dmg()?;
+            if self.skip_notarization {
+                if !self.dry_run {
+                    if let Some(parent) = self.paths.dmg.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::rename(&self.paths.strudel_temp_dmg, &self.paths.dmg)?;
+                }
+            } else {
+                self.notarize()?;
+            }
+            self.paths.dmg.clone()
+        };
 
         println!();
         let app_bundle_path = cformat!("<cyan>{}</cyan>", app_bundle.display());
-        let dmg_path = cformat!("<cyan>{}</cyan>", self.paths.dmg.display());
-        let msg = formatdoc! {r#"
+        let artifact_label = if self.mas {
+            "Pkg:        "
+        } else {
+            "DMG:        "
+        };
+        let artifact_path_str = cformat!("<cyan>{}</cyan>", artifact_path.display());
+        let msg = formatdoc! {"
             App bundle: {app_bundle_path}
-            DMG:        {dmg_path}
-        "#};
+            {artifact_label}{artifact_path_str}
+        "};
         if self.dry_run {
             cprintln!("<dim>[dry-run]</dim> Dry run complete. Artifacts would be at:");
             println!("{msg}");
             if !self.skip_notarization {
-                let problems = self.credential_problems();
+                let problems = if self.mas {
+                    self.mas_credential_problems()
+                } else {
+                    self.credential_problems()
+                };
                 if !problems.is_empty() {
                     println!();
                     cprintln!("<red>WARNING:</red> Credential problems:");
@@ -378,7 +438,9 @@ impl MacosBuilder {
                 }
             }
         } else if self.skip_notarization {
-            cprintln!("<green>Done!</green> DMG built (notarization skipped):");
+            let artifact_kind = if self.mas { "pkg" } else { "DMG" };
+            let verb = if self.mas { "upload" } else { "notarization" };
+            cprintln!("<green>Done!</green> {artifact_kind} built ({verb} skipped):");
             println!("{msg}");
         } else {
             cprintln!("<green>Done!</green> Distribution artifacts:");

@@ -61,6 +61,7 @@ impl RunCmd {
                     None,
                     false,
                     false,
+                    false,
                 )?;
                 if self.unsigned {
                     builder.bundle()

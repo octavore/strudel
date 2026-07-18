@@ -24,9 +24,15 @@ pub(crate) struct ReleaseCmd {
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     resume: Option<String>,
 
-    /// Build and package the DMG without submitting for notarization
+    /// Build the DMG/pkg without submitting for notarization/upload
     #[arg(long)]
     skip_notarization: bool,
+
+    /// Release to the Mac App Store: sign with Apple Distribution + Installer
+    /// certs, package a .pkg, and upload via altool instead of DMG +
+    /// notarization. See `strudel help app-store`.
+    #[arg(long)]
+    mas: bool,
 
     /// Copy the built app into /Applications after a successful release
     #[arg(long)]
@@ -43,6 +49,12 @@ pub(crate) struct ReleaseCmd {
 
 impl ReleaseCmd {
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
+        if self.mas && self.resume.is_some() {
+            bail!(
+                "`--resume` has no Mac App Store equivalent: altool upload isn't a resumable \
+                 async submission the way notarization is."
+            );
+        }
         let project = config::load_config(config)?;
         let targets = all_or_named(&project, self.target.as_deref())?;
         if self.resume.is_some() && targets.len() > 1 {
@@ -61,6 +73,7 @@ impl ReleaseCmd {
                     false,
                     self.resume.clone(),
                     self.skip_notarization,
+                    self.mas,
                     self.ci,
                 )?;
                 builder.release()?;

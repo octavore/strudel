@@ -259,6 +259,17 @@ fn resolve_target(
         .map(|ext| ext.resolve(config_dir))
         .collect::<Result<Vec<_>>>()?;
 
+    let mas_provisioning_profile = build
+        .mas
+        .as_ref()
+        .and_then(|m| m.provisioning_profile.clone())
+        .map(|p| resolve_to(config_dir, p));
+    let mas_entitlements_json_path = build
+        .mas
+        .as_ref()
+        .and_then(|m| m.entitlements_json_path.clone())
+        .map(|p| resolve_path(config_dir, p));
+
     // Secrets: environment only. These are never deserialized from the file.
     let apple_certificate: SecretString = std::env::var("APPLE_CERTIFICATE")
         .unwrap_or_default()
@@ -334,6 +345,14 @@ fn resolve_target(
             .or_else(|| global.notarize_api_key_path.clone()),
         apple_certificate,
         apple_certificate_password,
+        mas_sign_identity: apple.mas.as_ref().and_then(|m| m.identity.clone()),
+        mas_installer_identity: apple
+            .mas
+            .as_ref()
+            .and_then(|m| m.installer_identity.clone()),
+        mas_app_apple_id: apple.mas.as_ref().and_then(|m| m.app_apple_id.clone()),
+        mas_provisioning_profile,
+        mas_entitlements_json_path,
         notarize_timeout: apple.notarize_timeout.unwrap_or(600),
         build_env: build.build_env.unwrap_or_default(),
         embed_libs: build
@@ -380,6 +399,21 @@ pub struct AppleSection {
     pub api_key: Option<String>,
     pub api_key_path: Option<PathBuf>,
     pub notarize_timeout: Option<u64>,
+    pub mas: Option<MasAppleSection>,
+}
+
+/// `[apple.mas]` Mac App Store channel identity, selected by `strudel release
+/// --mas`. Separate from the flat `[apple]` fields (which always mean the
+/// Developer-ID channel): App Store distribution needs an Apple Distribution
+/// signing identity plus a separate Installer certificate for `productbuild`.
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MasAppleSection {
+    pub identity: Option<String>,
+    pub installer_identity: Option<String>,
+    /// Numeric App Store Connect app id (Apple ID), shown under App
+    /// Information. Required to upload a `.pkg` with `altool`.
+    pub app_apple_id: Option<String>,
 }
 
 /// App Store Connect API key credentials for `notarytool`.
@@ -588,6 +622,76 @@ mod tests {
         assert_eq!(single.apple.api_key.as_deref(), Some("KEYID123"));
         assert_eq!(single.apple.notarize_timeout, Some(1200));
         assert!(single.dmg.is_some(), "FULL fixture includes [dmg]");
+
+        let mas = single
+            .apple
+            .mas
+            .as_ref()
+            .expect("FULL fixture has [apple.mas]");
+        assert_eq!(
+            mas.identity.as_deref(),
+            Some("Apple Distribution: Me (TEAM123456)")
+        );
+        assert_eq!(
+            mas.installer_identity.as_deref(),
+            Some("3rd Party Mac Developer Installer: Me (TEAM123456)")
+        );
+        assert_eq!(mas.app_apple_id.as_deref(), Some("1234567890"));
+
+        let build_mas = single
+            .build
+            .mas
+            .as_ref()
+            .expect("FULL fixture has [build.mas]");
+        assert_eq!(
+            build_mas.provisioning_profile,
+            Some(PathBuf::from("mas.provisionprofile"))
+        );
+        assert_eq!(
+            build_mas.entitlements_json_path,
+            Some(PathBuf::from("mas-ent.json"))
+        );
+    }
+
+    #[test]
+    fn mas_fields_resolve_relative_to_config_dir() {
+        let cfg = parse_build_config(FULL).unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(
+            r.mas_sign_identity.as_deref(),
+            Some("Apple Distribution: Me (TEAM123456)")
+        );
+        assert_eq!(
+            r.mas_installer_identity.as_deref(),
+            Some("3rd Party Mac Developer Installer: Me (TEAM123456)")
+        );
+        assert_eq!(r.mas_app_apple_id.as_deref(), Some("1234567890"));
+        assert_eq!(
+            r.mas_provisioning_profile,
+            Some(PathBuf::from("/cfg/mas.provisionprofile"))
+        );
+        assert_eq!(
+            r.mas_entitlements_json_path,
+            Some(PathBuf::from("/cfg/mas-ent.json"))
+        );
+    }
+
+    #[test]
+    fn mas_fields_absent_resolve_to_none() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert!(r.mas_sign_identity.is_none());
+        assert!(r.mas_installer_identity.is_none());
+        assert!(r.mas_app_apple_id.is_none());
+        assert!(r.mas_provisioning_profile.is_none());
+        assert!(r.mas_entitlements_json_path.is_none());
     }
 
     #[test]
