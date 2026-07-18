@@ -42,7 +42,7 @@ use crate::cli::status::StatusCmd;
 )]
 pub struct Cli {
     /// Path to strudel.toml config file
-    #[arg(long, default_value = "strudel.toml")]
+    #[arg(long, global = true, default_value = "strudel.toml")]
     config: PathBuf,
 
     #[command(subcommand)]
