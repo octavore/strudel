@@ -57,3 +57,13 @@ jobs:
           draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
+
+      - name: Notify brrr
+        env:
+          BRRR_API_SECRET: ${{ secrets.BRRR_API_SECRET }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          curl -X POST "https://api.brrr.now/v1/send" \
+            -H "Authorization: Bearer $BRRR_API_SECRET" \
+            -d "🚀 $REPO $TAG built"
