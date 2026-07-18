@@ -1,12 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use color_print::cprintln;
 use serde_json::{Map, Value, json};
 
 use crate::builder::ios::IosTarget;
-use crate::builder::{IosBuilder, step};
+use crate::builder::{IosBuilder, read_partial_info_plist, step};
 use crate::config::ResolvedIcon;
 use crate::icon::{ios, render};
 use crate::shell::ShellCommand;
@@ -298,25 +298,6 @@ impl IosBuilder {
             PathBuf::from(out.trim())
         };
         Ok(dir)
-    }
-}
-
-/// Read `actool`'s `--output-partial-info-plist` output (an XML plist
-/// fragment, typically just `CFBundleIconName`/`CFBundleIcons`) and decode
-/// it straight into JSON via `plist`'s serde support, so it can be merged
-/// into the bundle's Info.plist JSON object - consistent with how the rest
-/// of the codebase reads plists (`plist::Value::from_reader` in
-/// `builder::macos::validators`/`builder::ios::profile`) rather than
-/// shelling out to `plutil`.
-fn read_partial_info_plist(path: &Path) -> Result<Map<String, Value>> {
-    let value: Value = plist::from_file(path)
-        .with_context(|| format!("Failed to read partial Info.plist at {}", path.display()))?;
-    match value {
-        Value::Object(map) => Ok(map),
-        _ => bail!(
-            "Partial Info.plist at {} is not a dictionary",
-            path.display()
-        ),
     }
 }
 
