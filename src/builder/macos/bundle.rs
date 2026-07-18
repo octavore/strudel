@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use serde_json::{Value, json};
 
-use crate::builder::{MacosBuilder, step};
+use crate::builder::{MacosBuilder, read_partial_info_plist, step};
 use crate::config::{ExtensionKind, ResolvedExtension, ResolvedIcon};
 use crate::icon::icns;
 use crate::icon::render::render_to_png;
@@ -46,12 +46,32 @@ impl MacosBuilder {
             ]),
         )?;
 
-        // set CFBundleIconFile if a bundle icon is configured
-        // todo: also support CFBundleIconName, the newer format.
-        // see https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+        // An Icon Composer `.icon` bundle is compiled straight through
+        // `actool`, which emits `CFBundleIconName` (the modern key) instead
+        // of the flat `CFBundleIconFile`/`.icns` this builder otherwise
+        // produces.
         if let Some(icon) = &self.cfg.icon {
-            self.write_icon(icon, &app_bundle_resources_dir.join("AppIcon.icns"))?;
-            info_json.insert("CFBundleIconFile".to_string(), json!("AppIcon.icns"));
+            let icon_plist_keys = if let ResolvedIcon::Path { path, .. } = icon
+                && path.extension().and_then(|e| e.to_str()) == Some("icon")
+            {
+                // Both `.icon` and `assets_dir` compile into the same
+                // `Contents/Resources/Assets.car`, so having both is an error.
+                if let Some(assets_dir) = &self.macos.assets_dir {
+                    bail!(
+                        "`[build.icon]` is an Icon Composer bundle ({}), but `[macos] assets_dir` is also set ({}), which is a conflict because they both compile into Contents/Resources/Assets.car. If possible, move the `.icon` bundle into the assets_dir catalog instead of setting both.",
+                        path.display(),
+                        assets_dir.display()
+                    );
+                }
+                self.compile_macos_icon(path, &app_bundle_resources_dir)?
+            } else {
+                self.write_icon(icon, &app_bundle_resources_dir.join("AppIcon.icns"))?;
+                serde_json::Map::from_iter([(
+                    "CFBundleIconFile".to_string(),
+                    json!("AppIcon.icns"),
+                )])
+            };
+            info_json.extend(icon_plist_keys);
         }
 
         // pipe JSON into plutil to produce Info.plist
@@ -141,6 +161,71 @@ impl MacosBuilder {
 
         let _ = fs::remove_file(&partial_plist_path);
         Ok(())
+    }
+
+    /// Compile an Icon Composer `.icon` bundle (configured via `[build.icon]`)
+    /// directly into `Contents/Resources/Assets.car` via `xcrun actool`,
+    /// mirroring [`Self::compile_macos_assets`]. Unlike a flat png/icns, a
+    /// `.icon` bundle is handed to `actool` as-is - it's already a complete
+    /// asset-catalog-style icon definition, not something strudel composites.
+    /// Returns the `CFBundleIconName` key from actool's partial Info.plist,
+    /// which the caller must merge into the bundle's real Info.plist.
+    fn compile_macos_icon(
+        &self,
+        icon_path: &Path,
+        resources_dir: &Path,
+    ) -> Result<serde_json::Map<String, Value>> {
+        let icon_name = icon_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .with_context(|| {
+                format!(
+                    "Icon Composer bundle has no file name: {}",
+                    icon_path.display()
+                )
+            })?;
+
+        if self.dry_run {
+            cprintln!(
+                "<dim>[dry-run]</dim> compile icon <blue>{}</blue> -> <blue>{}</blue> via actool",
+                icon_path.display(),
+                resources_dir.display()
+            );
+            return Ok(serde_json::Map::new());
+        }
+
+        step("Compiling app icon via actool...");
+        let deployment_target = self.macos_deployment_target()?;
+        let icon_str = icon_path
+            .to_str()
+            .with_context(|| format!("Invalid icon path: {}", icon_path.display()))?;
+        let resources_str = resources_dir.to_str().context(
+            "Contents/Resources path is not valid UTF-8, cannot pass to `actool --compile`",
+        )?;
+        let partial_plist_path = resources_dir
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("actool-icon-partial-info.plist");
+        let partial_plist_str = partial_plist_path.to_str().unwrap();
+
+        self.sh.run(ShellCommand::new("xcrun").args([
+            "actool",
+            icon_str,
+            "--compile",
+            resources_str,
+            "--platform",
+            "macosx",
+            "--minimum-deployment-target",
+            &deployment_target,
+            "--app-icon",
+            icon_name,
+            "--output-partial-info-plist",
+            partial_plist_str,
+        ]))?;
+
+        let result = read_partial_info_plist(&partial_plist_path);
+        let _ = fs::remove_file(&partial_plist_path);
+        result
     }
 
     /// The macOS deployment target `actool` should compile assets for, read

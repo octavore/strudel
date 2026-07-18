@@ -83,6 +83,28 @@ fn step(msg: &str) {
     cprintln!("\n<green>==>> {msg}</green>");
 }
 
+/// Read `actool`'s `--output-partial-info-plist` output (an XML plist
+/// fragment, typically just `CFBundleIconName`/`CFBundleIcons`) and decode
+/// it straight into JSON via `plist`'s serde support, so it can be merged
+/// into the bundle's Info.plist JSON object - consistent with how the rest
+/// of the codebase reads plists (`plist::Value::from_reader` in
+/// `builder::macos::validators`/`builder::ios::profile`) rather than
+/// shelling out to `plutil`. Shared by the macOS and iOS bundlers, both of
+/// which compile icons/asset catalogs via `actool`.
+pub(crate) fn read_partial_info_plist(
+    path: &Path,
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    let value: serde_json::Value = plist::from_file(path)
+        .with_context(|| format!("Failed to read partial Info.plist at {}", path.display()))?;
+    match value {
+        serde_json::Value::Object(map) => Ok(map),
+        _ => bail!(
+            "Partial Info.plist at {} is not a dictionary",
+            path.display()
+        ),
+    }
+}
+
 impl BuilderCore {
     fn new(cfg: ResolvedConfig, dry_run: bool, debug: bool) -> Self {
         BuilderCore {
