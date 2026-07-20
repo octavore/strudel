@@ -68,7 +68,13 @@ impl AppStoreClient {
     pub fn from_config(cfg: &ResolvedConfig) -> Result<Self> {
         let key_path = cfg.apple_api_key_path.as_ref().context(indoc! {"
             App Store Connect API credentials required for `app_store_connect` provisioning profile management.
-            Please set your API key id, API key path, and API issuer in your environment or strudel.toml.
+            Please set your API key id, API key path, and API issuer, either as environment variables:
+
+              APPLE_API_KEY        key ID (e.g. \"2X9R4HXF34\")
+              APPLE_API_KEY_PATH   path to your .p8 key file
+              APPLE_API_ISSUER     issuer UUID from App Store Connect
+
+            or under [apple] in strudel.toml. Run `strudel help notarize` for details.
 
             Alternatively, set [ios] provisioning = \"free\" in strudel.toml and run `strudel login`
             to use a plain Apple ID without a paid developer account.
