@@ -10,11 +10,13 @@
 //! `self.paths`, etc) and shared helpers are accessible from both. The
 //! work is split across submodules:
 //!
+//! - [`bundle`] bundle-layout helpers shared by both platforms
 //! - [`fs`] dry-run-aware filesystem helpers (on [`BuilderCore`])
 //! - [`keychain`] signing-credential preflight and certificate import
 //! - [`macos`] the macOS pipeline stages (todo: move MacOSBuilder here)
 //! - [`ios`] the iOS pipeline stages (todo: move IosBuilder here)
 
+mod bundle;
 mod fs;
 mod ios;
 pub(crate) mod keychain;
@@ -24,6 +26,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+pub(crate) use bundle::is_framework;
 use color_print::{cformat, cprintln};
 use indoc::formatdoc;
 pub(crate) use ios::decode_profile;
@@ -79,7 +82,7 @@ impl Deref for IosBuilder {
 }
 
 /// Print a green progress header for a build step.
-fn step(msg: &str) {
+pub(crate) fn step(msg: &str) {
     cprintln!("\n<green>==>> {msg}</green>");
 }
 

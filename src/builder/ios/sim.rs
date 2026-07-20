@@ -6,7 +6,7 @@ use color_print::cprintln;
 use serde::Deserialize;
 
 use crate::builder::ios::IosTarget;
-use crate::builder::{IosBuilder, step};
+use crate::builder::{IosBuilder, is_framework, step};
 use crate::shell::ShellCommand;
 
 #[derive(Deserialize)]
@@ -28,65 +28,7 @@ impl IosBuilder {
     /// only) and `strudel run --sim` (assembly, then ad-hoc sign, install, and
     /// launch).
     fn build_sim_bundle(&self) -> Result<PathBuf> {
-        let ios_settings = &self.ios;
-        if !self.cfg.extensions.is_empty() {
-            cprintln!(
-                "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
-                 [[extensions]] in this target will be ignored."
-            );
-        }
-        let target = &self.cfg.target_name;
-        let config_flag = if self.debug { "debug" } else { "release" };
-        let deployment = &ios_settings.deployment_target;
-
-        let host_arch = match std::env::consts::ARCH {
-            "aarch64" => "arm64",
-            other => other,
-        };
-        let triple = format!("{host_arch}-apple-ios{deployment}-simulator");
-
-        let sdk_path = self
-            .sh
-            .run(&["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"])
-            .map(|s| {
-                if s.is_empty() {
-                    "<iphonesimulator-sdk>".into()
-                } else {
-                    s
-                }
-            })?;
-        let swift = self
-            .sh
-            .run(&["xcrun", "-f", "swift"])
-            .map(|s| if s.is_empty() { "swift".into() } else { s })?;
-
-        step("Building for iOS Simulator...");
-        let source = self.cfg.source_dir.to_str().unwrap();
-        self.sh.run_streamed_env(
-            ShellCommand::new(&swift)
-                .args([
-                    "build",
-                    "-c",
-                    config_flag,
-                    "--triple",
-                    &triple,
-                    "--sdk",
-                    &sdk_path,
-                    "--package-path",
-                    source,
-                ])
-                .envs(&self.cfg.build_env),
-        )?;
-
-        let bin_dir = self.ios_bin_dir(&swift, config_flag, &triple, &sdk_path)?;
-        let binary = self.find_binary_in(&bin_dir, target)?;
-
-        step("Assembling iOS Simulator bundle...");
-        let bundle_dir = self.paths.build_dir.join("ios-sim");
-        let app_bundle = bundle_dir.join(format!("{target}.app"));
-        self.assemble_ios_bundle(&binary, &app_bundle, IosTarget::Simulator)?;
-
-        Ok(app_bundle)
+        self.compile_and_assemble(IosTarget::Simulator)
     }
 
     /// `strudel build` for an iOS target: assemble a `.app` for the Simulator
@@ -104,6 +46,26 @@ impl IosBuilder {
         let ios_settings = &self.ios;
         let sim_name = sim_override.unwrap_or(&ios_settings.simulator);
         let app_bundle = self.build_sim_bundle()?;
+
+        if !self.cfg.embed_libs.is_empty() {
+            step("Ad-hoc signing embedded libraries...");
+            let frameworks_dir = app_bundle.join("Frameworks");
+            for lib_path in &self.cfg.embed_libs {
+                if let Some(file_name) = lib_path.file_name() {
+                    let dylib = frameworks_dir.join(file_name);
+                    let mut cmd = ShellCommand::new("codesign").args([
+                        "--force",
+                        "--sign",
+                        "-",
+                        "--timestamp=none",
+                    ]);
+                    if is_framework(lib_path) {
+                        cmd = cmd.arg("--deep");
+                    }
+                    self.sh.run(cmd.arg(dylib.to_str().unwrap()))?;
+                }
+            }
+        }
 
         step("Ad-hoc signing simulator bundle...");
         self.sh.run(

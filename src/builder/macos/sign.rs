@@ -5,8 +5,7 @@ use std::fs;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use super::steps::is_framework;
-use crate::builder::{MacosBuilder, step};
+use crate::builder::{MacosBuilder, is_framework, step};
 use crate::config::ResolvedExtension;
 use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;

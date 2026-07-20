@@ -90,82 +90,10 @@ impl MacosBuilder {
     /// rpath, so the bundle is self-contained. No-op when `cfg.embed_libs`
     /// is empty.
     pub fn embed_libraries(&self, app_bundle: &Path) -> Result<()> {
-        if self.cfg.embed_libs.is_empty() {
-            return Ok(());
-        }
-
-        step("Embedding libraries and frameworks...");
-
-        let frameworks_dir = app_bundle.join("Contents/Frameworks");
-        self.create_dir(&frameworks_dir)?;
-
-        let executable = app_bundle.join("Contents/MacOS").join(&self.cfg.app_name);
-        let executable_str = executable
-            .to_str()
-            .context("embed: Invalid executable path.")?;
-
-        for lib_path in &self.cfg.embed_libs {
-            let file_name = lib_path.file_name().with_context(|| {
-                format!("embed_libs entry has no filename: {}", lib_path.display())
-            })?;
-            let dest = frameworks_dir.join(file_name);
-
-            if is_framework(lib_path) {
-                // `.framework` bundles (e.g. SwiftPM binaryTargets like
-                // Sparkle) are directory bundles already linked with an
-                // @rpath install name; copy the tree (via `ditto`, which
-                // preserves the Versions/... symlink structure) and skip
-                // the install-name rewrite done below for flat dylibs.
-                self.copy_tree(lib_path, &dest)?;
-                continue;
-            }
-
-            let file_name_str = file_name.to_str().context("embed: Invalid file name.")?;
-            let rpath_entry = format!("@rpath/{file_name_str}");
-            self.copy_file(lib_path, &dest)?;
-
-            // Find the original install name as seen by the executable.
-            let otool_out = self.sh.run(&["otool", "-L", executable_str])?;
-            let orig_install_name = if self.dry_run {
-                // In dry-run we can't run otool; use the filename as a stand-in.
-                format!("<otool:{file_name_str}>")
-            } else {
-                otool_out
-                    .lines()
-                    .skip(1)
-                    .map(|l| l.split_whitespace().next().unwrap_or(""))
-                    .find(|name| {
-                        Path::new(name)
-                            .file_name()
-                            .map(|n| n == file_name)
-                            .unwrap_or(false)
-                    })
-                    .map(|s| s.to_string())
-                    .with_context(|| {
-                        format!(
-                            "Could not find {file_name_str} in `otool -L {executable_str}`.\n\
-                             Ensure your Package.swift links this library."
-                        )
-                    })?
-            };
-
-            // Update the dylib (at `dest_str`): change install name to @rpath/{dylib_name}
-            let dest_str = dest.to_str().context("embed: Invalid destination path.")?;
-            self.sh
-                .run(&["install_name_tool", "-id", &rpath_entry, dest_str])?;
-
-            // Updated the executable (at `executable_str`): change its reference to the
-            // dylib from the `orig_install_name` to `@rpath/{dylib_name}``.
-            self.sh.run(&[
-                "install_name_tool",
-                "-change",
-                &orig_install_name,
-                &rpath_entry,
-                executable_str,
-            ])?;
-        }
-
-        Ok(())
+        self.core.embed_libraries(
+            &app_bundle.join("Contents/Frameworks"),
+            &app_bundle.join("Contents/MacOS").join(&self.cfg.app_name),
+        )
     }
 
     pub fn package_dmg(&self) -> Result<()> {
@@ -316,10 +244,4 @@ impl MacosBuilder {
 
         self.poll_notarization(&uuid, &pending, &PathBuf::from(&state.dmg_dest), &auth_args)
     }
-}
-
-/// Whether an `embed_libs` entry is a `.framework` directory bundle rather
-/// than a flat dylib.
-pub(super) fn is_framework(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()) == Some("framework")
 }

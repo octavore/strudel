@@ -9,9 +9,8 @@ use crate::apple::provisioning::{self, ensure_keychain_ready};
 use crate::builder::ios::IosTarget;
 use crate::builder::ios::profile::decode_profile;
 use crate::builder::keychain::parse_identity_line;
-use crate::builder::{IosBuilder, step};
+use crate::builder::{IosBuilder, is_framework, step};
 use crate::config::IosProvisioningBackend;
-use crate::shell::ShellCommand;
 
 impl IosBuilder {
     /// Build for one or more connected iOS devices, then install and launch.
@@ -22,57 +21,7 @@ impl IosBuilder {
     pub fn device(&self, device_selectors: &[String]) -> Result<()> {
         let ios_settings = &self.ios;
 
-        if !self.cfg.extensions.is_empty() {
-            cprintln!(
-                "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
-                 [[extensions]] in this target will be ignored."
-            );
-        }
-        let target = &self.cfg.target_name;
-        let config_flag = if self.debug { "debug" } else { "release" };
-        let deployment = &ios_settings.deployment_target;
-        let triple = format!("arm64-apple-ios{deployment}");
-
-        let sdk_path = self
-            .sh
-            .run(&["xcrun", "--sdk", "iphoneos", "--show-sdk-path"])
-            .map(|s| {
-                if s.is_empty() {
-                    "<iphoneos-sdk>".into()
-                } else {
-                    s
-                }
-            })?;
-        let swift = self
-            .sh
-            .run(&["xcrun", "-f", "swift"])
-            .map(|s| if s.is_empty() { "swift".into() } else { s })?;
-
-        step("Building for iOS device...");
-        let source = self.cfg.source_dir.to_str().unwrap();
-        self.sh.run_streamed_env(
-            ShellCommand::new(&swift)
-                .args([
-                    "build",
-                    "-c",
-                    config_flag,
-                    "--triple",
-                    &triple,
-                    "--sdk",
-                    &sdk_path,
-                    "--package-path",
-                    source,
-                ])
-                .envs(&self.cfg.build_env),
-        )?;
-
-        let bin_dir = self.ios_bin_dir(&swift, config_flag, &triple, &sdk_path)?;
-        let binary = self.find_binary_in(&bin_dir, target)?;
-
-        step("Assembling iOS device bundle...");
-        let bundle_dir = self.paths.build_dir.join("ios-device");
-        let app_bundle = bundle_dir.join(format!("{target}.app"));
-        self.assemble_ios_bundle(&binary, &app_bundle, IosTarget::Device)?;
+        let app_bundle = self.compile_and_assemble(IosTarget::Device)?;
 
         // Resolve target devices (returns UDIDs).
         let target_udids = self.resolve_target_udids(device_selectors)?;
@@ -187,6 +136,26 @@ impl IosBuilder {
             .context("Failed to write entitlements plist")?;
         let ent_str = ent_plist_path.to_str().unwrap();
         let bundle_str = app_bundle.to_str().unwrap();
+
+        if !self.cfg.embed_libs.is_empty() {
+            step(&format!("Signing embedded libraries ({identity})..."));
+            let frameworks_dir = app_bundle.join("Frameworks");
+            for lib_path in &self.cfg.embed_libs {
+                if let Some(file_name) = lib_path.file_name() {
+                    let dylib = frameworks_dir.join(file_name);
+                    let dylib_str = dylib.to_str().unwrap();
+                    let mut args = vec!["--force", "--sign", identity];
+                    if is_framework(lib_path) {
+                        args.push("--deep");
+                    }
+                    args.push(dylib_str);
+                    std::process::Command::new("codesign")
+                        .args(&args)
+                        .status()
+                        .context("Failed to run codesign")?;
+                }
+            }
+        }
 
         std::process::Command::new("codesign")
             .args([

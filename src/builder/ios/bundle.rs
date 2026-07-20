@@ -31,6 +31,32 @@ impl IosBuilder {
 
         self.copy_file(binary, &app_bundle.join(&self.cfg.target_name))?;
 
+        // Copy user-configured resources_dir contents into the bundle root
+        // (iOS `.app` bundles are flat, unlike macOS's Contents/Resources/).
+        if let Some(rdir) = &self.cfg.resources_dir {
+            step("Copying resource directory...");
+            self.copy_tree(rdir, app_bundle)?;
+        }
+
+        // Copy individual user-configured resource files and folders into
+        // the bundle root.
+        if !self.cfg.resources.is_empty() {
+            step("Copying resources...");
+            for resource in &self.cfg.resources {
+                let name = resource.file_name().with_context(|| {
+                    format!("Resource path has no filename: {}", resource.display())
+                })?;
+                let dest = app_bundle.join(name);
+                if resource.is_dir() {
+                    self.copy_tree(resource, &dest)?;
+                } else {
+                    self.copy_file(resource, &dest)?;
+                }
+            }
+        }
+
+        self.embed_ios_libraries(app_bundle)?;
+
         let mut info: Value = match &self.cfg.info_json_path {
             Some(path) => {
                 let s = fs::read_to_string(path)
@@ -106,6 +132,20 @@ impl IosBuilder {
         )?;
 
         Ok(())
+    }
+
+    /// Embed dynamic libraries and `.framework` bundles into `Frameworks/`
+    /// at the bundle root (iOS `.app` bundles are flat, so this sits next to
+    /// the executable rather than under `Contents/Frameworks` as on macOS),
+    /// fixing dylib install names so the bundle is self-contained. No-op
+    /// when `cfg.embed_libs` is empty. Signing embedded libraries is handled
+    /// separately, since iOS requires the same provisioning identity used
+    /// for the outer bundle.
+    fn embed_ios_libraries(&self, app_bundle: &Path) -> Result<()> {
+        self.core.embed_libraries(
+            &app_bundle.join("Frameworks"),
+            &app_bundle.join(&self.cfg.target_name),
+        )
     }
 
     fn compile_ios_assets(
