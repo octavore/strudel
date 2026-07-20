@@ -15,7 +15,7 @@ use crate::config::global::GlobalConfig;
 use crate::config::resolved::{
     ResolvedCopy, ResolvedDmg, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
 };
-use crate::config::utils::{env_or_global, resolve_path, resolve_to};
+use crate::config::utils::{env_or_global, is_bare_name, resolve_path, resolve_to};
 use crate::config::{IosProvisioningBackend, ResolvedConfig};
 
 /// The on-disk `strudel.toml`. Single-target configs use the flat form
@@ -336,11 +336,22 @@ fn resolve_target(
         apple_certificate_password,
         notarize_timeout: apple.notarize_timeout.unwrap_or(600),
         build_env: build.build_env.unwrap_or_default(),
+        // A bare name (no `/`) is a triple-dependent artifact: it's resolved
+        // against the current build's `.build/<triple>/release/` output dir
+        // at build time, not here, so switching build destinations (e.g.
+        // simulator to device) doesn't require separate paths. An entry
+        // containing `/` is a literal path, resolved as usual.
         embed_libs: build
             .embed_libs
             .unwrap_or_default()
             .into_iter()
-            .map(|p| resolve_to(config_dir, p))
+            .map(|p| {
+                if is_bare_name(&p) {
+                    p
+                } else {
+                    resolve_to(config_dir, p)
+                }
+            })
             .collect(),
         provisioning_profile: build
             .provisioning_profile
@@ -634,6 +645,29 @@ mod tests {
         assert_eq!(
             r.build_env.get("PKG_CONFIG_PATH").map(String::as_str),
             Some("/opt/homebrew/lib/pkgconfig")
+        );
+    }
+
+    #[test]
+    fn embed_libs_bare_name_is_left_unresolved_but_path_entry_resolves() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+
+            [build]
+            embed_libs = ["libFoo.dylib", "Sparkle.framework", "vendor/libBar.dylib"]
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(
+            r.embed_libs,
+            vec![
+                PathBuf::from("libFoo.dylib"),
+                PathBuf::from("Sparkle.framework"),
+                PathBuf::from("/cfg/vendor/libBar.dylib"),
+            ]
         );
     }
 

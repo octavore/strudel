@@ -249,7 +249,7 @@ impl MacosBuilder {
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
         let app_bundle = self.assemble_bundle(&host_binary)?;
-        self.embed_libraries(&app_bundle)?;
+        self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
         println!();
         cprintln!("<green>Done! App bundle:</green>");
@@ -267,7 +267,7 @@ impl MacosBuilder {
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
         let app_bundle = self.assemble_bundle(&host_binary)?;
-        self.embed_libraries(&app_bundle)?;
+        self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
         // No-op unless APPLE_CERTIFICATE is set; supports signing with an
         // imported Developer ID identity here too, but ad-hoc needs nothing.
@@ -359,7 +359,7 @@ impl MacosBuilder {
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
         let app_bundle = self.assemble_bundle(&host_binary)?;
-        self.embed_libraries(&app_bundle)?;
+        self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
         // Held through both `sign` and the DMG signing in `package_dmg`, the
         // only steps that need it. Dropped at the end of this function, which

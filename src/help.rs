@@ -264,7 +264,7 @@ fn print_config() {
         entitlements_json_path = "entitlements.json"       # JSON entitlements
         archs                  = ["arm64", "x86_64"]       # default: host arch only
         target_name            = "MyApp"                   # Swift executableTarget; default: app.name
-        embed_libs             = ["path/to/libFoo.dylib"]  # dylibs/.frameworks copied into Contents/Frameworks
+        embed_libs             = ["libFoo.dylib"]           # dylibs/.frameworks; see `strudel help dylibs`
         provisioning_profile   = "MyApp.provisionprofile"  # required for some entitlements
 
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
@@ -773,10 +773,22 @@ fn print_dylibs() {
         binaryTarget) that must ship inside the app bundle:
         {ANSI_PURPLE}
         [build]
-        embed_libs = ["path/to/libFoo.dylib", "path/to/Sparkle.framework"]
+        embed_libs = ["libFoo.dylib", "Sparkle.framework", "vendor/libBar.dylib"]
         {ANSI_RESET}
-        Paths are relative to the config file's directory unless absolute. strudel tells
-        dylibs and frameworks apart by extension (.framework vs. everything else).
+        strudel tells dylibs and frameworks apart by extension (.framework vs.
+        everything else).
+
+        ## Resolving entries
+
+        A bare name (no `/`, e.g. `libFoo.dylib`) is triple-dependent: strudel resolves
+        it against whichever `.build/<triple>/release/` directory it just built for
+        this invocation. This is what you want for anything swift build produces or
+        links per-platform, since it stays correct across build destinations (e.g.
+        switching between iOS simulator and device) without editing the list.
+
+        An entry containing `/` is a literal path, relative to the config file's
+        directory unless absolute, used as-is - for a vendored dylib or framework
+        that lives outside the build output and is the same for every triple.
 
         ## dylibs
 

@@ -20,6 +20,7 @@ impl IosBuilder {
         binary: &Path,
         app_bundle: &Path,
         target: IosTarget,
+        bin_dir: &Path,
     ) -> Result<()> {
         let ios_settings = &self.ios;
         if !self.dry_run {
@@ -55,7 +56,7 @@ impl IosBuilder {
             }
         }
 
-        self.embed_ios_libraries(app_bundle)?;
+        self.embed_ios_libraries(app_bundle, bin_dir)?;
 
         let mut info: Value = match &self.cfg.info_json_path {
             Some(path) => {
@@ -141,10 +142,11 @@ impl IosBuilder {
     /// when `cfg.embed_libs` is empty. Signing embedded libraries is handled
     /// separately, since iOS requires the same provisioning identity used
     /// for the outer bundle.
-    fn embed_ios_libraries(&self, app_bundle: &Path) -> Result<()> {
+    fn embed_ios_libraries(&self, app_bundle: &Path, bin_dir: &Path) -> Result<()> {
         self.core.embed_libraries(
             &app_bundle.join("Frameworks"),
             &app_bundle.join(&self.cfg.target_name),
+            bin_dir,
         )
     }
 

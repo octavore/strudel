@@ -4,7 +4,7 @@ mod extension;
 mod global;
 mod icon_section;
 mod resolved;
-mod utils;
+pub(crate) mod utils;
 
 #[cfg(test)]
 pub(crate) mod fixtures;

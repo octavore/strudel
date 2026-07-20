@@ -89,10 +89,11 @@ impl MacosBuilder {
     /// `Contents/Frameworks`, fix dylib install names and the executable's
     /// rpath, so the bundle is self-contained. No-op when `cfg.embed_libs`
     /// is empty.
-    pub fn embed_libraries(&self, app_bundle: &Path) -> Result<()> {
+    pub fn embed_libraries(&self, app_bundle: &Path, bin_dir: &Path) -> Result<()> {
         self.core.embed_libraries(
             &app_bundle.join("Contents/Frameworks"),
             &app_bundle.join("Contents/MacOS").join(&self.cfg.app_name),
+            bin_dir,
         )
     }
 

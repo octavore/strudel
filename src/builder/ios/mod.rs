@@ -115,7 +115,7 @@ impl IosBuilder {
         step(assemble_label);
         let bundle_dir = self.paths.build_dir.join(bundle_dir_name);
         let app_bundle = bundle_dir.join(format!("{target_name}.app"));
-        self.assemble_ios_bundle(&binary, &app_bundle, target)?;
+        self.assemble_ios_bundle(&binary, &app_bundle, target, &bin_dir)?;
 
         Ok(app_bundle)
     }
