@@ -73,6 +73,31 @@ pub struct BuildSection {
     pub resources_dir: Option<PathBuf>,
     /// Individual files or folders to copy into `Contents/Resources/`.
     pub resources: Option<Vec<PathBuf>>,
+
+    /// Arbitrary files or directories copied to a specific destination inside
+    /// the bundle, optionally signed (e.g. a helper binary placed outside
+    /// `Contents/Resources`/`Contents/Frameworks`).
+    pub copy: Option<Vec<CopySection>>,
+}
+
+/// One `[[build.copy]]` entry: an arbitrary file or directory copied into the
+/// bundle at a caller-chosen destination.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct CopySection {
+    /// Source file or directory, resolved relative to the config file's
+    /// directory. Copied in under its own file name (matching `resources`),
+    /// not renamed.
+    pub src: PathBuf,
+    /// Destination directory relative to the bundle root (e.g.
+    /// `"Contents/MacOS"` or `"Contents/Resources/tool"`), created if missing.
+    pub dest_dir: String,
+    /// Codesign the copied item before the outer bundle is sealed. Directories
+    /// are signed with `--deep` (they may contain nested code); files are
+    /// signed directly. Needed for executables or nested bundles placed
+    /// outside `embed_libs`/`resources`.
+    #[serde(default)]
+    pub sign: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]

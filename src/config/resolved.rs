@@ -201,6 +201,9 @@ pub struct ResolvedConfig {
     pub resources_dir: Option<PathBuf>,
     /// Individual files or folders to copy into `Contents/Resources/`.
     pub resources: Vec<PathBuf>,
+    /// Arbitrary files or directories copied to a caller-chosen destination
+    /// inside the bundle, optionally signed.
+    pub copy: Vec<ResolvedCopy>,
 
     pub target_platform: ResolvedTargetPlatform,
 
@@ -244,6 +247,16 @@ impl ResolvedConfig {
             ))
         }
     }
+}
+
+/// A [`crate::config::build_target::CopySection`] after path resolution.
+#[derive(Debug, Clone)]
+pub struct ResolvedCopy {
+    /// Absolute source path.
+    pub src: PathBuf,
+    /// Destination directory relative to the bundle root.
+    pub dest_dir: String,
+    pub sign: bool,
 }
 
 /// An [`ExtensionSection`] after path resolution and kind-specific validation.

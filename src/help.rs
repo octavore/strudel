@@ -29,6 +29,10 @@ pub(crate) const TOPICS: &[(&str, &str)] = &[
         "dylibs",
         "Embedding dynamic C libraries and .framework bundles in the bundle",
     ),
+    (
+        "copy",
+        "Copying arbitrary files/directories into the bundle, optionally signed",
+    ),
     ("universal", "Universal (fat) binaries for arm64 + x86_64"),
     ("ci", "CI/CD setup: GitHub Actions, secrets, keychain"),
     (
@@ -55,6 +59,7 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                 "entitlements" => print_entitlements(),
                 "extensions" | "extension" => print_extensions(),
                 "dylibs" | "dylib" | "frameworks" | "framework" => print_dylibs(),
+                "copy" => print_copy(),
                 "universal" => print_universal(),
                 "ci" => print_ci(),
                 "ios-device" | "ios_device" => print_ios_device(),
@@ -264,6 +269,15 @@ fn print_config() {
 
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
         resources              = ["Assets/logo.png"]       # individual files/folders to copy into Contents/Resources/
+        {ANSI_RESET}
+        ## [[build.copy]] optional, repeatable
+        # Arbitrary files/directories copied to a caller-chosen destination inside the
+        # bundle (e.g. a helper binary), optionally signed. See {ANSI_BLUE}strudel help copy{ANSI_RESET}.
+        {ANSI_PURPLE}
+        [[build.copy]]
+        src      = "path/to/helper"
+        dest_dir = "Contents/MacOS"
+        sign     = true
         {ANSI_RESET}
         ## assets_dir optional; top-level key (like [dmg]), not under [build]
         # xcassets catalog compiled into Contents/Resources/Assets.car via actool.
@@ -800,6 +814,45 @@ fn print_dylibs() {
 
         Static libraries (.a) are linked directly into the binary and do not need to be
         listed in embed_libs, nothing to embed or sign.
+    "#});
+}
+
+fn print_copy() {
+    print_help(&formatdoc! {r#"
+        # Copying arbitrary files into the bundle
+
+        `[[build.copy]]` copies a file or directory, under its own file name, into a
+        caller-chosen destination directory inside the bundle, distinct from
+        `embed_libs` (Contents/Frameworks) and `resources`/`resources_dir`
+        (Contents/Resources). Use it for things like a helper binary, a
+        command-line tool, or any other file that needs to land somewhere else in
+        the bundle:
+        {ANSI_PURPLE}
+        [[build.copy]]
+        src      = "path/to/helper"     # relative to the config file's directory
+        dest_dir = "Contents/MacOS"     # relative to the bundle root
+        sign     = true                  # codesign after copying; default: false
+        {ANSI_RESET}
+        This copies `path/to/helper` to `Contents/MacOS/helper` - same file name,
+        just relocated. `dest_dir` is created (including parent directories) if it
+        doesn't already exist. Repeat `[[build.copy]]` for multiple entries.
+
+        ## Signing
+
+        `sign = true` codesigns the copied item before the outer bundle is sealed,
+        the same way `embed_libs` entries are signed - required for any Mach-O
+        executable or nested bundle placed outside Contents/Frameworks, since nested
+        code must carry its own valid signature for `codesign --verify --deep
+        --strict` and notarization to pass.
+
+        strudel picks the codesign flags automatically based on `src`:
+          - a directory (e.g. a nested helper `.app` or plugin bundle) is signed with
+            `--deep`, since it may contain nested code of its own
+          - a plain file (e.g. a flat helper binary) is signed directly, no `--deep`
+
+        Files with `sign = false` (the default) are copied as-is and rely on the
+        outer bundle's `codesign --deep` (if any) or are exempt from signing
+        entirely (e.g. plain data files, scripts).
     "#});
 }
 

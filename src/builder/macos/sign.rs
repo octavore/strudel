@@ -86,6 +86,29 @@ impl MacosBuilder {
             }
         }
 
+        // Sign user-configured `[[build.copy]]` entries marked `sign = true`.
+        // Like embed_libs, these must be signed before the outer bundle is
+        // sealed: directories may contain nested code (hence `--deep`), flat
+        // files (e.g. a helper binary) are signed directly.
+        if self.cfg.copy.iter().any(|c| c.sign) {
+            step(&format!("Signing copied files...{msg}"));
+            for item in self.cfg.copy.iter().filter(|c| c.sign) {
+                let name = item.src.file_name().with_context(|| {
+                    format!("copy entry has no filename: {}", item.src.display())
+                })?;
+                let dest = self.paths.app_bundle.join(&item.dest_dir).join(name);
+                let dest_str = dest.to_str().with_context(|| {
+                    format!("Invalid copy destination: {}/{:?}", item.dest_dir, name)
+                })?;
+                let mut item_codesign_cmd = codesign_cmd.clone();
+                if item.src.is_dir() {
+                    item_codesign_cmd = item_codesign_cmd.arg("--deep");
+                }
+                item_codesign_cmd = item_codesign_cmd.arg(dest_str);
+                item_codesign_cmd.run(&self.sh)?;
+            }
+        }
+
         // Sign extensions inside-out: each `.appex` must be signed with its own
         // entitlements before the host bundle is sealed. A single `codesign
         // --deep` pass over the host would re-use the host's entitlements for

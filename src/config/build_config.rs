@@ -13,7 +13,7 @@ use crate::config::build_target::{
 use crate::config::extension::ExtensionSection;
 use crate::config::global::GlobalConfig;
 use crate::config::resolved::{
-    ResolvedDmg, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
+    ResolvedCopy, ResolvedDmg, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
 };
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
 use crate::config::{IosProvisioningBackend, ResolvedConfig};
@@ -351,6 +351,16 @@ fn resolve_target(
             .unwrap_or_default()
             .into_iter()
             .map(|p| resolve_to(config_dir, p))
+            .collect(),
+        copy: build
+            .copy
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| ResolvedCopy {
+                src: resolve_to(config_dir, c.src),
+                dest_dir: c.dest_dir,
+                sign: c.sign,
+            })
             .collect(),
         app_name: app.name,
         bundle_id: app.bundle_id,

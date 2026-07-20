@@ -125,6 +125,27 @@ impl MacosBuilder {
             self.compile_macos_assets(assets_dir, &app_bundle_resources_dir)?;
         }
 
+        // Copy user-configured `[[build.copy]]` entries, under their own file
+        // name, into their configured destination directory inside the
+        // bundle. Signing (if requested) happens later, in `sign()`, after
+        // every file is in place.
+        if !self.cfg.copy.is_empty() {
+            step("Copying extra files...");
+            for item in &self.cfg.copy {
+                let name = item.src.file_name().with_context(|| {
+                    format!("copy entry has no filename: {}", item.src.display())
+                })?;
+                let dest_dir = app_bundle.join(&item.dest_dir);
+                self.create_dir(&dest_dir)?;
+                let dest = dest_dir.join(name);
+                if item.src.is_dir() {
+                    self.copy_tree(&item.src, &dest)?;
+                } else {
+                    self.copy_file(&item.src, &dest)?;
+                }
+            }
+        }
+
         Ok(app_bundle.clone())
     }
 

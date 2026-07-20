@@ -83,6 +83,7 @@ fn resolved(target_platform: ResolvedTargetPlatform) -> ResolvedConfig {
         extensions: Vec::new(),
         resources_dir: None,
         resources: Vec::new(),
+        copy: Vec::new(),
         target_platform,
         team_id: String::new(),
         apple_api_issuer: String::new(),
