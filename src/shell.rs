@@ -1,5 +1,5 @@
 mod command;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{ExitStatus, Output, Stdio};
 
 use anyhow::{Result, bail};
@@ -119,6 +119,40 @@ impl Shell {
                 "{} failed (exit {code}):\n  command: {shell_cmd}\n  (output streamed above)",
                 shell_cmd.program,
             );
+        }
+        Ok(())
+    }
+
+    /// Run a command, streaming stdout live (e.g. app console logs) while
+    /// capturing stderr so failures can be inspected programmatically (e.g.
+    /// to detect a locked-device error and retry). Captured stderr is still
+    /// echoed to the terminal once the command finishes.
+    pub fn run_streamed_stdout(&self, shell_cmd: ShellCommand) -> Result<()> {
+        shell_cmd.log(self.dry_run);
+        if self.dry_run {
+            return Ok(());
+        }
+        let mut child = shell_cmd
+            .command()
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let mut stderr_buf = Vec::new();
+        child.stderr.take().unwrap().read_to_end(&mut stderr_buf)?;
+        let status = child.wait()?;
+        let stderr = String::from_utf8_lossy(&stderr_buf);
+        eprint!("{stderr}");
+        if !status.success() {
+            let code = exit_code_str(&status);
+            let stderr = stderr.trim();
+            let mut msg = format!(
+                "{} failed (exit {code}):\n  command: {shell_cmd}",
+                shell_cmd.program
+            );
+            if !stderr.is_empty() {
+                msg.push_str(&format!("\n--- stderr ---\n{stderr}"));
+            }
+            bail!(msg);
         }
         Ok(())
     }

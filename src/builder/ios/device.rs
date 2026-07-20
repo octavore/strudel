@@ -11,6 +11,7 @@ use crate::builder::ios::profile::decode_profile;
 use crate::builder::keychain::parse_identity_line;
 use crate::builder::{IosBuilder, is_framework, step};
 use crate::config::IosProvisioningBackend;
+use crate::shell::ShellCommand;
 
 impl IosBuilder {
     /// Build for one or more connected iOS devices, then install and launch.
@@ -59,8 +60,8 @@ impl IosBuilder {
         let app_str = app_bundle.to_str().unwrap();
         for udid in &target_udids {
             step(&format!("Installing on {udid}..."));
-            loop {
-                let result = self.sh.run(&[
+            retry_while_locked(udid, || {
+                self.sh.run(&[
                     "xcrun",
                     "devicectl",
                     "device",
@@ -69,31 +70,43 @@ impl IosBuilder {
                     "--device",
                     udid,
                     app_str,
-                ]);
-                match result {
-                    Ok(_) => break,
-                    Err(err) if is_device_locked_error(&err) => {
-                        cprintln!(
-                            "<yellow>warning:</yellow> Device {udid} is locked. Unlock it and \
-                             press enter to retry."
-                        );
-                        io::stdin().read_line(&mut String::new())?;
-                    },
-                    Err(err) => return Err(err),
-                }
-            }
+                ])
+            })?;
 
             step("Launching app...");
-            self.sh.run(&[
-                "xcrun",
-                "devicectl",
-                "device",
-                "process",
-                "launch",
-                "--device",
-                udid,
-                &self.cfg.bundle_id,
-            ])?;
+            // Attach to the console and stream logs live when running on a
+            // single device. With multiple target devices we'd need to
+            // stream several consoles concurrently to one terminal, so fall
+            // back to a plain, non-blocking launch there instead.
+            if target_udids.len() == 1 {
+                cprintln!("<dim>Streaming logs. Press Ctrl+C to stop.</dim>");
+                retry_while_locked(udid, || {
+                    self.sh
+                        .run_streamed_stdout(ShellCommand::new("xcrun").args([
+                            "devicectl",
+                            "device",
+                            "process",
+                            "launch",
+                            "--console",
+                            "--device",
+                            udid,
+                            &self.cfg.bundle_id,
+                        ]))
+                })?;
+                return Ok(());
+            }
+            retry_while_locked(udid, || {
+                self.sh.run(&[
+                    "xcrun",
+                    "devicectl",
+                    "device",
+                    "process",
+                    "launch",
+                    "--device",
+                    udid,
+                    &self.cfg.bundle_id,
+                ])
+            })?;
         }
 
         println!();
@@ -300,6 +313,24 @@ impl IosBuilder {
              The profile was created with an older certificate.\n\
              Run: strudel profile fetch --force"
         );
+    }
+}
+
+/// Retry a `devicectl` operation for as long as it keeps failing because the
+/// device is locked, prompting the user to unlock it between attempts.
+fn retry_while_locked<T>(udid: &str, mut op: impl FnMut() -> Result<T>) -> Result<T> {
+    loop {
+        match op() {
+            Ok(value) => return Ok(value),
+            Err(err) if is_device_locked_error(&err) => {
+                cprintln!(
+                    "<yellow>warning:</yellow> Device {udid} is locked. Unlock it and press \
+                     enter to retry."
+                );
+                io::stdin().read_line(&mut String::new())?;
+            },
+            Err(err) => return Err(err),
+        }
     }
 }
 
