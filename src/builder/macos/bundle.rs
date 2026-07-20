@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use color_print::cprintln;
 use serde_json::{Value, json};
 
-use crate::builder::{MacosBuilder, read_partial_info_plist, step};
+use crate::builder::{MacosBuilder, read_partial_info_plist, resolve_build_artifact, step};
 use crate::config::{ExtensionKind, ResolvedExtension, ResolvedIcon};
 use crate::icon::icns;
 use crate::icon::render::render_to_png;
@@ -20,7 +20,7 @@ impl MacosBuilder {
     // assemble the .app bundle by creating the bundle structure:
     // 1. copy in the binary and other resources
     // 2. generate the Info.plist from the info JSON
-    pub fn assemble_bundle(&self, binary_path: &Path) -> Result<PathBuf> {
+    pub fn assemble_bundle(&self, binary_path: &Path, bin_dir: &Path) -> Result<PathBuf> {
         step("Assembling app bundle...");
         let app_bundle = &self.paths.app_bundle;
         let app_bundle_resources_dir = app_bundle.join("Contents/Resources");
@@ -97,24 +97,29 @@ impl MacosBuilder {
         }
 
         // Copy user-configured resources_dir contents into Contents/Resources/.
+        // Falls back to bin_dir if the configured location doesn't exist, so a
+        // bare name (e.g. a SwiftPM-generated resource bundle) resolves
+        // against the current build's output.
         if let Some(rdir) = &self.cfg.resources_dir {
             step("Copying resource directory...");
-            self.copy_tree(rdir, &app_bundle_resources_dir)?;
+            let rdir = resolve_build_artifact(rdir, bin_dir);
+            self.copy_tree(&rdir, &app_bundle_resources_dir)?;
         }
 
         // Copy individual user-configured resource files and folders into
-        // Contents/Resources/.
+        // Contents/Resources/. Same bin_dir fallback as resources_dir.
         if !self.cfg.resources.is_empty() {
             step("Copying resources...");
             for resource in &self.cfg.resources {
+                let resource = resolve_build_artifact(resource, bin_dir);
                 let name = resource.file_name().with_context(|| {
                     format!("Resource path has no filename: {}", resource.display())
                 })?;
                 let dest = app_bundle_resources_dir.join(name);
                 if resource.is_dir() {
-                    self.copy_tree(resource, &dest)?;
+                    self.copy_tree(&resource, &dest)?;
                 } else {
-                    self.copy_file(resource, &dest)?;
+                    self.copy_file(&resource, &dest)?;
                 }
             }
         }

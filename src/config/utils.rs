@@ -16,13 +16,6 @@ pub fn resolve_path(base: &Path, p: impl AsRef<Path>) -> PathBuf {
     resolve_to(base, p.as_ref().to_path_buf())
 }
 
-/// Whether `p` is a bare file name (no directory component), e.g.
-/// `libFoo.dylib` or `Sparkle.framework` rather than `path/to/libFoo.dylib`.
-pub fn is_bare_name(p: &Path) -> bool {
-    p.parent()
-        .is_none_or(|parent| parent.as_os_str().is_empty())
-}
-
 /// Select config var by checking the following in order: env, project, global.
 pub fn env_or_global(
     project_val: Option<String>,

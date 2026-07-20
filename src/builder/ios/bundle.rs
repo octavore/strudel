@@ -6,7 +6,7 @@ use color_print::cprintln;
 use serde_json::{Map, Value, json};
 
 use crate::builder::ios::IosTarget;
-use crate::builder::{IosBuilder, read_partial_info_plist, step};
+use crate::builder::{IosBuilder, read_partial_info_plist, resolve_build_artifact, step};
 use crate::config::ResolvedIcon;
 use crate::icon::{ios, render};
 use crate::shell::ShellCommand;
@@ -34,24 +34,29 @@ impl IosBuilder {
 
         // Copy user-configured resources_dir contents into the bundle root
         // (iOS `.app` bundles are flat, unlike macOS's Contents/Resources/).
+        // Falls back to bin_dir if the configured location doesn't exist, so
+        // a bare name (e.g. a SwiftPM-generated resource bundle) resolves
+        // against the current build's output.
         if let Some(rdir) = &self.cfg.resources_dir {
             step("Copying resource directory...");
-            self.copy_tree(rdir, app_bundle)?;
+            let rdir = resolve_build_artifact(rdir, bin_dir);
+            self.copy_tree(&rdir, app_bundle)?;
         }
 
         // Copy individual user-configured resource files and folders into
-        // the bundle root.
+        // the bundle root. Same bin_dir fallback as resources_dir.
         if !self.cfg.resources.is_empty() {
             step("Copying resources...");
             for resource in &self.cfg.resources {
+                let resource = resolve_build_artifact(resource, bin_dir);
                 let name = resource.file_name().with_context(|| {
                     format!("Resource path has no filename: {}", resource.display())
                 })?;
                 let dest = app_bundle.join(name);
                 if resource.is_dir() {
-                    self.copy_tree(resource, &dest)?;
+                    self.copy_tree(&resource, &dest)?;
                 } else {
-                    self.copy_file(resource, &dest)?;
+                    self.copy_file(&resource, &dest)?;
                 }
             }
         }

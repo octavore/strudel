@@ -270,6 +270,12 @@ fn print_config() {
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
         resources              = ["Assets/logo.png"]       # individual files/folders to copy into Contents/Resources/
         {ANSI_RESET}
+        Both resolve relative to the config file's directory unless absolute, same as
+        any other path. If the resolved location doesn't exist, strudel falls back to
+        the current build's `.build/<triple>/release/` output dir instead - so a bare
+        name (e.g. a SwiftPM-generated resource bundle) still works without listing a
+        path.
+
         ## [[build.copy]] optional, repeatable
         # Arbitrary files/directories copied to a caller-chosen destination inside the
         # bundle (e.g. a helper binary), optionally signed. See {ANSI_BLUE}strudel help copy{ANSI_RESET}.
@@ -780,15 +786,17 @@ fn print_dylibs() {
 
         ## Resolving entries
 
-        A bare name (no `/`, e.g. `libFoo.dylib`) is triple-dependent: strudel resolves
-        it against whichever `.build/<triple>/release/` directory it just built for
-        this invocation. This is what you want for anything swift build produces or
-        links per-platform, since it stays correct across build destinations (e.g.
-        switching between iOS simulator and device) without editing the list.
+        Every entry resolves relative to the config file's directory unless absolute,
+        same as any other path - including a bare name like `libFoo.dylib`. If the
+        resolved location doesn't exist, strudel falls back to whichever
+        `.build/<triple>/release/` directory it just built for this invocation.
 
-        An entry containing `/` is a literal path, relative to the config file's
-        directory unless absolute, used as-is - for a vendored dylib or framework
-        that lives outside the build output and is the same for every triple.
+        The fallback is what makes a bare name work for anything swift build produces
+        or links per-platform: it stays correct across build destinations (e.g.
+        switching between iOS simulator and device) without editing the list. A
+        vendored dylib or framework that lives outside the build output and is the
+        same for every triple just needs a real path (e.g. `vendor/libBar.dylib`) and
+        the fallback never triggers.
 
         ## dylibs
 

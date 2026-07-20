@@ -26,7 +26,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-pub(crate) use bundle::is_framework;
+pub(crate) use bundle::{is_framework, resolve_build_artifact};
 use color_print::{cformat, cprintln};
 use indoc::formatdoc;
 pub(crate) use ios::decode_profile;
@@ -248,7 +248,7 @@ impl MacosBuilder {
         self.clean()?;
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
-        let app_bundle = self.assemble_bundle(&host_binary)?;
+        let app_bundle = self.assemble_bundle(&host_binary, &bin_dir)?;
         self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
         println!();
@@ -266,7 +266,7 @@ impl MacosBuilder {
         self.clean()?;
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
-        let app_bundle = self.assemble_bundle(&host_binary)?;
+        let app_bundle = self.assemble_bundle(&host_binary, &bin_dir)?;
         self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
         // No-op unless APPLE_CERTIFICATE is set; supports signing with an
@@ -358,7 +358,7 @@ impl MacosBuilder {
         self.clean()?;
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
-        let app_bundle = self.assemble_bundle(&host_binary)?;
+        let app_bundle = self.assemble_bundle(&host_binary, &bin_dir)?;
         self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
         // Held through both `sign` and the DMG signing in `package_dmg`, the
