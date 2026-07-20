@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -59,16 +59,29 @@ impl IosBuilder {
         let app_str = app_bundle.to_str().unwrap();
         for udid in &target_udids {
             step(&format!("Installing on {udid}..."));
-            self.sh.run(&[
-                "xcrun",
-                "devicectl",
-                "device",
-                "install",
-                "app",
-                "--device",
-                udid,
-                app_str,
-            ])?;
+            loop {
+                let result = self.sh.run(&[
+                    "xcrun",
+                    "devicectl",
+                    "device",
+                    "install",
+                    "app",
+                    "--device",
+                    udid,
+                    app_str,
+                ]);
+                match result {
+                    Ok(_) => break,
+                    Err(err) if is_device_locked_error(&err) => {
+                        cprintln!(
+                            "<yellow>warning:</yellow> Device {udid} is locked. Unlock it and \
+                             press enter to retry."
+                        );
+                        io::stdin().read_line(&mut String::new())?;
+                    },
+                    Err(err) => return Err(err),
+                }
+            }
 
             step("Launching app...");
             self.sh.run(&[
@@ -288,4 +301,15 @@ impl IosBuilder {
              Run: strudel profile fetch --force"
         );
     }
+}
+
+/// Whether a `devicectl` install failure was caused by the device being
+/// locked (e.g. `kAMDMobileImageMounterDeviceLocked`), rather than some
+/// other, non-retryable install error.
+fn is_device_locked_error(err: &anyhow::Error) -> bool {
+    let msg = err.to_string();
+    msg.contains("kAMDMobileImageMounterDeviceLocked")
+        || msg.contains("device is locked")
+        || msg.contains("BSErrorCodeDescription = Locked")
+        || msg.contains("could not be, unlocked")
 }
