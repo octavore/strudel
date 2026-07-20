@@ -609,6 +609,25 @@ mod tests {
     }
 
     #[test]
+    fn build_env_nests_under_build() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+
+            [build.build_env]
+            PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(
+            r.build_env.get("PKG_CONFIG_PATH").map(String::as_str),
+            Some("/opt/homebrew/lib/pkgconfig")
+        );
+    }
+
+    #[test]
     fn missing_required_app_field_is_error() {
         let err = parse_build_config(indoc! { r#"
             [app]

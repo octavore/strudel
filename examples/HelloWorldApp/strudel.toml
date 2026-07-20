@@ -40,7 +40,7 @@ build_number = "1"
 
 # Extra environment variables forwarded to `swift build` (e.g. for
 # pkg-config or library discovery). Values are passed through verbatim.
-# [build_env]
+# [build.build_env]
 # PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 
 # Apple developer identifiers, used for signing, notarization, and

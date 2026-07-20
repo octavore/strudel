@@ -284,7 +284,7 @@ top-level.
 | ----------------------------------- | -------- | ----------------------------------------------------------- |
 | [`[app]`](#app-required)            | yes      | Name, bundle ID, version                                    |
 | [`[build]`](#build-optional)        | no       | Sources, output dir, icon, resources, architectures         |
-| [`[build_env]`](#build_env-optional)| no       | Extra env vars for `swift build`                            |
+| [`[build.build_env]`](#buildbuild_env-optional)| no| Extra env vars for `swift build`                            |
 | [`[ios]`](#ios-optional-experimental)| no      | Simulator, device, and provisioning settings for iOS        |
 | [`[[extensions]]`](#extensions-optional)| no   | Embedded `.appex` bundles                                   |
 | [`assets_dir`](#assets_dir-optional-macos)| no | `.xcassets` catalog compiled into `Contents/Resources/Assets.car` |
@@ -359,13 +359,13 @@ one image. If `path` points to an Icon Composer `.icon` bundle instead of a
 raster image, it's handed to `actool` directly. If `ios.assets_dir` (below) is
 also set, it takes precedence over `[build.icon]` for that target.
 
-## `[build_env]` (optional)
+## `[build.build_env]` (optional)
 
 Extra environment variables forwarded to `swift build` (e.g. for `pkg-config`).
 Each key/value is passed through to the build environment:
 
 ```toml
-[build_env]
+[build.build_env]
 PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 ```
 

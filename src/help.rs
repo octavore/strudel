@@ -280,11 +280,11 @@ fn print_config() {
         icon.scale      = 1.2               # optional
         icon.background = "#fefefe"       # optional; hex, defaults to white
         {ANSI_RESET}
-        ## [build_env] optional
+        ## [build.build_env] optional
 
         Extra env vars forwarded to {ANSI_BLUE}swift build{ANSI_RESET} (e.g. for pkg-config):
         {ANSI_PURPLE}
-        [build_env]
+        [build.build_env]
         PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
         {ANSI_RESET}
         ## [apple] optional, but required for `release`
