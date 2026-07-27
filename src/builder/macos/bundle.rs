@@ -334,8 +334,9 @@ impl MacosBuilder {
         }
     }
 
-    /// Assemble one app extension `.appex` bundle under the host's
-    /// `Contents/PlugIns/`:
+    /// Assemble one extension bundle under the host's `Contents/PlugIns/`
+    /// (app extensions) or `Contents/Library/SystemExtensions/` (system
+    /// extensions):
     /// 1. Builds the extension `Info.plist` (injecting kind-specific
     ///    `NSExtension` keys)
     /// 2. Copies the binary
@@ -355,9 +356,16 @@ impl MacosBuilder {
         // binaries from a single `swift build` invocation.
         let binary_path = self.find_binary_in(bin_dir, &ext.target_name)?;
 
-        self.create_dir(&paths.appex.join("Contents/MacOS"))?;
+        self.create_dir(&paths.bundle.join("Contents/MacOS"))?;
         self.create_dir(&paths.resources)?;
         self.copy_file(&binary_path, &paths.binary)?;
+
+        // System extensions use the `SYSX` package type; app extensions
+        // (Safari web extensions, generic app extensions) use `XPC!`.
+        let package_type = match ext.kind {
+            ExtensionKind::SystemExtension => "SYSX",
+            ExtensionKind::SafariWebExtension | ExtensionKind::AppExtension => "XPC!",
+        };
 
         let mut info_json = self.build_info_json(
             ext.info_json_path.clone(),
@@ -367,8 +375,7 @@ impl MacosBuilder {
                 ("CFBundleName".into(), ext.name.clone()),
                 ("CFBundleDisplayName".into(), ext.name.clone()),
                 ("CFBundleInfoDictionaryVersion".into(), "6.0".into()),
-                // App extensions use the XPC bundle package type.
-                ("CFBundlePackageType".into(), "XPC!".into()),
+                ("CFBundlePackageType".into(), package_type.into()),
             ]),
         )?;
 
@@ -397,6 +404,15 @@ impl MacosBuilder {
                         "<yellow>warning:</yellow> App Extension `{}` is missing `principal_class`, which may be required depending on the extension point.",
                         ext.name
                     );
+                }
+                info_json.insert("NSExtension".into(), Value::Object(ns_ext));
+            },
+            ExtensionKind::SystemExtension => {
+                let ident = ext.extension_point_identifier.as_deref().unwrap_or("");
+                let mut ns_ext = serde_json::Map::new();
+                ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
+                if let Some(class) = ext.principal_class.as_deref() {
+                    ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
                 }
                 info_json.insert("NSExtension".into(), Value::Object(ns_ext));
             },

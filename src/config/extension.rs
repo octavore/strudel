@@ -9,9 +9,30 @@ use crate::config::utils::resolve_to;
 /// The kind of app extension after resolution. A flat discriminator used by
 /// downstream build steps; the kind-specific data has already been unpacked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
 pub enum ExtensionKind {
     SafariWebExtension,
     AppExtension,
+    SystemExtension,
+}
+
+/// The kind of system extension (`[[extensions]] kind = "system_extension"`),
+/// selecting its `NSExtensionPointIdentifier`. DriverKit dexts are not
+/// covered: they use `IOKitPersonalities`, not `NSExtension`.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemExtensionType {
+    NetworkExtension,
+    EndpointSecurity,
+}
+
+impl SystemExtensionType {
+    pub fn extension_point_identifier(self) -> &'static str {
+        match self {
+            SystemExtensionType::NetworkExtension => "com.apple.system_extension.network_extension",
+            SystemExtensionType::EndpointSecurity => "com.apple.system_extension.endpoint_security",
+        }
+    }
 }
 
 /// One entry per app extension embedded in the host bundle. In toml, this is
@@ -100,6 +121,19 @@ impl ExtensionSection {
                 principal_class,
                 Some(extension_point_identifier),
             ),
+            ExtensionKindConfig::SystemExtension {
+                system_extension_type,
+                principal_class,
+            } => (
+                ExtensionKind::SystemExtension,
+                None,
+                principal_class,
+                Some(
+                    system_extension_type
+                        .extension_point_identifier()
+                        .to_string(),
+                ),
+            ),
         };
 
         Ok(ResolvedExtension {
@@ -121,6 +155,7 @@ impl ExtensionSection {
 /// common extension fields in TOML.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[allow(clippy::enum_variant_names)]
 pub enum ExtensionKindConfig {
     SafariWebExtension {
         /// Directory whose contents (manifest.json, JS, HTML, icons, etc) are
@@ -138,6 +173,15 @@ pub enum ExtensionKindConfig {
         extension_point_identifier: String,
         /// `NSExtensionPrincipalClass`. Optional, not all extension points
         /// require it.
+        principal_class: Option<String>,
+    },
+    SystemExtension {
+        /// Selects the `NSExtensionPointIdentifier` (network extension vs
+        /// endpoint security).
+        system_extension_type: SystemExtensionType,
+        /// `NSExtensionPrincipalClass`. Optional; system extensions typically
+        /// register their provider from `main()` rather than a principal
+        /// class.
         principal_class: Option<String>,
     },
 }
@@ -327,6 +371,86 @@ mod tests {
             ext.principal_class.as_deref(),
             Some("Ext.FinderSyncController")
         );
+    }
+
+    #[test]
+    fn parses_and_resolves_system_extension() {
+        let cfg = parse_build_config(indoc! {r#"
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+
+            [[extensions]]
+            kind = "system_extension"
+            target_name = "MyNetworkExtension"
+            bundle_id = "com.example.myapp.NetworkExtension"
+            system_extension_type = "network_extension"
+            entitlements_json_path = "netext/entitlements.json"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(r.extensions.len(), 1);
+        let ext = &r.extensions[0];
+        assert_eq!(ext.kind, ExtensionKind::SystemExtension);
+        assert_eq!(ext.target_name, "MyNetworkExtension");
+        assert_eq!(ext.name, "MyNetworkExtension");
+        assert_eq!(ext.bundle_id, "com.example.myapp.NetworkExtension");
+        assert_eq!(
+            ext.extension_point_identifier.as_deref(),
+            Some("com.apple.system_extension.network_extension")
+        );
+        assert!(ext.principal_class.is_none());
+        assert!(ext.resources_dir.is_none());
+        assert_eq!(
+            ext.entitlements_json_path,
+            PathBuf::from("/cfg/netext/entitlements.json")
+        );
+    }
+
+    #[test]
+    fn system_extension_endpoint_security_maps_extension_point() {
+        let cfg = parse_build_config(indoc! {r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [[extensions]]
+            kind = "system_extension"
+            target_name = "Ext"
+            bundle_id = "y.Ext"
+            system_extension_type = "endpoint_security"
+            entitlements_json_path = "e.json"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(
+            r.extensions[0].extension_point_identifier.as_deref(),
+            Some("com.apple.system_extension.endpoint_security")
+        );
+    }
+
+    #[test]
+    fn system_extension_requires_system_extension_type() {
+        let err = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [[extensions]]
+            kind = "system_extension"
+            target_name = "Ext"
+            bundle_id = "y.Ext"
+            entitlements_json_path = "e.json"
+        "#})
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("system_extension_type"), "got: {msg}");
     }
 
     #[test]

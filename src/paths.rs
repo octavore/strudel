@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::config::{ResolvedConfig, ResolvedExtension};
+use crate::config::{ExtensionKind, ResolvedConfig, ResolvedExtension};
 
 pub struct PendingSubmission {
     pub dir: PathBuf,
@@ -28,10 +28,12 @@ pub struct Paths {
     pub extensions: Vec<ExtensionPaths>,
 }
 
-/// All bundle-internal paths for a single app extension. The `.appex` lives at
-/// `<host>.app/Contents/PlugIns/<name>.appex/`.
+/// All bundle-internal paths for a single extension. App extensions
+/// (`safari_web_extension`, `app_extension`) live at
+/// `<host>.app/Contents/PlugIns/<name>.appex/`; system extensions live at
+/// `<host>.app/Contents/Library/SystemExtensions/<name>.systemextension/`.
 pub struct ExtensionPaths {
-    pub appex: PathBuf,
+    pub bundle: PathBuf,
     pub binary: PathBuf,
     pub info_plist: PathBuf,
     pub resources: PathBuf,
@@ -46,15 +48,20 @@ impl ExtensionPaths {
         build_dir: &std::path::Path,
         ext: &ResolvedExtension,
     ) -> Self {
-        let appex = app_bundle
-            .join("Contents/PlugIns")
-            .join(format!("{}.appex", ext.name));
+        let bundle = match ext.kind {
+            ExtensionKind::SystemExtension => app_bundle
+                .join("Contents/Library/SystemExtensions")
+                .join(format!("{}.systemextension", ext.name)),
+            ExtensionKind::SafariWebExtension | ExtensionKind::AppExtension => app_bundle
+                .join("Contents/PlugIns")
+                .join(format!("{}.appex", ext.name)),
+        };
         ExtensionPaths {
-            binary: appex.join("Contents/MacOS").join(&ext.target_name),
-            info_plist: appex.join("Contents/Info.plist"),
-            resources: appex.join("Contents/Resources"),
+            binary: bundle.join("Contents/MacOS").join(&ext.target_name),
+            info_plist: bundle.join("Contents/Info.plist"),
+            resources: bundle.join("Contents/Resources"),
             entitlements_plist: build_dir.join(format!("{}.entitlements.plist", ext.name)),
-            appex,
+            bundle,
         }
     }
 }
@@ -220,7 +227,7 @@ mod tests {
         assert_eq!(p.extensions.len(), 1);
         let e = &p.extensions[0];
         assert_eq!(
-            e.appex,
+            e.bundle,
             PathBuf::from("/out/MyApp.app/Contents/PlugIns/MyAppExtension.appex")
         );
         assert_eq!(
@@ -244,6 +251,36 @@ mod tests {
         assert_eq!(
             e.entitlements_plist,
             PathBuf::from("/out/MyAppExtension.entitlements.plist")
+        );
+    }
+
+    #[test]
+    fn system_extension_paths_nest_under_system_extensions() {
+        let mut c = cfg("/out", "MyApp", "1.0");
+        c.extensions.push(ResolvedExtension {
+            kind: ExtensionKind::SystemExtension,
+            target_name: "MyNetworkExtension".into(),
+            bundle_id: "com.example.myapp.NetworkExtension".into(),
+            name: "MyNetworkExtension".into(),
+            info_json_path: None,
+            entitlements_json_path: PathBuf::from("/ext/e.json"),
+            resources_dir: None,
+            principal_class: None,
+            extension_point_identifier: Some("com.apple.system_extension.network_extension".into()),
+        });
+        let p = Paths::new(&c);
+        let e = &p.extensions[0];
+        assert_eq!(
+            e.bundle,
+            PathBuf::from(
+                "/out/MyApp.app/Contents/Library/SystemExtensions/MyNetworkExtension.systemextension"
+            )
+        );
+        assert_eq!(
+            e.binary,
+            PathBuf::from(
+                "/out/MyApp.app/Contents/Library/SystemExtensions/MyNetworkExtension.systemextension/Contents/MacOS/MyNetworkExtension"
+            )
         );
     }
 }

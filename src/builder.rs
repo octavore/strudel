@@ -223,8 +223,9 @@ impl MacosBuilder {
         })
     }
 
-    /// Assemble every configured app extension under
-    /// `<app>.app/Contents/PlugIns/`. No-op when no extensions are configured.
+    /// Assemble every configured extension, under `<app>.app/Contents/PlugIns/`
+    /// (app extensions) or `<app>.app/Contents/Library/SystemExtensions/`
+    /// (system extensions). No-op when no extensions are configured.
     fn assemble_extensions(&self, bin_dir: &Path) -> Result<()> {
         for (ext, ext_paths) in self.cfg.extensions.iter().zip(self.paths.extensions.iter()) {
             self.assemble_appex(ext, ext_paths, bin_dir)?;

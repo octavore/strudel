@@ -109,11 +109,12 @@ impl MacosBuilder {
             }
         }
 
-        // Sign extensions inside-out: each `.appex` must be signed with its own
-        // entitlements before the host bundle is sealed. A single `codesign
-        // --deep` pass over the host would re-use the host's entitlements for
-        // the nested bundle, which is wrong: the extension is sandboxed
-        // independently and typically needs a different set.
+        // Sign extensions inside-out: each extension bundle (.appex or
+        // .systemextension) must be signed with its own entitlements before
+        // the host bundle is sealed. A single `codesign --deep` pass over the
+        // host would re-use the host's entitlements for the nested bundle,
+        // which is wrong: the extension is sandboxed independently and
+        // typically needs a different set.
         for (ext, ext_paths) in self.cfg.extensions.iter().zip(self.paths.extensions.iter()) {
             self.sign_extension(ext, ext_paths, &codesign_cmd, adhoc, msg)?;
         }
@@ -145,9 +146,10 @@ impl MacosBuilder {
         Ok(())
     }
 
-    /// Sign one nested `.appex` with its own entitlements. Called by [`sign`]
-    /// for each configured extension, after embedded dylibs are signed and
-    /// before the host bundle is sealed.
+    /// Sign one nested extension bundle (`.appex` or `.systemextension`) with
+    /// its own entitlements. Called by [`sign`] for each configured
+    /// extension, after embedded dylibs are signed and before the host
+    /// bundle is sealed.
     fn sign_extension(
         &self,
         ext: &ResolvedExtension,
@@ -157,7 +159,7 @@ impl MacosBuilder {
         msg: &str,
     ) -> Result<()> {
         let appex_str = paths
-            .appex
+            .bundle
             .to_str()
             .context("Invalid extension bundle path.")?;
         let ent_json_path = &ext.entitlements_json_path;

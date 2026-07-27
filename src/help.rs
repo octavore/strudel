@@ -23,7 +23,7 @@ pub(crate) const TOPICS: &[(&str, &str)] = &[
     ("entitlements", "Entitlements and provisioning profiles"),
     (
         "extensions",
-        "App extensions: safari_web_extension, app_extension",
+        "App and system extensions: safari_web_extension, app_extension, system_extension",
     ),
     (
         "dylibs",
@@ -67,6 +67,10 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                 | "ios_free_provisioning"
                 | "free-provisioning"
                 | "free_provisioning" => print_ios_free_provisioning(),
+                "ios-app" | "ios_app" | "ios-guidelines" | "ios_guidelines" => print_ios_app(),
+                "macos-app" | "macos_app" | "macos-guidelines" | "macos_guidelines" => {
+                    print_macos_app()
+                },
                 _ => {
                     if let Some(sub) = app.find_subcommand_mut(&key) {
                         sub.print_long_help().unwrap();
@@ -438,7 +442,8 @@ fn print_signing() {
 
         strudel signs inside-out:
           1. Embedded dylibs (Contents/Frameworks)
-          2. Each .appex (with the extension's entitlements)
+          2. Each extension bundle - .appex or .systemextension (with the extension's
+             entitlements)
           3. Host .app (with the host entitlements)
 
         We do not use --deep on the host sign as it would incorrectly re-apply host entitlements
@@ -592,16 +597,18 @@ fn print_entitlements() {
 
 fn print_extensions() {
     print_help(&formatdoc! {r#"
-        # App extensions
+        # App and system extensions
 
-        App extensions are embedded as .appex bundles under Contents/PlugIns/ in the host
-        app. Each extension is assembled and codesigned separately; notarizing the host .app
-        covers all nested .appex bundles.
+        App extensions (safari_web_extension, app_extension) are embedded as .appex bundles
+        under Contents/PlugIns/ in the host app. System extensions (system_extension) are
+        embedded as .systemextension bundles under Contents/Library/SystemExtensions/. Each
+        extension is assembled and codesigned separately; notarizing the host .app covers
+        all nested bundles.
 
         ## Common fields (all kinds)
         {ANSI_PURPLE}
         [[extensions]]
-        kind                   = "safari_web_extension"        # or "app_extension"
+        kind                   = "safari_web_extension"  # or "app_extension", "system_extension"
         target_name            = "MyExtension"                 # SPM executableTarget
         bundle_id              = "com.example.myapp.Extension"
         # name                 = "MyExtension"                 # defaults to target_name
@@ -647,19 +654,50 @@ fn print_extensions() {
 
         See https://developer.apple.com/documentation/bundleresources/information-property-list/nsextension/nsextensionpointidentifier
 
+        ## kind = "system_extension"
+
+        A macOS System Extension (Network Extension or Endpoint Security), embedded under
+        Contents/Library/SystemExtensions/. Unlike app extensions, a system extension is not
+        sandboxed alongside the host app: once installed it runs as its own long-lived,
+        OS-managed process, activated at runtime by the host app via `SystemExtensions.framework` (`OSSystemExtensionRequest`). strudel only assembles and signs the bundle, it does not
+        call that API for you.
+        {ANSI_PURPLE}
+        [[extensions]]
+        kind                  = "system_extension"
+        target_name           = "MyNetworkExtension"
+        bundle_id             = "com.example.myapp.NetworkExtension"
+        entitlements_json_path = "netext/entitlements.json"
+        system_extension_type = "network_extension"   # or "endpoint_security"
+        # principal_class     = "MyNetworkExtension.FilterDataProvider"  # rarely needed
+        {ANSI_RESET}
+        system_extension_type values and their NSExtensionPointIdentifier:
+          "network_extension"    com.apple.system_extension.network_extension
+          "endpoint_security"    com.apple.system_extension.endpoint_security
+
+        DriverKit drivers (.dext) are not supported: they use IOKitPersonalities instead
+        of NSExtension and are outside this mechanism entirely.
+
+        The host app's own entitlements (its top-level `entitlements_json_path`) need
+        `com.apple.developer.system-extension.install`; the extension's entitlements
+        need whatever the extension type requires (e.g.
+        `com.apple.developer.networking.networkextension` for a Network Extension,
+        `com.apple.developer.endpoint-security.client` for Endpoint Security).
+
         ## Auto-injected Info.plist keys
 
         All extensions get: CFBundleExecutable, CFBundleIdentifier, CFBundleName,
-        CFBundleDisplayName, CFBundleVersion, CFBundleShortVersionString,
-        CFBundlePackageType = "XPC!"
+        CFBundleDisplayName, CFBundleVersion, CFBundleShortVersionString.
+        CFBundlePackageType = "XPC!" for safari_web_extension/app_extension, "SYSX" for
+        system_extension.
 
         User-supplied info_json_path provides additional keys; auto-injected ones win
         on conflict.
 
         ## Sign order
 
-        Inside-out: embedded dylibs -> each .appex -> host .app. `--deep` is not used on the
-        host as it would apply host entitlements to nested bundles incorrectly.
+        Inside-out: embedded dylibs -> each extension bundle (.appex or .systemextension) ->
+        host .app. `--deep` is not used on the host as it would apply host entitlements to
+        nested bundles incorrectly.
     "#});
 }
 
@@ -852,6 +890,7 @@ fn print_copy() {
         src      = "path/to/helper"     # relative to the config file's directory
         dest_dir = "Contents/MacOS"     # relative to the bundle root
         sign     = true                  # codesign after copying; default: false
+        entitlements_json_path = "helper-entitlements.json"  # optional, requires sign = true
         {ANSI_RESET}
         This copies `path/to/helper` to `Contents/MacOS/helper` - same file name,
         just relocated. `dest_dir` is created (including parent directories) if it
@@ -873,6 +912,12 @@ fn print_copy() {
         Files with `sign = false` (the default) are copied as-is and rely on the
         outer bundle's `codesign --deep` (if any) or are exempt from signing
         entirely (e.g. plain data files, scripts).
+
+        `entitlements_json_path`, like extensions' entitlements, gives the copied
+        item its own entitlements at signing time instead of inheriting the host
+        app's - useful for a nested helper `.app` or plugin that needs a different
+        sandbox/capability set. Resolved relative to the config file's directory.
+        Ignored unless `sign = true`.
     "#});
 }
 
