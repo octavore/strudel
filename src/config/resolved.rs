@@ -257,6 +257,8 @@ pub struct ResolvedCopy {
     /// Destination directory relative to the bundle root.
     pub dest_dir: String,
     pub sign: bool,
+    /// Entitlements to apply when signing this item, if any.
+    pub entitlements_json_path: Option<PathBuf>,
 }
 
 /// An [`ExtensionSection`] after path resolution and kind-specific validation.

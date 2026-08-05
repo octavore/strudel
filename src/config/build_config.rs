@@ -366,6 +366,9 @@ fn resolve_target(
                 src: resolve_to(config_dir, c.src),
                 dest_dir: c.dest_dir,
                 sign: c.sign,
+                entitlements_json_path: c
+                    .entitlements_json_path
+                    .map(|p| resolve_path(config_dir, p)),
             })
             .collect(),
         app_name: app.name,

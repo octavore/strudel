@@ -98,6 +98,10 @@ pub struct CopySection {
     /// outside `embed_libs`/`resources`.
     #[serde(default)]
     pub sign: bool,
+    /// Entitlements to apply when signing this item (requires `sign = true`).
+    /// Resolved relative to the config file's directory, like the top-level
+    /// `build.entitlements_json_path`.
+    pub entitlements_json_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

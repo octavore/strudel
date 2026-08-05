@@ -104,6 +104,43 @@ impl MacosBuilder {
                 if item.src.is_dir() {
                     item_codesign_cmd = item_codesign_cmd.arg("--deep");
                 }
+                if let Some(ent_json_path) = &item.entitlements_json_path {
+                    let ent_json_str = ent_json_path
+                        .to_str()
+                        .context("Invalid copy entitlements path.")?;
+                    let ent_raw = fs::read_to_string(ent_json_path).with_context(|| {
+                        format!(
+                            "Failed to read entitlements JSON for copy entry `{}` at {ent_json_str}",
+                            name.to_string_lossy()
+                        )
+                    })?;
+                    let item_ent_value: Value =
+                        serde_json::from_str(&ent_raw).with_context(|| {
+                            format!(
+                                "Copy entry entitlements file is not valid JSON: {ent_json_str}"
+                            )
+                        })?;
+                    let ent_plist = self.paths.build_dir.join(format!(
+                        "{}.copy-entitlements.plist",
+                        name.to_string_lossy()
+                    ));
+                    let ent_plist_str = ent_plist
+                        .to_str()
+                        .context("Invalid copy entitlements plist path.")?;
+                    self.sh.run(&[
+                        "plutil",
+                        "-convert",
+                        "xml1",
+                        ent_json_str,
+                        "-o",
+                        ent_plist_str,
+                    ])?;
+                    if adhoc {
+                        self.validate_entitlements_for_adhoc(&item_ent_value);
+                    }
+                    item_codesign_cmd =
+                        item_codesign_cmd.arg_group(["--entitlements", ent_plist_str]);
+                }
                 item_codesign_cmd = item_codesign_cmd.arg(dest_str);
                 item_codesign_cmd.run(&self.sh)?;
             }
