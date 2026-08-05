@@ -43,6 +43,14 @@ pub(crate) const TOPICS: &[(&str, &str)] = &[
         "ios-free-provisioning",
         "Free Apple ID provisioning: login, 7-day profiles, no paid account needed",
     ),
+    (
+        "ios-app",
+        "Quick checklist for iOS app setup: launch screen, permission strings, icons, dark mode",
+    ),
+    (
+        "macos-app",
+        "Quick checklist for macOS app niceties: settings window, menu bar icon, sandboxing, activation policy",
+    ),
 ];
 
 pub fn run(topic: Option<&str>, mut app: Command) {
@@ -1157,5 +1165,148 @@ fn print_ios_free_provisioning() {
 
         {ANSI_BLUE}strudel help ios-device{ANSI_RESET}
         {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
+    "#});
+}
+
+fn print_ios_app() {
+    print_help(&formatdoc! {r#"
+        # iOS app checklist
+
+        Things that are easy to skip, don't fail the build, but are visibly wrong
+        (or cause a rejection) at runtime.
+
+        ## Info.plist data are set in info_json_path
+
+        strudel generates Info.plist itself from the JSON file at {ANSI_PURPLE}build.info_json_path{ANSI_RESET}.
+        Note that the CFBundle* identity keys (identifier, name, version, build number)
+        are always written by strudel and override anything in that file. With no
+        info_json_path at all, the app ships with only strudel's defaults.
+        See {ANSI_BLUE}strudel help config{ANSI_RESET}.
+
+        ## UILaunchScreen
+
+        Required, or the app falls back to a letterboxed compatibility mode at
+        launch instead of using the full screen. strudel does not inject a
+        default, so a target with no info_json_path has no launch screen.
+        Minimal working value:
+        {ANSI_PURPLE}
+        {{ "UILaunchScreen": {{}} }}
+        {ANSI_RESET}
+        ## Permission usage strings
+
+        Any API that needs user consent (camera, photos, microphone, location,
+        contacts, etc.) needs its NSXxxUsageDescription key in info_json_path with
+        a real, human-readable reason. Missing the key crashes the app on first
+        access instead of showing a denial prompt.
+
+        ## App icon
+
+        With {ANSI_PURPLE}[build.icon]{ANSI_RESET}, strudel renders the complete iPhone appiconset
+        (every size/scale plus the 1024x1024 ios-marketing rendition) from your
+        single source image. Use {ANSI_BLUE}strudel icon{ANSI_RESET} to render that source image to
+        a PNG (written to {ANSI_BLUE}--out{ANSI_RESET}, default the current directory) to preview.
+
+        ## Dark mode
+
+        Verify custom colors are asset-catalog colors (or adapt via
+        Color(uiColor:)/semantic colors), not hardcoded RGB, so the app doesn't
+        look broken in dark mode.
+
+        ## Dynamic Type
+
+        Use .font(.body)-style semantic text styles rather than fixed point sizes
+        for user-facing prose, so accessibility text-size settings take effect.
+
+        ## Orientation / size classes
+
+        strudel builds iPhone-only by default: UIDeviceFamily defaults to [1] and
+        icons are compiled with --target-device iphone, so the generated appiconset
+        carries no iPad renditions. For a universal app, set UIDeviceFamily
+        yourself in info_json_path:
+        {ANSI_PURPLE}
+        {{ "UIDeviceFamily": [1, 2] }}
+        {ANSI_RESET}
+        and supply a hand-authored {ANSI_PURPLE}ios.assets_dir{ANSI_RESET} with ipad idiom icons, since
+        [build.icon] won't generate them. Then check layout at iPad multitasking
+        widths, e.g:
+        {ANSI_BLUE}
+        strudel run --sim "iPad Pro 13-inch (M4)"
+        {ANSI_RESET}
+
+        ## See also
+
+        {ANSI_BLUE}strudel help config{ANSI_RESET}
+        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
+        {ANSI_BLUE}strudel help ios-device{ANSI_RESET}
+    "#});
+}
+
+fn print_macos_app() {
+    print_help(&formatdoc! {r#"
+        # macOS app checklist
+
+        Things that don't fail the build but read as unpolished, or break
+        sandboxed/notarized builds.
+
+        ## Info.plist data are set in info_json_path
+
+        strudel generates Info.plist itself from the JSON file at {ANSI_PURPLE}build.info_json_path{ANSI_RESET}.
+        It always writes CFBundleExecutable, CFBundleIdentifier, CFBundlePackageType
+        and the version keys, overriding anything in that file.
+        See {ANSI_BLUE}strudel help config{ANSI_RESET}.
+
+        ## App display name
+
+        Unlike the iOS builder, this one writes no CFBundleName/CFBundleDisplayName,
+        so the menu bar and About box fall back to the executable name. If the name
+        users should see differs (spaces, capitalization), set it yourself:
+        {ANSI_PURPLE}
+        {{ "CFBundleName": "My App" }}
+        {ANSI_RESET}
+        ## Settings/Preferences window
+
+        Use SwiftUI's Settings {{ }} scene with a TabView shell: one Label per
+        tab, a fixed .frame(width:height:), top-aligned content.
+        {ANSI_PURPLE}
+        Settings {{
+            TabView {{
+                GeneralSettingsView()
+                    .tabItem {{ Label("General", systemImage: "gearshape") }}
+            }}
+            .padding(20)
+            .frame(width: 400, height: 300, alignment: .top)
+            .navigationTitle("My App")
+        }}
+        {ANSI_RESET}
+        Persist values with @AppStorage directly in the views, or a shared
+        wrapper class reading the same UserDefaults keys for code that isn't a
+        SwiftUI view (e.g. a background service reading preferences at runtime).
+
+        ## Menu bar icon
+
+        A MenuBarExtra label built from Image(nsImage:) needs isTemplate = true
+        set on the underlying NSImage (plus manual resizing to ~18pt height,
+        preserving aspect ratio) or it won't tint correctly for light/dark mode
+        and click-highlight the way native status-item icons do.
+
+        ## Menu-bar-only apps opening a window
+
+        With LSUIElement set, opening any window (Settings, About, a document)
+        needs an explicit switch to .regular activation policy first, or the
+        window can open behind other apps or not come to front at all. Switching
+        alone isn't enough: the policy change needs a beat to take effect, so
+        give it ~100ms before opening, or the window still opens behind.
+
+        ## App Sandbox entitlements
+
+        Decide sandboxing up front; retrofitting it onto an app that assumed
+        unrestricted file access is the most common late-stage rework. See
+        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}.
+
+        ## See also
+
+        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
+        {ANSI_BLUE}strudel help signing{ANSI_RESET}
+        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
     "#});
 }
