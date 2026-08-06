@@ -16,7 +16,18 @@ release = "./scripts/release.sh"
 "example:multi-target" = "cargo run -- --config examples/MultiTargetApp/strudel.toml run"
 "example:safari-extension" = "cargo run -- --config examples/SafariExtension/strudel.toml run"
 
+"crates:publish" = {
+  command = [
+    "cargo publish -p strudel-appleid",
+    "cargo publish -p strudel-dmg",
+    "cargo publish -p strudel-icon",
+    "cargo publish -p strudel-cli",
+  ],
+  env = {
+    "CARGO_REGISTRY_TOKEN" = "axo://projects/crates-io/api-token",
+  }
+}
+
 [global_packages]
 rust = "stable"
 "rvben/rumdl" = "^0.2.52"
-

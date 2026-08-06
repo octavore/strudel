@@ -48,6 +48,12 @@ Install strudel with homebrew:
 brew install octavore/tools/strudel
 ```
 
+Or install with cargo:
+
+```sh
+cargo install strudel-cli
+```
+
 ### Requirements
 
 - macOS with the Xcode command line tools installed
