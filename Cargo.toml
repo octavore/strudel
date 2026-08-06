@@ -15,7 +15,7 @@ resolver = "2"
 members = [".", "crates/appleid", "crates/dmg", "crates/icon"]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.6.0"
 
 [[bin]]
 name = "strudel"
@@ -24,12 +24,12 @@ path = "src/main.rs"
 [dependencies]
 anstream = "1.0.0"
 anyhow = "1"
-appleid = {package = "strudel-appleid", path = "crates/appleid", version = "0.5.1" }
+appleid = {package = "strudel-appleid", path = "crates/appleid", version = "0.6.0" }
 base64 = "0.22"
 clap = {version = "4", features = ["derive"]}
 color-print = "0.3.7"
-dmg = {package = "strudel-dmg", path = "crates/dmg", version = "0.5.1" }
-icon = {package = "strudel-icon", path = "crates/icon", version = "0.5.1" }
+dmg = {package = "strudel-dmg", path = "crates/dmg", version = "0.6.0" }
+icon = {package = "strudel-icon", path = "crates/icon", version = "0.6.0" }
 image = {version = "0.25", default-features = false, features = ["png"]}
 indoc = "2"
 inquire = "0.9"
