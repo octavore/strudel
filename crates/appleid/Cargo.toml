@@ -3,6 +3,7 @@ name = "strudel-appleid"
 version.workspace = true
 edition = "2024"
 description = "Apple ID authentication and provisioning helpers used internally by strudel"
+readme = "README.md"
 repository = "https://github.com/octavore/strudel"
 license = "Apache-2.0"
 

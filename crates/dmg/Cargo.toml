@@ -3,6 +3,7 @@ name = "strudel-dmg"
 version.workspace = true
 edition = "2024"
 description = "Read and edit DMG disk images."
+readme = "README.md"
 repository = "https://github.com/octavore/strudel"
 license = "Apache-2.0"
 
