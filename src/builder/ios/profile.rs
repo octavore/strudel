@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use clml::{cformat, cformatdoc, cprintln};
 
 use crate::apple::appstore::AppStoreClient;
 use crate::apple::provisioning;
-use crate::builder::{IosBuilder, step};
+use crate::builder::IosBuilder;
 use crate::config::IosProvisioningBackend;
 use crate::devices::DeviceSet;
 use crate::paths::ensure_strudel_dir;
@@ -25,18 +25,19 @@ impl IosBuilder {
             && cached.exists()
             && profile_is_current(cached, &udids, &self.cfg.bundle_id, &self.cfg.team_id)?
         {
-            cprintln!(
+            self.note(cformat!(
                 "<green>✔</green> Cached profile is current: {}",
                 cached.display()
-            );
+            ));
             return Ok(());
         }
 
         if self.dry_run {
-            cprintln!(
-                "<dim>[dry-run]</dim> Would fetch provisioning profile via App Store Connect API"
-            );
-            cprintln!("<dim>[dry-run]</dim> Would write to {}", cached.display());
+            self.echo(cformatdoc! {"
+                <dim>[dry-run]</dim> Would fetch provisioning profile via App Store Connect API
+                <dim>[dry-run]</dim> Would write to {}",
+                cached.display()
+            });
             return Ok(());
         }
 
@@ -74,18 +75,18 @@ impl IosBuilder {
             && cached.exists()
             && profile_is_current(cached, &udid_refs, &self.cfg.bundle_id, &self.cfg.team_id)?
         {
-            cprintln!(
+            self.note(cformat!(
                 "<green>✔</green> Using cached profile: {}",
                 cached.display()
-            );
+            ));
             return Ok(cached.clone());
         }
 
         if self.dry_run {
-            cprintln!(
+            self.echo(cformat!(
                 "<dim>[dry-run]</dim> Would auto-fetch provisioning profile \
                  via App Store Connect API"
-            );
+            ));
             return Ok(cached.clone());
         }
 
@@ -98,9 +99,9 @@ impl IosBuilder {
     fn auto_fetch_profile(&self) -> Result<()> {
         let ios_settings = &self.ios;
         if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) {
-            cprintln!(
+            self.note(cformat!(
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
-            );
+            ));
             return provisioning::auto_fetch_profile(&self.cfg, &self.paths);
         }
 
@@ -114,32 +115,42 @@ impl IosBuilder {
 
         let client = AppStoreClient::from_config(&self.cfg)?;
 
-        step("Looking up bundle ID on App Store Connect...");
+        self.step("Looking up bundle ID on App Store Connect...");
         let bundle_id_ref =
             client.find_or_create_bundle_id(&self.cfg.bundle_id, &self.cfg.app_name)?;
-        cprintln!(
+        self.note(cformat!(
             "<dim>  Bundle ID: {} (portal ID: {})</dim>",
             self.cfg.bundle_id,
             bundle_id_ref
-        );
+        ));
 
-        step("Finding development certificates...");
+        self.step("Finding development certificates...");
         let certs = client.list_development_certificates()?;
-        cprintln!(
+        self.note(cformat!(
             "<dim>  Found {} development certificate(s)</dim>",
             certs.len()
-        );
+        ));
         let cert_ids: Vec<String> = certs.iter().map(|c| c.id.clone()).collect();
 
-        step("Matching tracked devices to portal...");
-        cprintln!("<dim>  Tracked devices: {}</dim>", device_set.device.len());
+        self.step("Matching tracked devices to portal...");
+        self.note(cformat!(
+            "<dim>  Tracked devices: {}</dim>",
+            device_set.device.len()
+        ));
         let portal_devices = client.list_devices()?;
-        cprintln!("<dim>  Portal devices: {}</dim>", portal_devices.len());
+        self.note(cformat!(
+            "<dim>  Portal devices: {}</dim>",
+            portal_devices.len()
+        ));
         let mut device_ids = Vec::new();
         for tracked in &device_set.device {
             match portal_devices.iter().find(|d| d.udid == tracked.udid) {
                 Some(pd) => {
-                    cprintln!("<dim>  Matched: {} ({})</dim>", tracked.name, tracked.udid);
+                    self.note(cformat!(
+                        "<dim>  Matched: {} ({})</dim>",
+                        tracked.name,
+                        tracked.udid
+                    ));
                     device_ids.push(pd.id.clone());
                 },
                 None => bail!(
@@ -153,7 +164,7 @@ impl IosBuilder {
         }
 
         let profile_name = format!("strudel {} Development", self.cfg.app_name);
-        step(&format!(
+        self.step(&format!(
             "Creating provisioning profile \"{profile_name}\"..."
         ));
         let profile_bytes = client.create_development_profile(
@@ -165,10 +176,10 @@ impl IosBuilder {
 
         ensure_strudel_dir(&self.paths.strudel_dir)?;
         fs::write(&self.paths.cached_profile, &profile_bytes)?;
-        cprintln!(
+        self.note(cformat!(
             "<green>✔</green> Profile cached at {}",
             self.paths.cached_profile.display()
-        );
+        ));
         Ok(())
     }
 }

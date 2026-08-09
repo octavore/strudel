@@ -2,14 +2,14 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use clml::{cformat, cformatdoc, cprintln};
 
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::apple::provisioning::{self, ensure_keychain_ready};
 use crate::builder::ios::IosTarget;
 use crate::builder::ios::profile::decode_profile;
 use crate::builder::keychain::parse_identity_line;
-use crate::builder::{IosBuilder, is_framework, step};
+use crate::builder::{IosBuilder, is_framework};
 use crate::config::IosProvisioningBackend;
 use crate::shell::ShellCommand;
 
@@ -30,7 +30,7 @@ impl IosBuilder {
         // Resolve provisioning profile.
         let profile_path = self.resolve_profile(&target_udids)?;
 
-        step("Embedding provisioning profile...");
+        self.step("Embedding provisioning profile...");
         self.copy_file(&profile_path, &app_bundle.join("embedded.mobileprovision"))?;
 
         // For free provisioning, always sign with the exact certificate we
@@ -46,7 +46,7 @@ impl IosBuilder {
             dev_fp = provisioning::dev_cert_sha1()?;
         }
 
-        step("Signing device bundle...");
+        self.step("Signing device bundle...");
         let is_free = matches!(ios_settings.provisioning, IosProvisioningBackend::Free);
         let identity = if let Some(fp) = &dev_fp {
             fp.as_str()
@@ -59,7 +59,7 @@ impl IosBuilder {
 
         let app_str = app_bundle.to_str().unwrap();
         for udid in &target_udids {
-            step(&format!("Installing on {udid}..."));
+            self.step(&format!("Installing on {udid}..."));
             retry_while_locked(udid, || {
                 self.sh.run(&[
                     "xcrun",
@@ -73,13 +73,13 @@ impl IosBuilder {
                 ])
             })?;
 
-            step("Launching app...");
+            self.step("Launching app...");
             // Attach to the console and stream logs live when running on a
             // single device. With multiple target devices we'd need to
             // stream several consoles concurrently to one terminal, so fall
             // back to a plain, non-blocking launch there instead.
             if target_udids.len() == 1 {
-                cprintln!("<dim>Streaming logs. Press Ctrl+C to stop.</dim>");
+                self.note(cformat!("<dim>Streaming logs. Press Ctrl+C to stop.</dim>"));
                 retry_while_locked(udid, || {
                     self.sh
                         .run_streamed_stdout(ShellCommand::new("xcrun").args([
@@ -109,11 +109,10 @@ impl IosBuilder {
             })?;
         }
 
-        println!();
-        cprintln!(
-            "<green>Done!</green> App installed and launched on {} device(s).",
+        self.note(cformat!(
+            "\n<green>Done!</green> App installed and launched on {} device(s).",
             target_udids.len()
-        );
+        ));
         Ok(())
     }
 
@@ -128,25 +127,22 @@ impl IosBuilder {
         identity: &str,
     ) -> Result<()> {
         if self.dry_run {
-            cprintln!(
-                "<dim>[dry-run]</dim> security cms -D -i {} | extract Entitlements",
-                profile_path.display()
-            );
-            cprintln!(
-                "<dim>[dry-run]</dim> codesign --force --sign {} --entitlements \
-                 ios-device-entitlements.plist --generate-entitlement-der {}",
-                identity,
+            self.echo(cformatdoc! {"
+                <dim>[dry-run]</dim> security cms -D -i {} | extract Entitlements
+                <dim>[dry-run]</dim> codesign --force --sign {identity} --entitlements \
+                ios-device-entitlements.plist --generate-entitlement-der {}",
+                profile_path.display(),
                 app_bundle.display()
-            );
+            });
             return Ok(());
         }
 
-        step("Checking signing identity...");
+        self.step("Checking signing identity...");
         self.check_signing_identity(identity)?;
 
         let profile_plist = decode_profile(profile_path)?;
 
-        step("Checking certificate is authorized by profile...");
+        self.step("Checking certificate is authorized by profile...");
         self.check_identity_in_profile(identity, &profile_plist)?;
 
         let entitlements = profile_plist
@@ -164,7 +160,7 @@ impl IosBuilder {
         let bundle_str = app_bundle.to_str().unwrap();
 
         if !self.cfg.embed_libs.is_empty() {
-            step(&format!("Signing embedded libraries ({identity})..."));
+            self.step(&format!("Signing embedded libraries ({identity})..."));
             let frameworks_dir = app_bundle.join("Frameworks");
             for lib_path in &self.cfg.embed_libs {
                 if let Some(file_name) = lib_path.file_name() {
@@ -196,7 +192,7 @@ impl IosBuilder {
             .status()
             .context("Failed to run codesign")?;
 
-        step("Verifying device signature...");
+        self.step("Verifying device signature...");
         let verify_status = std::process::Command::new("codesign")
             .args(["--verify", "--deep", "--strict", "--verbose=2", bundle_str])
             .status()

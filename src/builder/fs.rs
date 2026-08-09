@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use color_print::cprintln;
+use clml::cformat;
 
 use crate::builder::BuilderCore;
 
@@ -13,7 +13,7 @@ impl BuilderCore {
     /// Create a directory (and parents), logging in dry-run instead of acting.
     pub(super) fn create_dir(&self, path: &Path) -> Result<()> {
         if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> mkdir -p {}", path.display());
+            self.echo(cformat!("<dim>[dry-run]</dim> mkdir -p {}", path.display()));
             return Ok(());
         }
         fs::create_dir_all(path).with_context(|| format!("Failed to create {}", path.display()))
@@ -22,11 +22,11 @@ impl BuilderCore {
     /// Copy a file, logging source -> dest in dry-run instead of acting.
     pub(super) fn copy_file(&self, from: &Path, to: &Path) -> Result<()> {
         if self.dry_run {
-            cprintln!(
+            self.echo(cformat!(
                 "<dim>[dry-run]</dim> copy <blue>{}</blue> -> <blue>{}</blue>",
                 from.display(),
                 to.display()
-            );
+            ));
             return Ok(());
         }
         fs::copy(from, to)
@@ -52,11 +52,11 @@ impl BuilderCore {
     #[allow(dead_code)]
     pub(super) fn write_file(&self, path: &Path, contents: &str) -> Result<()> {
         if self.dry_run {
-            cprintln!(
+            self.echo(cformat!(
                 "<dim>[dry-run]</dim> write {} ({} bytes)",
                 path.display(),
                 contents.len()
-            );
+            ));
             return Ok(());
         }
         fs::write(path, contents).with_context(|| format!("Failed to write {}", path.display()))

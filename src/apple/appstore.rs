@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use color_print::cprintln;
+use clml::cprintln;
 use indoc::indoc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::de::DeserializeOwned;

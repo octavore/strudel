@@ -1,6 +1,5 @@
-use anstream::println;
 use clap::Command;
-use color_print::cformat;
+use clml::cprintln;
 use indoc::formatdoc;
 
 const ANSI_GREEN: &str = "\x1b[32m"; // env vars
@@ -84,7 +83,7 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                         sub.print_long_help().unwrap();
                         println!();
                     } else {
-                        println!("{}", cformat!("<red>Unknown topic: {t}</red>"));
+                        cprintln!("<red>Unknown topic: {t}</red>");
                         eprintln!();
                         print_index(&app);
                         std::process::exit(1);
@@ -112,19 +111,13 @@ fn print_index(app: &Command) {
     println!("Available commands:");
     println!();
     for (name, about) in commands(app) {
-        println!(
-            "{}",
-            cformat!("  <bold,green>{name:<14}</bold,green> {about}")
-        );
+        cprintln!("  <bold,green>{name:<14}</bold,green> {about}");
     }
     println!();
     println!("Available topics:");
     println!();
     for (name, desc) in TOPICS {
-        println!(
-            "{}",
-            cformat!("  <bold,green>{name:<14}</bold,green> {desc}")
-        );
+        cprintln!("  <bold,green>{name:<14}</bold,green> {desc}");
     }
     println!();
     println!("Usage: strudel help <topic/command>");
@@ -133,9 +126,9 @@ fn print_index(app: &Command) {
 fn print_help(text: &str) {
     for line in text.lines() {
         if line.starts_with("# ") {
-            println!("{}", cformat!("<bold,cyan>{}</bold,cyan>", line));
+            cprintln!("<bold,cyan>{}</bold,cyan>", line);
         } else if line.starts_with("## ") {
-            println!("{}", cformat!("<bold,yellow>{}</bold,yellow>", line));
+            cprintln!("<bold,yellow>{}</bold,yellow>", line);
         } else {
             println!("{}", line);
         }

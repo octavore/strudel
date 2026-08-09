@@ -22,14 +22,13 @@ name = "strudel"
 path = "src/main.rs"
 
 [dependencies]
-anstream = "1.0.0"
 anyhow = "1"
-appleid = {package = "strudel-appleid", path = "crates/appleid", version = "0.6.0" }
+appleid = {package = "strudel-appleid", path = "crates/appleid", version = "0.6.0"}
 base64 = "0.22"
 clap = {version = "4", features = ["derive"]}
-color-print = "0.3.7"
-dmg = {package = "strudel-dmg", path = "crates/dmg", version = "0.6.0" }
-icon = {package = "strudel-icon", path = "crates/icon", version = "0.6.0" }
+clml = { version = "0.2", features = ["anstream", "doc"] }
+dmg = {package = "strudel-dmg", path = "crates/dmg", version = "0.6.0"}
+icon = {package = "strudel-icon", path = "crates/icon", version = "0.6.0"}
 image = {version = "0.25", default-features = false, features = ["png"]}
 indoc = "2"
 inquire = "0.9"
@@ -48,6 +47,7 @@ ureq = {version = "3", features = ["json"]}
 xdg = "3.0.0"
 
 [dev-dependencies]
+anstream = "1.0.0"
 temp-env = "0.3"
 tempfile = "3"
 

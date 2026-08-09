@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::builder::{BuilderCore, step};
+use crate::builder::BuilderCore;
 
 /// Whether an `embed_libs` entry is a `.framework` directory bundle rather
 /// than a flat dylib.
@@ -55,7 +55,7 @@ impl BuilderCore {
             return Ok(());
         }
 
-        step("Embedding libraries and frameworks...");
+        self.step("Embedding libraries and frameworks...");
 
         self.create_dir(frameworks_dir)?;
 
@@ -130,7 +130,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::resolve_build_artifact;
-    use crate::builder::BuilderCore;
+    use crate::builder::{BuilderCore, OutputFlags};
     use crate::config::fixtures::resolved_macos;
 
     #[test]
@@ -175,7 +175,7 @@ mod tests {
 
         let mut cfg = resolved_macos();
         cfg.embed_libs = vec!["Sparkle.framework".into()];
-        let core = BuilderCore::new(cfg, false, false);
+        let core = BuilderCore::new(cfg, OutputFlags::default(), false);
 
         let frameworks_dir = dir.path().join("Frameworks");
         let executable = dir.path().join("MyApp");

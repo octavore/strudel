@@ -1,5 +1,5 @@
 use anyhow::Result;
-use color_print::cprintln;
+use clml::cprintln;
 
 use crate::config::{Platform, ResolvedConfig, ResolvedProject};
 

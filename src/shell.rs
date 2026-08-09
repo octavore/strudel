@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::process::{ExitStatus, Output, Stdio};
 
 use anyhow::{Result, bail};
-use color_print::cprintln;
+use clml::cprintln;
 
 pub use crate::shell::command::{ShellArg, ShellCommand};
 
@@ -41,18 +41,38 @@ fn exit_code_str(status: &ExitStatus) -> String {
 #[derive(Clone, Copy)]
 pub struct Shell {
     pub dry_run: bool,
+    no_echo: bool,
+    quiet: bool,
 }
 
 impl Shell {
-    pub fn new(dry_run: bool) -> Self {
-        Shell { dry_run }
+    pub fn new(dry_run: bool, no_echo: bool, quiet: bool) -> Self {
+        Shell {
+            dry_run,
+            no_echo,
+            quiet,
+        }
+    }
+
+    /// Full silence: no progress messages, no command echo, and streamed
+    /// subprocess output is captured instead of shown live (only surfaced on
+    /// failure).
+    pub fn quiet(&self) -> bool {
+        self.quiet
+    }
+
+    /// True if the dim "command: ..." echo lines should be skipped, either
+    /// because `--no-echo` was passed directly or because quiet mode implies
+    /// it.
+    pub fn echo_suppressed(&self) -> bool {
+        self.no_echo || self.quiet
     }
 
     /// Run a command, return trimmed stdout. Fails on non-zero exit.
     /// In dry-run, the env is printed for transparency.
     pub fn run<C: Into<ShellCommand>>(&self, shell_cmd: C) -> Result<String> {
         let shell_cmd = shell_cmd.into();
-        if !self.dry_run || !shell_cmd.hide_dry_run {
+        if (!self.dry_run || !shell_cmd.hide_dry_run) && !self.echo_suppressed() {
             shell_cmd.log(self.dry_run);
         }
         if self.dry_run {
@@ -74,10 +94,12 @@ impl Shell {
         stdin_data: &[u8],
     ) -> Result<String> {
         let shell_cmd = shell_cmd.into();
-        shell_cmd.log_with_trailer(self.dry_run, &format!("<< <[{} bytes]>", stdin_data.len()));
-        match std::str::from_utf8(stdin_data) {
-            Ok(text) => cprintln!("<dim>{text}</dim>"),
-            Err(_) => cprintln!("<dim>(binary data)</dim>",),
+        if !self.echo_suppressed() {
+            shell_cmd.log_with_trailer(self.dry_run, &format!("<< <[{} bytes]>", stdin_data.len()));
+            match std::str::from_utf8(stdin_data) {
+                Ok(text) => cprintln!("<dim>{text}</dim>"),
+                Err(_) => cprintln!("<dim>(binary data)</dim>"),
+            }
         }
         if self.dry_run {
             return Ok(String::new());
@@ -103,9 +125,23 @@ impl Shell {
     /// Use for long-running commands (e.g. `swift build`) where progress
     /// should be visible. Output is not captured, failures report only
     /// the exit code (since command output is streamed live).
+    ///
+    /// Under `--no-echo` or `--quiet` the subprocess's own output (e.g. raw
+    /// `swift build` diagnostics) is captured instead of streamed live, and
+    /// only surfaced on failure, so the two flags actually silence the
+    /// command rather than merely hiding the "command: ..." line above it.
     pub fn run_streamed_env(&self, shell_cmd: ShellCommand) -> Result<()> {
-        shell_cmd.log(self.dry_run);
+        if !self.echo_suppressed() {
+            shell_cmd.log(self.dry_run);
+        }
         if self.dry_run {
+            return Ok(());
+        }
+        if self.echo_suppressed() {
+            let output = shell_cmd.command().output()?;
+            if !output.status.success() {
+                bail!(format_failure(&shell_cmd, &output));
+            }
             return Ok(());
         }
         let status = shell_cmd
@@ -128,8 +164,17 @@ impl Shell {
     /// to detect a locked-device error and retry). Captured stderr is still
     /// echoed to the terminal once the command finishes.
     pub fn run_streamed_stdout(&self, shell_cmd: ShellCommand) -> Result<()> {
-        shell_cmd.log(self.dry_run);
+        if !self.echo_suppressed() {
+            shell_cmd.log(self.dry_run);
+        }
         if self.dry_run {
+            return Ok(());
+        }
+        if self.echo_suppressed() {
+            let output = shell_cmd.command().output()?;
+            if !output.status.success() {
+                bail!(format_failure(&shell_cmd, &output));
+            }
             return Ok(());
         }
         let mut child = shell_cmd

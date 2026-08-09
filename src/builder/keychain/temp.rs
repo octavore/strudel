@@ -7,11 +7,11 @@ use std::fs;
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as b64;
-use color_print::cprintln;
+use clml::{cformatdoc, cprintln};
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::builder::MacosBuilder;
 use crate::builder::keychain::parse_identity_line;
-use crate::builder::{MacosBuilder, step};
 use crate::shell::{Shell, ShellCommand};
 
 /// Extract the quoted identity names from `security find-identity` output.
@@ -55,7 +55,7 @@ impl MacosBuilder {
             return Ok(None);
         };
 
-        step("Importing signing certificate into a temporary keychain...");
+        self.step("Importing signing certificate into a temporary keychain...");
 
         let pid = std::process::id();
         let temp_dir = tempfile::Builder::new()
@@ -72,21 +72,15 @@ impl MacosBuilder {
         let kc_pw: SecretString = format!("strudel-{pid}").into();
 
         if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> security create-keychain -p <<redacted>> {keychain}");
-            cprintln!(
-                "<dim>[dry-run]</dim> decode $APPLE_CERTIFICATE ({} b64 chars) -> <<temp>>.p12",
+            self.echo(cformatdoc! {"
+                <dim>[dry-run]</dim> security create-keychain -p <<redacted>> {keychain}
+                <dim>[dry-run]</dim> decode $APPLE_CERTIFICATE ({} b64 chars) -> <<temp>>.p12
+                <dim>[dry-run]</dim> security import <<temp>>.p12 -P <<redacted>> -k {keychain}
+                <dim>[dry-run]</dim> security set-key-partition-list -S apple-tool:,apple: -k <<redacted>> {keychain}
+                <dim>[dry-run]</dim> security list-keychains -d user -s {keychain} <<existing...>>
+                <dim>[dry-run]</dim> security find-identity -v -p codesigning {keychain}",
                 cert_b64.expose_secret().len()
-            );
-            cprintln!(
-                "<dim>[dry-run]</dim> security import <<temp>>.p12 -P <<redacted>> -k {keychain}"
-            );
-            cprintln!(
-                "<dim>[dry-run]</dim> security set-key-partition-list -S apple-tool:,apple: -k <<redacted>> {keychain}"
-            );
-            cprintln!(
-                "<dim>[dry-run]</dim> security list-keychains -d user -s {keychain} <<existing...>>"
-            );
-            cprintln!("<dim>[dry-run]</dim> security find-identity -v -p codesigning {keychain}");
+            });
             return Ok(Some((
                 TempKeychain {
                     sh: self.sh,
@@ -222,10 +216,12 @@ pub(in crate::builder) struct TempKeychain {
 impl Drop for TempKeychain {
     fn drop(&mut self) {
         if self.dry_run {
-            cprintln!(
-                "<dim>[dry-run]</dim> security delete-keychain {}",
-                self.path
-            );
+            if !self.sh.echo_suppressed() {
+                cprintln!(
+                    "<dim>[dry-run]</dim> security delete-keychain {}",
+                    self.path
+                );
+            }
             return;
         }
         if !self.original_list.is_empty() {

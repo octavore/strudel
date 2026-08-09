@@ -7,8 +7,8 @@ fmt = ["cargo clippy", "cargo +nightly fmt"]
 check = "cargo +nightly fmt -- --check"
 test = "cargo test --workspace --locked"
 lint = "cargo clippy --workspace --all-targets --locked -- -D warnings"
-mdlint = "rumdl check ."
-ci = [":check", ":lint", ":mdlint", ":test"]
+"lint:md" = "rumdl check ."
+ci = [":check", ":lint", ":lint:md", ":test"]
 release = "./scripts/release.sh"
 
 "example:hello-world" = "cargo run -- --config examples/HelloWorldApp/strudel.toml run"

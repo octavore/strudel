@@ -11,7 +11,7 @@ mod shell;
 mod skill;
 mod status;
 
-use color_print::ceprintln;
+use clml::ceprintln;
 
 fn main() -> ! {
     let exit_code = cli::Cli::execute().map(|_| 0).unwrap_or_else(|e| {

@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use clap::Subcommand;
 
-use crate::builder::IosBuilder;
+use crate::builder::{IosBuilder, OutputFlags};
 use crate::cli::helpers::for_each_selected;
 use crate::config::{self, Platform};
 use crate::status;
@@ -48,7 +48,11 @@ impl ProfileCmd {
             }) => {
                 let project = config::load_config(config)?;
                 for_each_selected(&project, target.as_deref(), Platform::Ios, false, |cfg| {
-                    IosBuilder::new(cfg.clone(), dry_run, false)?.profile_fetch(force)
+                    let output = OutputFlags {
+                        dry_run,
+                        ..Default::default()
+                    };
+                    IosBuilder::new(cfg.clone(), output, false)?.profile_fetch(force)
                 })
             },
         }

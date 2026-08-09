@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use color_print::cprintln;
+use clml::cprintln;
 
 use crate::help;
 

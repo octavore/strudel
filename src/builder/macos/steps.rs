@@ -7,17 +7,17 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use clml::cformat;
 use dmg::DmgSpec;
 use serde_json::Value;
 
+use crate::builder::MacosBuilder;
 use crate::builder::macos::notarize::NotarizationState;
-use crate::builder::{MacosBuilder, step};
 use crate::shell::ShellCommand;
 
 impl MacosBuilder {
     pub fn clean(&self) -> Result<()> {
-        step("Cleaning previous build...");
+        self.step("Cleaning previous build...");
         let build_dir = &self.paths.build_dir;
         if build_dir.as_os_str().is_empty() || build_dir == Path::new("/") {
             bail!("build_dir is empty or root, refusing to clean");
@@ -25,8 +25,9 @@ impl MacosBuilder {
 
         if self.dry_run {
             let build_dir = build_dir.display();
-            cprintln!("<dim>[dry-run]</dim> rm -rf {build_dir}");
-            cprintln!("<dim>[dry-run]</dim> mkdir -p {build_dir}");
+            self.echo(cformat!(
+                "<dim>[dry-run]</dim> rm -rf {build_dir}\n<dim>[dry-run]</dim> mkdir -p {build_dir}"
+            ));
             return Ok(());
         }
 
@@ -43,7 +44,7 @@ impl MacosBuilder {
     /// locate a specific target's binary.
     pub fn build_binary(&self) -> Result<PathBuf> {
         let config_flag = if self.debug { "debug" } else { "release" };
-        step(&format!("Building {config_flag} binary..."));
+        self.step(&format!("Building {config_flag} binary..."));
 
         // Build base args shared between both swift invocations
         let source = self.cfg.source_dir.to_str().unwrap();
@@ -105,19 +106,19 @@ impl MacosBuilder {
         let temp_dmg = &self.paths.strudel_temp_dmg;
         let temp_dmg_str = temp_dmg.to_str().unwrap();
 
-        step("Creating DMG...");
+        self.step("Creating DMG...");
 
         if let Some(dmg_cfg) = &macos_settings.dmg {
             if self.dry_run {
-                cprintln!(
+                self.echo(cformat!(
                     "<dim>[dry-run]</dim> hdiutil create -volname {:?} -format UDZO {}",
                     vol_name,
                     temp_dmg.display()
-                );
+                ));
                 return Ok(());
             }
             fs::create_dir_all(&self.paths.strudel_dir)?;
-            step("Configuring DMG window...");
+            self.step("Configuring DMG window...");
             dmg::create(
                 &DmgSpec {
                     vol_name,
@@ -143,12 +144,12 @@ impl MacosBuilder {
             let staging_applications = staging.join("Applications");
 
             if self.dry_run {
-                cprintln!("<dim>[dry-run]</dim> rm -rf {staging_str}");
-                cprintln!("<dim>[dry-run]</dim> mkdir -p {staging_str}");
-                cprintln!(
-                    "<dim>[dry-run]</dim> ln -s /Applications {}",
+                self.echo(cformat!(
+                    "<dim>[dry-run]</dim> rm -rf {staging_str}\n\
+                     <dim>[dry-run]</dim> mkdir -p {staging_str}\n\
+                     <dim>[dry-run]</dim> ln -s /Applications {}",
                     staging_applications.display()
-                );
+                ));
             } else {
                 fs::create_dir_all(&self.paths.strudel_dir)?;
                 if staging.exists() {
@@ -190,11 +191,11 @@ impl MacosBuilder {
         let temp_dmg = &self.paths.strudel_temp_dmg;
         let temp_dmg_str = temp_dmg.to_str().unwrap();
 
-        step("Submitting DMG for notarization...");
-        cprintln!(
+        self.step("Submitting DMG for notarization...");
+        self.note(cformat!(
             "<dim>Note: first-time notarization can take several hours. \
              Press Ctrl-C to stop: run `strudel release --resume` to continue later.</dim>"
-        );
+        ));
 
         let auth_args = self.notary_auth_args()?;
         let notarize_cmd = ShellCommand::new("xcrun")
@@ -215,19 +216,19 @@ impl MacosBuilder {
                 .to_string()
         };
 
-        cprintln!("  <dim>Submission ID: {uuid}</dim>");
+        self.note(cformat!("  <dim>Submission ID: {uuid}</dim>"));
 
         let pending = self.paths.pending_submission(&uuid);
         if !self.dry_run {
             fs::create_dir_all(&pending.dir)?;
             fs::rename(temp_dmg, &pending.dmg)?;
         } else {
-            cprintln!("<dim>[dry-run]</dim> mkdir -p {}", pending.dir.display());
-            cprintln!(
-                "<dim>[dry-run]</dim> mv {} {}",
+            self.echo(cformat!(
+                "<dim>[dry-run]</dim> mkdir -p {}\n<dim>[dry-run]</dim> mv {} {}",
+                pending.dir.display(),
                 temp_dmg.display(),
                 pending.dmg.display()
-            );
+            ));
         }
 
         let state = NotarizationState {
@@ -240,7 +241,10 @@ impl MacosBuilder {
         if !self.dry_run {
             fs::write(&pending.state, toml::to_string(&state)?)?;
         } else {
-            cprintln!("<dim>[dry-run]</dim> write {}", pending.state.display());
+            self.echo(cformat!(
+                "<dim>[dry-run]</dim> write {}",
+                pending.state.display()
+            ));
         }
 
         self.poll_notarization(&uuid, &pending, &PathBuf::from(&state.dmg_dest), &auth_args)

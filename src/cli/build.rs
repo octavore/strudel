@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::builder::{IosBuilder, MacosBuilder};
+use crate::builder::{IosBuilder, MacosBuilder, OutputFlags};
 use crate::cli::helpers::{all_or_named, run_for_targets};
 use crate::config::{self, ResolvedTargetPlatform};
 
@@ -19,6 +19,16 @@ pub(crate) struct BuildCmd {
     #[arg(long)]
     dry_run: bool,
 
+    /// Suppress echoing of the underlying commands
+    #[arg(long)]
+    no_echo: bool,
+
+    /// Full silence: no progress messages or command echo, and streamed
+    /// subprocess output (e.g. `swift build`) is only shown on failure.
+    /// Implies --no-echo.
+    #[arg(long)]
+    quiet: bool,
+
     /// (macOS) Open the app bundle after a successful build
     #[arg(long)]
     open: bool,
@@ -34,6 +44,14 @@ pub(crate) struct BuildCmd {
 }
 
 impl BuildCmd {
+    fn output_flags(&self) -> OutputFlags {
+        OutputFlags {
+            dry_run: self.dry_run,
+            no_echo: self.no_echo,
+            quiet: self.quiet,
+        }
+    }
+
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
         let project = config::load_config(config)?;
         let targets = all_or_named(&project, self.target.as_deref())?;
@@ -41,7 +59,7 @@ impl BuildCmd {
             ResolvedTargetPlatform::Mac(_) => {
                 let mut builder = MacosBuilder::new(
                     cfg.clone(),
-                    self.dry_run,
+                    self.output_flags(),
                     self.open,
                     self.debug,
                     None,
@@ -62,7 +80,7 @@ impl BuildCmd {
                 if self.install {
                     anyhow::bail!("--install is only supported for macOS targets");
                 }
-                IosBuilder::new(cfg.clone(), self.dry_run, self.debug)?.build()
+                IosBuilder::new(cfg.clone(), self.output_flags(), self.debug)?.build()
             },
         })
     }

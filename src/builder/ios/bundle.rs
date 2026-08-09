@@ -2,11 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use color_print::cprintln;
+use clml::cformat;
 use serde_json::{Map, Value, json};
 
 use crate::builder::ios::IosTarget;
-use crate::builder::{IosBuilder, read_partial_info_plist, resolve_build_artifact, step};
+use crate::builder::{IosBuilder, read_partial_info_plist, resolve_build_artifact};
 use crate::config::ResolvedIcon;
 use crate::icon::{ios, render};
 use crate::shell::ShellCommand;
@@ -38,7 +38,7 @@ impl IosBuilder {
         // a bare name (e.g. a SwiftPM-generated resource bundle) resolves
         // against the current build's output.
         if let Some(rdir) = &self.cfg.resources_dir {
-            step("Copying resource directory...");
+            self.step("Copying resource directory...");
             let rdir = resolve_build_artifact(rdir, bin_dir);
             self.copy_tree(&rdir, app_bundle)?;
         }
@@ -46,7 +46,7 @@ impl IosBuilder {
         // Copy individual user-configured resource files and folders into
         // the bundle root. Same bin_dir fallback as resources_dir.
         if !self.cfg.resources.is_empty() {
-            step("Copying resources...");
+            self.step("Copying resources...");
             for resource in &self.cfg.resources {
                 let resource = resolve_build_artifact(resource, bin_dir);
                 let name = resource.file_name().with_context(|| {
@@ -161,7 +161,7 @@ impl IosBuilder {
         app_bundle: &Path,
         target: IosTarget,
     ) -> Result<Map<String, Value>> {
-        step("Compiling asset catalog...");
+        self.step("Compiling asset catalog...");
         let icon_name = self.ios.app_icon_name.clone();
         let partial_plist_path = app_bundle
             .parent()
@@ -192,10 +192,12 @@ impl IosBuilder {
         target: IosTarget,
     ) -> Result<Map<String, Value>> {
         if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> generate app icon and compile via actool");
+            self.echo(cformat!(
+                "<dim>[dry-run]</dim> generate app icon and compile via actool"
+            ));
             return Ok(Map::new());
         }
-        step("Generating app icon...");
+        self.step("Generating app icon...");
 
         let work_dir = app_bundle
             .parent()
@@ -355,7 +357,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::builder::IosBuilder;
+    use crate::builder::{IosBuilder, OutputFlags};
     use crate::config::fixtures::resolved_ios;
 
     #[test]
@@ -366,7 +368,11 @@ mod tests {
     }
 
     fn builder() -> IosBuilder {
-        IosBuilder::new(resolved_ios(), true, false).unwrap()
+        let output = OutputFlags {
+            dry_run: true,
+            ..Default::default()
+        };
+        IosBuilder::new(resolved_ios(), output, false).unwrap()
     }
 
     #[test]

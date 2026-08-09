@@ -6,10 +6,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp, fs};
 
 use anyhow::{Context, Result, bail};
-use color_print::{cprint, cprintln};
+use clml::{cformat, cprint, cprintln};
 use serde::{Deserialize, Serialize};
 
-use crate::builder::{MacosBuilder, step};
+use crate::builder::MacosBuilder;
 use crate::paths::PendingSubmission;
 use crate::shell::ShellArg;
 
@@ -73,10 +73,12 @@ impl MacosBuilder {
         dmg_dest: &Path,
         auth_args: &[ShellArg],
     ) -> Result<()> {
-        step("Waiting for notarization...");
+        self.step("Waiting for notarization...");
 
         if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> Would poll notarytool info {uuid} until accepted");
+            self.echo(cformat!(
+                "<dim>[dry-run]</dim> Would poll notarytool info {uuid} until accepted"
+            ));
             return self.finalize_notarization(pending, dmg_dest);
         }
 
@@ -93,8 +95,7 @@ impl MacosBuilder {
 
             let apple_status = match status {
                 "Accepted" => {
-                    println!();
-                    cprintln!("  <green>Accepted!</green>");
+                    self.note(cformat!("\n  <green>Accepted!</green>"));
                     return self.finalize_notarization(pending, dmg_dest);
                 },
                 "Invalid" | "Rejected" => {
@@ -124,7 +125,9 @@ impl MacosBuilder {
                 );
             }
 
-            if self.ci {
+            if self.quiet() {
+                sleep(Duration::from_secs(POLL_SECS));
+            } else if self.ci {
                 // A plain line per poll cycle instead of a \r-updating
                 // countdown, which reads as endless noise in captured CI logs.
                 let elapsed_s = started.elapsed().as_secs();
@@ -160,11 +163,11 @@ impl MacosBuilder {
         let pending_dmg_str = pending.dmg.to_str().unwrap();
         let app_bundle_str = self.paths.app_bundle.to_str().unwrap();
 
-        step("Stapling app bundle...");
+        self.step("Stapling app bundle...");
         self.sh
             .run(&["xcrun", "stapler", "staple", app_bundle_str])?;
 
-        step("Verifying Gatekeeper assessment...");
+        self.step("Verifying Gatekeeper assessment...");
         let _ = self
             .sh
             .run(&[
@@ -179,11 +182,11 @@ impl MacosBuilder {
             ])
             .inspect_err(|e| cprintln!("<yellow>warning:</yellow> spctl assessment failed: {e}"));
 
-        step("Stapling DMG...");
+        self.step("Stapling DMG...");
         self.sh
             .run(&["xcrun", "stapler", "staple", pending_dmg_str])?;
 
-        step("Moving DMG to output...");
+        self.step("Moving DMG to output...");
         if !self.dry_run {
             if let Some(parent) = dmg_dest.parent() {
                 fs::create_dir_all(parent)?;
@@ -191,12 +194,12 @@ impl MacosBuilder {
             fs::rename(&pending.dmg, dmg_dest)?;
             fs::remove_dir_all(&pending.dir)?;
         } else {
-            cprintln!(
-                "<dim>[dry-run]</dim> mv {} {}",
+            self.echo(cformat!(
+                "<dim>[dry-run]</dim> mv {} {}\n<dim>[dry-run]</dim> rm -rf {}",
                 pending.dmg.display(),
-                dmg_dest.display()
-            );
-            cprintln!("<dim>[dry-run]</dim> rm -rf {}", pending.dir.display());
+                dmg_dest.display(),
+                pending.dir.display()
+            ));
         }
 
         Ok(())
@@ -298,16 +301,15 @@ impl MacosBuilder {
         let dmg_dest = PathBuf::from(&state.dmg_dest);
         let auth_args = self.notary_auth_args()?;
 
-        step("Resuming notarization...");
-        cprintln!("  <dim>Submission ID: {uuid}</dim>");
+        self.step("Resuming notarization...");
+        self.note(cformat!("  <dim>Submission ID: {uuid}</dim>"));
 
         self.poll_notarization(&uuid, &pending, &dmg_dest, &auth_args)?;
 
-        println!();
-        cprintln!(
-            "<green>Done!</green> DMG: <cyan>{}</cyan>",
+        self.note(cformat!(
+            "\n<green>Done!</green> DMG: <cyan>{}</cyan>",
             dmg_dest.display()
-        );
+        ));
         Ok(())
     }
 }

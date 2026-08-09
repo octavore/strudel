@@ -16,10 +16,10 @@ mod sim;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use color_print::cprintln;
+use clml::cprintln;
 pub use profile::decode_profile;
 
-use crate::builder::{IosBuilder, step};
+use crate::builder::IosBuilder;
 use crate::shell::ShellCommand;
 
 /// Simulator or device target. This selects the SDK, triple suffix, and
@@ -84,7 +84,7 @@ impl IosBuilder {
             .run(&["xcrun", "-f", "swift"])
             .map(|s| if s.is_empty() { "swift".into() } else { s })?;
 
-        step(build_label);
+        self.step(build_label);
         let source = self.cfg.source_dir.to_str().unwrap();
         let mut build_cmd = ShellCommand::new(&swift)
             .args([
@@ -112,7 +112,7 @@ impl IosBuilder {
         let bin_dir = self.ios_bin_dir(&swift, config_flag, &triple, &sdk_path)?;
         let binary = self.find_binary_in(&bin_dir, target_name)?;
 
-        step(assemble_label);
+        self.step(assemble_label);
         let bundle_dir = self.paths.build_dir.join(bundle_dir_name);
         let app_bundle = bundle_dir.join(format!("{target_name}.app"));
         self.assemble_ios_bundle(&binary, &app_bundle, target, &bin_dir)?;

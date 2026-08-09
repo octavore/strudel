@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 pub(crate) use bundle::{is_framework, resolve_build_artifact};
-use color_print::{cformat, cprintln};
+use clml::{cformat, cprintln};
 use indoc::formatdoc;
 pub(crate) use ios::decode_profile;
 
@@ -36,6 +36,20 @@ use crate::config::{
 };
 use crate::paths::Paths;
 use crate::shell::Shell;
+
+/// Output-verbosity flags shared by every driver constructor, grouped so
+/// adding one doesn't blow out the parameter count on `MacosBuilder::new`/
+/// `IosBuilder::new`.
+#[derive(Clone, Copy, Default)]
+pub struct OutputFlags {
+    /// Print commands without executing them.
+    pub dry_run: bool,
+    /// Suppress echoing of the underlying commands.
+    pub no_echo: bool,
+    /// Full silence: no progress messages or command echo, and streamed
+    /// subprocess output is only shown on failure. Implies `no_echo`.
+    pub quiet: bool,
+}
 
 /// State and helpers shared by every platform driver.
 pub struct BuilderCore {
@@ -81,11 +95,6 @@ impl Deref for IosBuilder {
     }
 }
 
-/// Print a green progress header for a build step.
-pub(crate) fn step(msg: &str) {
-    cprintln!("\n<green>==>> {msg}</green>");
-}
-
 /// Read `actool`'s `--output-partial-info-plist` output (an XML plist
 /// fragment, typically just `CFBundleIconName`/`CFBundleIcons`) and decode
 /// it straight into JSON via `plist`'s serde support, so it can be merged
@@ -109,14 +118,59 @@ pub(crate) fn read_partial_info_plist(
 }
 
 impl BuilderCore {
-    fn new(cfg: ResolvedConfig, dry_run: bool, debug: bool) -> Self {
+    fn new(cfg: ResolvedConfig, output: OutputFlags, debug: bool) -> Self {
         BuilderCore {
             paths: Paths::new(&cfg),
-            sh: Shell::new(dry_run),
-            dry_run,
+            sh: Shell::new(output.dry_run, output.no_echo, output.quiet),
+            dry_run: output.dry_run,
             debug,
             cfg,
         }
+    }
+
+    /// Print a green progress header for a build step. Suppressed in quiet
+    /// mode. When `--no-echo` is set (but not `--quiet`), the leading blank
+    /// line is dropped so consecutive step headers, now the only thing on
+    /// screen, print back-to-back instead of double-spaced.
+    pub(crate) fn step(&self, msg: &str) {
+        if self.sh.quiet() {
+            return;
+        }
+        if self.echo_suppressed() {
+            cprintln!("<green>==>> {msg}</green>");
+        } else {
+            cprintln!("\n<green>==>> {msg}</green>");
+        }
+    }
+
+    /// Print a dim command/filesystem echo line (e.g. a dry-run "rm -rf ..."),
+    /// unless suppressed by `--no-echo` or `--quiet`. Build the (optionally
+    /// colored) message with `clml::cformat!`.
+    pub(crate) fn echo(&self, msg: impl AsRef<str>) {
+        if !self.echo_suppressed() {
+            cprintln!("{}", msg.as_ref());
+        }
+    }
+
+    /// Print an informational/success line, suppressed by `--no-echo` as
+    /// well as `--quiet` since it's noise once command echo and streamed
+    /// subprocess output are already hidden.
+    pub(crate) fn note(&self, msg: impl AsRef<str>) {
+        if !self.echo_suppressed() {
+            cprintln!("{}", msg.as_ref());
+        }
+    }
+
+    /// Full silence: no progress headers, "Done!" banners, or streamed
+    /// subprocess output.
+    pub(crate) fn quiet(&self) -> bool {
+        self.sh.quiet()
+    }
+
+    /// True if the dim command-echo lines (including dry-run filesystem
+    /// echoes) should be skipped.
+    pub(crate) fn echo_suppressed(&self) -> bool {
+        self.sh.echo_suppressed()
     }
 
     /// Locate the binary for `target_name` in the swift build output dir. In
@@ -176,19 +230,21 @@ impl BuilderCore {
             anyhow::bail!("build_dir is empty or root, refusing to clean");
         }
 
-        step("Cleaning strudel output...");
+        self.step("Cleaning strudel output...");
         let prefix = if self.dry_run { "[dry-run] " } else { "" };
-        cprintln!("<dim>{prefix}rm -rf {}</dim>", build_dir.display());
+        self.echo(cformat!(
+            "<dim>{prefix}rm -rf {}</dim>",
+            build_dir.display()
+        ));
         if !self.dry_run && build_dir.exists() {
             std::fs::remove_dir_all(build_dir)?;
         }
 
-        step("Cleaning Swift build cache...");
+        self.step("Cleaning Swift build cache...");
         self.sh
             .run(&["swift", "package", "clean", "--package-path", source])?;
 
-        println!();
-        cprintln!("<green>Done!</green>");
+        self.note(cformat!("\n<green>Done!</green>"));
         Ok(())
     }
 }
@@ -196,13 +252,17 @@ impl BuilderCore {
 /// Clean a single target's build output. Platform-agnostic, so `strudel
 /// clean` can tidy macOS and iOS targets alike without picking a driver.
 pub fn clean(cfg: ResolvedConfig, dry_run: bool) -> Result<()> {
-    BuilderCore::new(cfg, dry_run, false).clean_command()
+    let output = OutputFlags {
+        dry_run,
+        ..Default::default()
+    };
+    BuilderCore::new(cfg, output, false).clean_command()
 }
 
 impl MacosBuilder {
     pub fn new(
         cfg: ResolvedConfig,
-        dry_run: bool,
+        output: OutputFlags,
         open: bool,
         debug: bool,
         resume: Option<String>,
@@ -214,7 +274,7 @@ impl MacosBuilder {
         };
         let macos = macos.clone();
         Ok(MacosBuilder {
-            core: BuilderCore::new(cfg, dry_run, debug),
+            core: BuilderCore::new(cfg, output, debug),
             macos,
             open,
             resume,
@@ -252,9 +312,10 @@ impl MacosBuilder {
         let app_bundle = self.assemble_bundle(&host_binary, &bin_dir)?;
         self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
-        println!();
-        cprintln!("<green>Done! App bundle:</green>");
-        cprintln!("<cyan>{}</cyan>", app_bundle.display());
+        self.note(cformat!(
+            "\n<green>Done! App bundle:</green>\n<cyan>{}</cyan>",
+            app_bundle.display()
+        ));
         self.open_app()?;
         Ok(())
     }
@@ -278,13 +339,15 @@ impl MacosBuilder {
         });
         self.sign()?;
 
-        println!();
-        if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> Dry run complete. Signed app bundle would be at:");
+        let status = if self.dry_run {
+            cformat!("<dim>[dry-run]</dim> Dry run complete. Signed app bundle would be at:")
         } else {
-            println!("Done! Signed app bundle:");
+            "Done! Signed app bundle:".to_string()
         };
-        cprintln!("<cyan>{}</cyan>", app_bundle.display());
+        self.note(cformat!(
+            "\n{status}\n<cyan>{}</cyan>",
+            app_bundle.display()
+        ));
         self.open_app()?;
         Ok(())
     }
@@ -296,14 +359,13 @@ impl MacosBuilder {
         let app_bundle = &self.paths.app_bundle;
         let dest = Path::new("/Applications").join(format!("{}.app", self.cfg.app_name));
 
-        println!();
         if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> rm -rf {}", dest.display());
-            cprintln!(
-                "<dim>[dry-run]</dim> ditto {} {}",
+            self.echo(cformat!(
+                "\n<dim>[dry-run]</dim> rm -rf {}\n<dim>[dry-run]</dim> ditto {} {}",
+                dest.display(),
                 app_bundle.display(),
                 dest.display()
-            );
+            ));
             return Ok(());
         }
 
@@ -312,10 +374,10 @@ impl MacosBuilder {
                 .with_context(|| format!("Failed to remove existing {}", dest.display()))?;
         }
         self.copy_tree(app_bundle, &dest)?;
-        cprintln!(
-            "<green>Installed to</green> <cyan>{}</cyan>",
+        self.note(cformat!(
+            "\n<green>Installed to</green> <cyan>{}</cyan>",
             dest.display()
-        );
+        ));
         Ok(())
     }
 
@@ -336,11 +398,10 @@ impl MacosBuilder {
             }
         }
         self.copy_file(dmg, &dest)?;
-        println!();
-        cprintln!(
-            "<green>DMG copied to</green> <cyan>{}</cyan>",
+        self.note(cformat!(
+            "\n<green>DMG copied to</green> <cyan>{}</cyan>",
             dest.display()
-        );
+        ));
         Ok(())
     }
 
@@ -383,33 +444,30 @@ impl MacosBuilder {
             self.notarize()?;
         }
 
-        println!();
         let app_bundle_path = cformat!("<cyan>{}</cyan>", app_bundle.display());
         let dmg_path = cformat!("<cyan>{}</cyan>", self.paths.dmg.display());
-        let msg = formatdoc! {r#"
+        let artifacts = formatdoc! {r#"
             App bundle: {app_bundle_path}
             DMG:        {dmg_path}
         "#};
-        if self.dry_run {
-            cprintln!("<dim>[dry-run]</dim> Dry run complete. Artifacts would be at:");
-            println!("{msg}");
-            if !self.skip_notarization {
-                let problems = self.credential_problems();
-                if !problems.is_empty() {
-                    println!();
-                    cprintln!("<red>WARNING:</red> Credential problems:");
-                    for p in &problems {
-                        cprintln!("- {p}");
-                    }
+        let status = if self.dry_run {
+            cformat!("<dim>[dry-run]</dim> Dry run complete. Artifacts would be at:")
+        } else if self.skip_notarization {
+            cformat!("<green>Done!</green> DMG built (notarization skipped):")
+        } else {
+            cformat!("<green>Done!</green> Distribution artifacts:")
+        };
+        self.note(format!("\n{status}\n{artifacts}"));
+        if self.dry_run && !self.skip_notarization {
+            let problems = self.credential_problems();
+            if !problems.is_empty() {
+                println!();
+                cprintln!("<red>WARNING:</red> Credential problems:");
+                for p in &problems {
+                    cprintln!("- {p}");
                 }
             }
-        } else if self.skip_notarization {
-            cprintln!("<green>Done!</green> DMG built (notarization skipped):");
-            println!("{msg}");
-        } else {
-            cprintln!("<green>Done!</green> Distribution artifacts:");
-            println!("{msg}");
-        };
+        }
 
         self.open_app()?;
         Ok(())
@@ -417,13 +475,13 @@ impl MacosBuilder {
 }
 
 impl IosBuilder {
-    pub fn new(cfg: ResolvedConfig, dry_run: bool, debug: bool) -> Result<Self> {
+    pub fn new(cfg: ResolvedConfig, output: OutputFlags, debug: bool) -> Result<Self> {
         let ResolvedTargetPlatform::Ios(ref ios) = cfg.target_platform else {
             bail!("IosBuilder constructed for a non-iOS target");
         };
         let ios = ios.clone();
         Ok(IosBuilder {
-            core: BuilderCore::new(cfg, dry_run, debug),
+            core: BuilderCore::new(cfg, output, debug),
             ios,
         })
     }

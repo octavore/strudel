@@ -6,10 +6,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use clml::{cformat, cprintln};
 use serde_json::{Value, json};
 
-use crate::builder::{MacosBuilder, read_partial_info_plist, resolve_build_artifact, step};
+use crate::builder::{MacosBuilder, read_partial_info_plist, resolve_build_artifact};
 use crate::config::{ExtensionKind, ResolvedExtension, ResolvedIcon};
 use crate::icon::icns;
 use crate::icon::render::render_to_png;
@@ -21,7 +21,7 @@ impl MacosBuilder {
     // 1. copy in the binary and other resources
     // 2. generate the Info.plist from the info JSON
     pub fn assemble_bundle(&self, binary_path: &Path, bin_dir: &Path) -> Result<PathBuf> {
-        step("Assembling app bundle...");
+        self.step("Assembling app bundle...");
         let app_bundle = &self.paths.app_bundle;
         let app_bundle_resources_dir = app_bundle.join("Contents/Resources");
 
@@ -101,7 +101,7 @@ impl MacosBuilder {
         // bare name (e.g. a SwiftPM-generated resource bundle) resolves
         // against the current build's output.
         if let Some(rdir) = &self.cfg.resources_dir {
-            step("Copying resource directory...");
+            self.step("Copying resource directory...");
             let rdir = resolve_build_artifact(rdir, bin_dir);
             self.copy_tree(&rdir, &app_bundle_resources_dir)?;
         }
@@ -109,7 +109,7 @@ impl MacosBuilder {
         // Copy individual user-configured resource files and folders into
         // Contents/Resources/. Same bin_dir fallback as resources_dir.
         if !self.cfg.resources.is_empty() {
-            step("Copying resources...");
+            self.step("Copying resources...");
             for resource in &self.cfg.resources {
                 let resource = resolve_build_artifact(resource, bin_dir);
                 let name = resource.file_name().with_context(|| {
@@ -135,7 +135,7 @@ impl MacosBuilder {
         // bundle. Signing (if requested) happens later, in `sign()`, after
         // every file is in place.
         if !self.cfg.copy.is_empty() {
-            step("Copying extra files...");
+            self.step("Copying extra files...");
             for item in &self.cfg.copy {
                 let name = item.src.file_name().with_context(|| {
                     format!("copy entry has no filename: {}", item.src.display())
@@ -157,7 +157,7 @@ impl MacosBuilder {
     /// Compile `assets_dir` (a `.xcassets` catalog) into
     /// `Assets.car` inside `resources_dir` via `xcrun actool`.
     fn compile_macos_assets(&self, assets_dir: &Path, resources_dir: &Path) -> Result<()> {
-        step("Compiling asset catalog...");
+        self.step("Compiling asset catalog...");
 
         let deployment_target = self.macos_deployment_target()?;
         let assets_str = assets_dir
@@ -212,15 +212,15 @@ impl MacosBuilder {
             })?;
 
         if self.dry_run {
-            cprintln!(
+            self.echo(cformat!(
                 "<dim>[dry-run]</dim> compile icon <blue>{}</blue> -> <blue>{}</blue> via actool",
                 icon_path.display(),
                 resources_dir.display()
-            );
+            ));
             return Ok(serde_json::Map::new());
         }
 
-        step("Compiling app icon via actool...");
+        self.step("Compiling app icon via actool...");
         let deployment_target = self.macos_deployment_target()?;
         let icon_str = icon_path
             .to_str()
@@ -294,29 +294,29 @@ impl MacosBuilder {
                     return self.copy_file(path, dest);
                 }
                 if self.dry_run {
-                    cprintln!(
+                    self.echo(cformat!(
                         "<dim>[dry-run]</dim> convert icon <blue>{}</blue> -> <blue>{}</blue> (.icns)",
                         path.display(),
                         dest.display()
-                    );
+                    ));
                     return Ok(());
                 }
-                step("Converting app icon to .icns...");
+                self.step("Converting app icon to .icns...");
                 icns::make_icns(path, dest)
             },
             ResolvedIcon::Generated {
                 src, icns: to_icns, ..
             } => {
                 if self.dry_run {
-                    cprintln!(
+                    self.echo(cformat!(
                         "<dim>[dry-run]</dim> generate icon <blue>{}</blue> -> <blue>{}</blue>",
                         src.display(),
                         dest.display()
-                    );
+                    ));
                     return Ok(());
                 }
 
-                step("Generating app icon...");
+                self.step("Generating app icon...");
 
                 if !to_icns {
                     return render_to_png(icon, dest);
@@ -348,7 +348,7 @@ impl MacosBuilder {
         paths: &ExtensionPaths,
         bin_dir: &Path,
     ) -> Result<()> {
-        step(&format!("Assembling extension `{}`...", ext.name));
+        self.step(&format!("Assembling extension `{}`...", ext.name));
 
         // Locate the extension binary that `swift build` produced. Building
         // all package targets is intentional: a Package.swift that declares

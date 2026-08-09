@@ -1,12 +1,12 @@
 use std::io::{self, Write};
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use clml::{cformat, cprintln};
 use serde::Deserialize;
 
 use crate::apple::appstore::AppStoreClient;
 use crate::apple::provisioning;
-use crate::builder::{IosBuilder, step};
+use crate::builder::IosBuilder;
 use crate::config::IosProvisioningBackend;
 use crate::devices::DeviceSet;
 use crate::paths::ensure_strudel_dir;
@@ -154,7 +154,7 @@ impl IosBuilder {
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
             );
             for (udid, name) in devices {
-                step(&format!("Registering {name} ({udid}) via Apple ID..."));
+                self.step(&format!("Registering {name} ({udid}) via Apple ID..."));
                 provisioning::register_device(&self.cfg, name, udid)?;
             }
         } else {
@@ -167,7 +167,7 @@ impl IosBuilder {
                     cprintln!("<dim>Already registered on portal:</dim> {name} ({udid})");
                     continue;
                 }
-                step(&format!("Registering {name} ({udid}) on portal..."));
+                self.step(&format!("Registering {name} ({udid}) on portal..."));
                 match client.register_device(name, udid) {
                     Ok(_) => {},
                     Err(e) => {
@@ -234,11 +234,14 @@ impl IosBuilder {
         // install step surfaces a clear error later.
         if device_set.device.len() == 1 {
             let d = &device_set.device[0];
-            cprintln!("<green>✔</green> Using registered device: {}", d.name);
+            self.note(cformat!(
+                "<green>✔</green> Using registered device: {}",
+                d.name
+            ));
             return Ok(vec![d.udid.clone()]);
         }
 
-        step("Detecting connected iOS device...");
+        self.step("Detecting connected iOS device...");
         let connected = self.list_connected_devices()?;
 
         if self.dry_run {
@@ -249,15 +252,15 @@ impl IosBuilder {
 
         // Hint about connected devices that aren't tracked rather than failing.
         for (udid, name) in &unregistered {
-            cprintln!(
+            self.note(cformat!(
                 "<dim>Skipping untracked device {name} ({udid}). Run \
                  `strudel devices add` to add it.</dim>"
-            );
+            ));
         }
 
         match resolution {
             DeviceResolution::Single { udid, name } => {
-                cprintln!("<green>✔</green> Found device: {name}");
+                self.note(cformat!("<green>✔</green> Found device: {name}"));
                 Ok(vec![udid])
             },
             DeviceResolution::Prompt(registered) => {

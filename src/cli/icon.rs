@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use color_print::cprintln;
+use clml::cprintln;
 
 use crate::cli::helpers::all_or_named;
 use crate::config::{self, ResolvedIcon};

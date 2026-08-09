@@ -4,10 +4,10 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use clml::{cformat, cprintln};
 use serde_json::Value;
 
-use crate::builder::{MacosBuilder, step};
+use crate::builder::MacosBuilder;
 
 impl MacosBuilder {
     /// Describe any signing/notarization credentials that are missing or
@@ -69,7 +69,7 @@ impl MacosBuilder {
         if self.dry_run {
             return Ok(false);
         }
-        step("Validating signing identity...");
+        self.step("Validating signing identity...");
         let identity = &self.cfg.sign_identity;
 
         let identity_in = |args: &[&str]| -> Result<bool> {
@@ -83,7 +83,7 @@ impl MacosBuilder {
         };
 
         if identity_in(&["find-identity", "-v", "-p", "codesigning"])? {
-            cprintln!("<green>✔</green> Signing identity found");
+            self.note(cformat!("<green>✔</green> Signing identity found"));
             Ok(false)
         } else if identity_in(&["find-identity", "-p", "codesigning"])? {
             cprintln!(
@@ -102,7 +102,7 @@ impl MacosBuilder {
     /// Decode a provisioning profile with `security cms` and warn about
     /// expiry, team ID mismatches, and bundle ID mismatches.
     pub(crate) fn validate_provisioning_profile(&self, profile_path: &Path) -> Result<()> {
-        step("Validating provisioning profile...");
+        self.step("Validating provisioning profile...");
         let profile_str = profile_path.to_str().unwrap();
 
         // 1. Decode the CMS envelope in memory and parse with the `plist` crate.
@@ -170,7 +170,7 @@ impl MacosBuilder {
             }
         }
 
-        cprintln!("<green>✔</green> Provisioning profile validated");
+        self.note(cformat!("<green>✔</green> Provisioning profile validated"));
         Ok(())
     }
 
@@ -208,11 +208,16 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::builder::OutputFlags;
     use crate::config::ResolvedConfig;
     use crate::config::fixtures::resolved_macos;
 
     fn builder(cfg: ResolvedConfig) -> MacosBuilder {
-        MacosBuilder::new(cfg, true, false, false, None, false, false).unwrap()
+        let output = OutputFlags {
+            dry_run: true,
+            ..Default::default()
+        };
+        MacosBuilder::new(cfg, output, false, false, None, false, false).unwrap()
     }
 
     #[test]

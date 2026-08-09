@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 
-use crate::builder::MacosBuilder;
+use crate::builder::{MacosBuilder, OutputFlags};
 use crate::cli::helpers::{all_or_named, run_for_targets};
 use crate::config::{self, ResolvedTargetPlatform};
 
@@ -14,6 +14,16 @@ pub(crate) struct ReleaseCmd {
     /// Print commands without executing them
     #[arg(long)]
     dry_run: bool,
+
+    /// Suppress echoing of the underlying commands
+    #[arg(long)]
+    no_echo: bool,
+
+    /// Full silence: no progress messages or command echo, and streamed
+    /// subprocess output (e.g. `swift build`) is only shown on failure.
+    /// Implies --no-echo.
+    #[arg(long)]
+    quiet: bool,
 
     /// Open the app bundle after a successful build
     #[arg(long)]
@@ -42,6 +52,14 @@ pub(crate) struct ReleaseCmd {
 }
 
 impl ReleaseCmd {
+    fn output_flags(&self) -> OutputFlags {
+        OutputFlags {
+            dry_run: self.dry_run,
+            no_echo: self.no_echo,
+            quiet: self.quiet,
+        }
+    }
+
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
         let project = config::load_config(config)?;
         let targets = all_or_named(&project, self.target.as_deref())?;
@@ -56,7 +74,7 @@ impl ReleaseCmd {
             ResolvedTargetPlatform::Mac(_) => {
                 let mut builder = MacosBuilder::new(
                     cfg.clone(),
-                    self.dry_run,
+                    self.output_flags(),
                     self.open,
                     false,
                     self.resume.clone(),

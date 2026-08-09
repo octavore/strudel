@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::path::PathBuf;
 use std::process::Command;
 
-use color_print::{cformat, cprintln};
+use clml::{cformat, cprintln};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::shell::Shell;

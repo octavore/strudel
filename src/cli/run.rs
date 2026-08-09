@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::builder::{IosBuilder, MacosBuilder};
+use crate::builder::{IosBuilder, MacosBuilder, OutputFlags};
 use crate::cli::helpers::{all_or_named, run_for_targets};
 use crate::config::{self, Platform, ResolvedTargetPlatform};
 
@@ -33,12 +33,30 @@ pub(crate) struct RunCmd {
     #[arg(long)]
     dry_run: bool,
 
+    /// Suppress echoing of the underlying commands
+    #[arg(long)]
+    no_echo: bool,
+
+    /// Full silence: no progress messages or command echo, and streamed
+    /// subprocess output (e.g. `swift build`) is only shown on failure.
+    /// Implies --no-echo.
+    #[arg(long)]
+    quiet: bool,
+
     /// Build with the debug configuration instead of release
     #[arg(long)]
     debug: bool,
 }
 
 impl RunCmd {
+    fn output_flags(&self) -> OutputFlags {
+        OutputFlags {
+            dry_run: self.dry_run,
+            no_echo: self.no_echo,
+            quiet: self.quiet,
+        }
+    }
+
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
         let project = config::load_config(config)?;
         // --sim / --device only apply to iOS targets, so if either is given
@@ -55,7 +73,7 @@ impl RunCmd {
             ResolvedTargetPlatform::Mac(_) => {
                 let mut builder = MacosBuilder::new(
                     cfg.clone(),
-                    self.dry_run,
+                    self.output_flags(),
                     true,
                     self.debug,
                     None,
@@ -69,7 +87,7 @@ impl RunCmd {
                 }
             },
             ResolvedTargetPlatform::Ios(_) => {
-                let builder = IosBuilder::new(cfg.clone(), self.dry_run, self.debug)?;
+                let builder = IosBuilder::new(cfg.clone(), self.output_flags(), self.debug)?;
                 if !self.device.is_empty() {
                     let selectors: Vec<String> = self
                         .device

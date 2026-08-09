@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use appleid::Session;
-use color_print::cprintln;
+use clml::cprintln;
 
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder;

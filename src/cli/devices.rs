@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use clap::Subcommand;
 
-use crate::builder::IosBuilder;
+use crate::builder::{IosBuilder, OutputFlags};
 use crate::cli::helpers::for_each_selected;
 use crate::config::{self, Platform};
 use crate::status;
@@ -70,7 +70,11 @@ impl DevicesCmd {
             }) => {
                 let project = config::load_config(config)?;
                 for_each_selected(&project, target.as_deref(), Platform::Ios, false, |cfg| {
-                    IosBuilder::new(cfg.clone(), dry_run, false)?.device_add(&devices)
+                    let output = OutputFlags {
+                        dry_run,
+                        ..Default::default()
+                    };
+                    IosBuilder::new(cfg.clone(), output, false)?.device_add(&devices)
                 })
             },
             Some(DevicesAction::Register {
@@ -81,7 +85,11 @@ impl DevicesCmd {
             }) => {
                 let project = config::load_config(config)?;
                 for_each_selected(&project, target.as_deref(), Platform::Ios, false, |cfg| {
-                    IosBuilder::new(cfg.clone(), dry_run, false)?.device_register(&name, &udid)
+                    let output = OutputFlags {
+                        dry_run,
+                        ..Default::default()
+                    };
+                    IosBuilder::new(cfg.clone(), output, false)?.device_register(&name, &udid)
                 })
             },
         }

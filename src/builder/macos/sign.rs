@@ -5,7 +5,7 @@ use std::fs;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::builder::{MacosBuilder, is_framework, step};
+use crate::builder::{MacosBuilder, is_framework};
 use crate::config::ResolvedExtension;
 use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;
@@ -67,7 +67,7 @@ impl MacosBuilder {
         // bundle. codesign --verify --deep --strict and notarization both
         // require nested Mach-O files to carry valid signatures.
         if !self.cfg.embed_libs.is_empty() {
-            step(&format!("Signing embedded libraries...{msg}"));
+            self.step(&format!("Signing embedded libraries...{msg}"));
             let frameworks_dir = self.paths.app_bundle.join("Contents/Frameworks");
             for lib_path in &self.cfg.embed_libs {
                 if let Some(file_name) = lib_path.file_name() {
@@ -91,7 +91,7 @@ impl MacosBuilder {
         // sealed: directories may contain nested code (hence `--deep`), flat
         // files (e.g. a helper binary) are signed directly.
         if self.cfg.copy.iter().any(|c| c.sign) {
-            step(&format!("Signing copied files...{msg}"));
+            self.step(&format!("Signing copied files...{msg}"));
             for item in self.cfg.copy.iter().filter(|c| c.sign) {
                 let name = item.src.file_name().with_context(|| {
                     format!("copy entry has no filename: {}", item.src.display())
@@ -157,7 +157,7 @@ impl MacosBuilder {
         }
 
         // Run bundle codesign with entitlements
-        step(&format!("Signing app bundle...{msg}"));
+        self.step(&format!("Signing app bundle...{msg}"));
 
         // Some entitlements only work when the signature is backed by a provisioning
         // profile. Ad-hoc signatures carry no profile, so the system (launchd)
@@ -170,7 +170,7 @@ impl MacosBuilder {
         codesign_cmd = codesign_cmd.arg_group(["--entitlements", ent_plist_path]);
         self.sh.run(codesign_cmd.arg(app_bundle))?;
 
-        step("Verifying signature...");
+        self.step("Verifying signature...");
         self.sh.run(&[
             "codesign",
             "--verify",
@@ -226,7 +226,7 @@ impl MacosBuilder {
             ent_plist_str,
         ])?;
 
-        step(&format!("Signing extension `{}`...{msg}", ext.name));
+        self.step(&format!("Signing extension `{}`...{msg}", ext.name));
         if adhoc {
             self.validate_entitlements_for_adhoc(&ent_value);
         }

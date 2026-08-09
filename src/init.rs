@@ -2,7 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 use anyhow::{Result, bail};
-use color_print::cprintln;
+use clml::cprintln;
 
 use crate::apple::provisioning;
 use crate::config::{

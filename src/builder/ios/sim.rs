@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use color_print::cprintln;
+use clml::{cformat, cprintln};
 use serde::Deserialize;
 
 use crate::builder::ios::IosTarget;
-use crate::builder::{IosBuilder, is_framework, step};
+use crate::builder::{IosBuilder, is_framework};
 use crate::shell::ShellCommand;
 
 #[derive(Deserialize)]
@@ -35,9 +35,10 @@ impl IosBuilder {
     /// triple. No signing, install, or launch. See `run --sim` for that.
     pub fn build(&self) -> Result<()> {
         let app_bundle = self.build_sim_bundle()?;
-        println!();
-        cprintln!("<green>Done! App bundle:</green>");
-        cprintln!("<cyan>{}</cyan>", app_bundle.display());
+        self.note(cformat!(
+            "\n<green>Done! App bundle:</green>\n<cyan>{}</cyan>",
+            app_bundle.display()
+        ));
         Ok(())
     }
 
@@ -48,7 +49,7 @@ impl IosBuilder {
         let app_bundle = self.build_sim_bundle()?;
 
         if !self.cfg.embed_libs.is_empty() {
-            step("Ad-hoc signing embedded libraries...");
+            self.step("Ad-hoc signing embedded libraries...");
             let frameworks_dir = app_bundle.join("Frameworks");
             for lib_path in &self.cfg.embed_libs {
                 if let Some(file_name) = lib_path.file_name() {
@@ -67,7 +68,7 @@ impl IosBuilder {
             }
         }
 
-        step("Ad-hoc signing simulator bundle...");
+        self.step("Ad-hoc signing simulator bundle...");
         self.sh.run(
             ShellCommand::new("codesign")
                 .args(["--force", "--sign", "-", "--timestamp=none"])
@@ -76,16 +77,16 @@ impl IosBuilder {
 
         let sim_udid = self.find_simulator(sim_name)?;
 
-        step("Booting iOS Simulator...");
+        self.step("Booting iOS Simulator...");
         let _ = self.sh.run(&["xcrun", "simctl", "boot", &sim_udid]);
         self.sh.run(&["open", "-a", "Simulator"])?;
 
-        step("Installing app on simulator...");
+        self.step("Installing app on simulator...");
         let app_str = app_bundle.to_str().unwrap();
         self.sh
             .run(&["xcrun", "simctl", "install", &sim_udid, app_str])?;
 
-        step("Launching app...");
+        self.step("Launching app...");
         self.sh.run(ShellCommand::new("xcrun").args([
             "simctl",
             "launch",

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
-use color_print::cprintln;
+use clml::cprintln;
 use toml_edit::{DocumentMut, Item, Table, value};
 
 #[derive(Clone, Copy, ValueEnum)]
