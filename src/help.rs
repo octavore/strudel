@@ -1,11 +1,5 @@
 use clap::Command;
-use clml::cprintln;
-use indoc::formatdoc;
-
-const ANSI_GREEN: &str = "\x1b[32m"; // env vars
-const ANSI_BLUE: &str = "\x1b[34m"; // code
-const ANSI_PURPLE: &str = "\x1b[35m"; // toml
-const ANSI_RESET: &str = "\x1b[0m";
+use clml::{cformatdoc, cprintln};
 
 pub(crate) const TOPICS: &[(&str, &str)] = &[
     ("config", "Full strudel.toml reference"),
@@ -136,7 +130,7 @@ fn print_help(text: &str) {
 }
 
 fn print_targets() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Multiple targets (product x platform)
 
         A single `strudel.toml` can declare multiple build targets using `[[target]]`
@@ -150,7 +144,7 @@ fn print_targets() {
         - Monorepos with multiple executables that share signing/notarization creds.
 
         ## Example: macOS + iOS from one strudel.toml
-        {ANSI_PURPLE}
+        <magenta>
         # Shared across all targets:
         [apple]
         identity     = "Developer ID Application: You (XXXXXXXXXX)"
@@ -185,7 +179,7 @@ fn print_targets() {
         app.version      = "1.0.0"
         app.build_number = "1"
         ios.deployment_target = "18.0"
-        {ANSI_RESET}
+        </>
         ## Rules
 
         - A config defines EITHER a top-level [app] OR one or more [[target]] blocks,
@@ -197,17 +191,17 @@ fn print_targets() {
 
         ## Selecting targets at runtime
 
-        Every target has an id of `<platform>/<app.name>`, e.g. `macos/MyApp` and
+        Every target has an id of `<<platform>>/<<app.name>>`, e.g. `macos/MyApp` and
         `ios/MyApp`. Two targets on the same platform may not share an app name.
 
         When multiple targets are eligible for a command, strudel runs them all and
         prints a per-target header. To narrow to a single target, give any substring
         of its id, eg:
-        {ANSI_BLUE}
+        <blue>
         strudel build ios/MyApp    # the whole id
         strudel build mac          # a prefix of the platform
         strudel build MyApp        # the app name
-        {ANSI_RESET}
+        </>
         A selector must select exactly one target. `MyApp` above works only if a
         single target carries that app name; when both a macOS and an iOS target do,
         strudel will report an error. Exact id matches always works, eg `ios/App`
@@ -226,10 +220,10 @@ fn print_targets() {
 
         With multiple targets, each gets its own build directory, named for its target
         id so they cannot collide:
-          .build/dist/macos/<name>
-          .build/dist/ios/<name>
+          .build/dist/macos/<<name>>
+          .build/dist/ios/<<name>>
 
-        Override per-target with {ANSI_PURPLE}build.build_dir{ANSI_RESET}.
+        Override per-target with <magenta>build.build_dir</>.
 
         ## iOS extension caveat
 
@@ -239,28 +233,28 @@ fn print_targets() {
 
         ## See also
 
-        {ANSI_BLUE}strudel help config{ANSI_RESET}
-        {ANSI_BLUE}strudel help extensions{ANSI_RESET}
+        <blue>strudel help config</>
+        <blue>strudel help extensions</>
     "#});
 }
 
 fn print_config() {
-    print_help(&formatdoc! {r##"
+    print_help(&cformatdoc! {r##"
         # strudel.toml reference
 
         Relative paths are resolved relative to the config file's directory.
-        Override the config path with: {ANSI_BLUE}strudel --config path/to/strudel.toml <cmd>{ANSI_RESET}
+        Override the config path with: <blue>strudel --config path/to/strudel.toml <<cmd>></>
 
         ## [app] required
-        {ANSI_PURPLE}
+        <magenta>
         [app]
         name         = "MyApp"              # display name, .app bundle name, binary name
         bundle_id    = "com.example.myapp"  # CFBundleIdentifier
         version      = "1.0.0"              # CFBundleShortVersionString
         build_number = "1"                  # CFBundleVersion; default: "1"
-        {ANSI_RESET}
+        </>
         ## [build] optional
-        {ANSI_PURPLE}
+        <magenta>
         [build]
         source_dir             = "."                       # Swift package root; default: config file dir
         build_dir              = ".build/dist"             # output dir; relative to source_dir
@@ -274,50 +268,50 @@ fn print_config() {
 
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
         resources              = ["Assets/logo.png"]       # individual files/folders to copy into Contents/Resources/
-        {ANSI_RESET}
+        </>
         Both resolve relative to the config file's directory unless absolute, same as
         any other path. If the resolved location doesn't exist, strudel falls back to
-        the current build's `.build/<triple>/release/` output dir instead - so a bare
+        the current build's `.build/<<triple>>/release/` output dir instead - so a bare
         name (e.g. a SwiftPM-generated resource bundle) still works without listing a
         path.
 
         ## [[build.copy]] optional, repeatable
         # Arbitrary files/directories copied to a caller-chosen destination inside the
-        # bundle (e.g. a helper binary), optionally signed. See {ANSI_BLUE}strudel help copy{ANSI_RESET}.
-        {ANSI_PURPLE}
+        # bundle (e.g. a helper binary), optionally signed. See <blue>strudel help copy</>.
+        <magenta>
         [[build.copy]]
         src      = "path/to/helper"
         dest_dir = "Contents/MacOS"
         sign     = true
-        {ANSI_RESET}
+        </>
         ## assets_dir optional; top-level key (like [dmg]), not under [build]
         # xcassets catalog compiled into Contents/Resources/Assets.car via actool.
         # Deployment target is read from Package.swift's platforms entry; defaults to 14.0 if none.
-        {ANSI_PURPLE}
+        <magenta>
         assets_dir = "Sources/App/Assets.xcassets"
-        {ANSI_RESET}
+        </>
         ## [build.icon] optional; no icon if unset
         # Either a png or icns file copied in unmodified (set icon.path), or
         # generate an icon from a png or svg at build time (icon.src). For iOS
         # targets, ios.assets_dir takes precedence if both are set.
-        {ANSI_PURPLE}
+        <magenta>
         icon.src        = "art.png"
         icon.scale      = 1.2               # optional
         icon.background = "#fefefe"       # optional; hex, defaults to white
-        {ANSI_RESET}
+        </>
         ## [build.build_env] optional
 
-        Extra env vars forwarded to {ANSI_BLUE}swift build{ANSI_RESET} (e.g. for pkg-config):
-        {ANSI_PURPLE}
+        Extra env vars forwarded to <blue>swift build</> (e.g. for pkg-config):
+        <magenta>
         [build.build_env]
         PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
-        {ANSI_RESET}
+        </>
         ## [apple] optional, but required for `release`
 
         Apple developer identifiers, shared by signing, notarization, and
         provisioning-profile management (the App Store Connect API key
         authenticates all three).
-        {ANSI_PURPLE}
+        <magenta>
         [apple]
         identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id      = "XXXXXXXXXX"
@@ -326,26 +320,26 @@ fn print_config() {
         api_key          = "2X9R4HXF34"
         api_key_path     = "AuthKey_2X9R4HXF34.p8"
         notarize_timeout = 600   # seconds to wait for notarytool; default: 600
-        {ANSI_RESET}
+        </>
         Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
-        See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
+        See: <blue>strudel help global-config</>
 
         ## [[target]] optional, repeatable (multi-target configs)
 
         Replace [app] with one or more [[target]] blocks to build multiple
         products or platforms (e.g. macOS + iOS) from the same strudel.toml.
-        See: {ANSI_BLUE}strudel help targets{ANSI_RESET}
+        See: <blue>strudel help targets</>
 
         ## [[extensions]] optional, repeatable
 
-        See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
+        See: <blue>strudel help extensions</>
 
         ## [ios] optional
 
         Only valid inside an iOS [[target]] block, or as a top-level fallback for
         iOS targets in a multi-target config - the flat single-app form above is
-        always macOS. See: {ANSI_BLUE}strudel help targets{ANSI_RESET}
-        {ANSI_PURPLE}
+        always macOS. See: <blue>strudel help targets</>
+        <magenta>
         [ios]
         simulator         = "iPhone 16"  # default; override with --simulator
         device            = "My iPhone"  # name or UDID; auto-detected if unset
@@ -358,11 +352,11 @@ fn print_config() {
         #   "free"               any Apple ID, no paid account; 7-day profiles, max 3 devices
         provisioning = "app_store_connect"  # or "free"
         apple_id     = "you@example.com"    # pre-fills the login prompt (free path only)
-        {ANSI_RESET}
-        See {ANSI_BLUE}strudel help ios-device{ANSI_RESET} and {ANSI_BLUE}strudel help ios-free-provisioning{ANSI_RESET}.
+        </>
+        See <blue>strudel help ios-device</> and <blue>strudel help ios-free-provisioning</>.
 
         ## [dmg] optional overrides for macOS DMG window layout
-        {ANSI_PURPLE}
+        <magenta>
         [dmg]
         plain          = false                         # set true for a plain UDZO DMG
         background     = "assets/dmg-background.png"  # PNG/JPEG image or "#rrggbb" color; optional
@@ -374,56 +368,56 @@ fn print_config() {
         applications_x = 468                           # Applications symlink X (default shown)
         applications_y = 192                           # Applications symlink Y (default shown)
         icon_text_size = 12.0                         # icon label point size (default shown)
-        {ANSI_RESET}
+        </>
         By default (even with no `[dmg]` section), strudel stages the app, an
         Applications symlink, and a generated `.DS_Store` that lays out the Finder
         window (icon positions, size, background), then builds the compressed DMG
         directly from that folder.
 
         To skip window configuration and produce a plain compressed DMG directly:
-        {ANSI_PURPLE}
+        <magenta>
         [dmg]
         plain = true
-        {ANSI_RESET}
+        </>
         All other fields are optional overrides; omit `[dmg]` entirely to use defaults.
 
         ## Environment secrets (never in strudel.toml)
 
-        {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}           base64-encoded Developer ID .p12 (CI use)
-        {ANSI_GREEN}APPLE_CERTIFICATE_PASSWORD{ANSI_RESET}  export password for the .p12
+        <green>APPLE_CERTIFICATE</>           base64-encoded Developer ID .p12 (CI use)
+        <green>APPLE_CERTIFICATE_PASSWORD</>  export password for the .p12
     "##});
 }
 
 fn print_signing() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Code signing
 
         ## Configuring the signing identity
 
         Three ways to set the identity (highest to lowest priority):
 
-        1. Environment: {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}, {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}
+        1. Environment: <green>APPLE_SIGNING_IDENTITY</>, <green>APPLE_TEAM_ID</>
         2. Project config (strudel.toml):
-        {ANSI_PURPLE}
+        <magenta>
         [apple]
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
-        {ANSI_RESET}
+        </>
         3. Global config (~/.config/strudel/config.toml) is shared across all projects:
-        {ANSI_PURPLE}
+        <magenta>
         [apple]
         identity = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id  = "XXXXXXXXXX"
-        {ANSI_RESET}
-        Edit the global config: {ANSI_BLUE}strudel config global edit{ANSI_RESET}
-        See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
+        </>
+        Edit the global config: <blue>strudel config global edit</>
+        See: <blue>strudel help global-config</>
 
-        The identity string must match exactly what {ANSI_BLUE}security find-identity -v -p codesigning{ANSI_RESET}
+        The identity string must match exactly what <blue>security find-identity -v -p codesigning</>
         shows. Copy it from there to avoid typos.
 
         ## Ad-hoc signing (local dev)
 
-        When no identity is configured, {ANSI_BLUE}strudel build{ANSI_RESET} uses ad-hoc signing (--sign -).
+        When no identity is configured, <blue>strudel build</> uses ad-hoc signing (--sign -).
         Ad-hoc signatures let you run the app locally but the app cannot be distributed
         or notarized.
 
@@ -434,10 +428,10 @@ fn print_signing() {
         1. Export your Developer ID certificate as a .p12 from Keychain Access
            (right-click -> Export, set an export password)
         2. Base64-encode it:
-               {ANSI_BLUE}base64 -i DeveloperID.p12 | pbcopy{ANSI_RESET}
+               <blue>base64 -i DeveloperID.p12 | pbcopy</>
         3. Set CI secrets:
-               {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}          (the base64 string)
-               {ANSI_GREEN}APPLE_CERTIFICATE_PASSWORD{ANSI_RESET} (the export password you set)
+               <green>APPLE_CERTIFICATE</>          (the base64 string)
+               <green>APPLE_CERTIFICATE_PASSWORD</> (the export password you set)
 
         ## Sign order for bundles with extensions
 
@@ -452,19 +446,19 @@ fn print_signing() {
 
         ## See also
 
-        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
-        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
-        {ANSI_BLUE}strudel help ci{ANSI_RESET}
+        <blue>strudel help notarize</>
+        <blue>strudel help entitlements</>
+        <blue>strudel help ci</>
     "#});
 }
 
 fn print_notarize() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Notarization
 
         Notarization is required for distributing a signed app outside the Mac App Store.
-        strudel runs {ANSI_BLUE}xcrun notarytool submit{ANSI_RESET} and then {ANSI_BLUE}xcrun stapler staple{ANSI_RESET} automatically
-        as part of {ANSI_BLUE}strudel release{ANSI_RESET}.
+        strudel runs <blue>xcrun notarytool submit</> and then <blue>xcrun stapler staple</> automatically
+        as part of <blue>strudel release</>.
 
         ## Auth
 
@@ -474,35 +468,35 @@ fn print_notarize() {
 
         Three ways to set credentials (highest to lowest priority):
 
-        1. Environment: {ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}, {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}
+        1. Environment: <green>APPLE_API_ISSUER</>, <green>APPLE_API_KEY</>, <green>APPLE_API_KEY_PATH</>
         2. Project config (strudel.toml):
-        {ANSI_PURPLE}
+        <magenta>
         [apple]
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"  # Issuer ID
         api_key      = "2X9R4HXF34"                             # Key ID
         api_key_path = "AuthKey_2X9R4HXF34.p8"                  # path to .p8 file
-        {ANSI_RESET}
+        </>
         3. Global config (~/.config/strudel/config.toml) is shared across all projects.
            api_key_path here is typically an absolute path:
-        {ANSI_PURPLE}
+        <magenta>
         [apple]
         api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
-        {ANSI_RESET}
-        Edit the global config: {ANSI_BLUE}strudel config global edit{ANSI_RESET}
-        See: {ANSI_BLUE}strudel help global-config{ANSI_RESET}
+        </>
+        Edit the global config: <blue>strudel config global edit</>
+        See: <blue>strudel help global-config</>
 
         ## Key role
 
         A "Developer" role key is enough for macOS app notarization, whether locally or in CI.
-        If you also use strudel's iOS auto-provisioning ({ANSI_PURPLE}"app_store_connect"{ANSI_RESET}),
+        If you also use strudel's iOS auto-provisioning (<magenta>"app_store_connect"</>),
         use an "Admin" role key instead - device registration and profile management via the
         App Store Connect API require additional permissions.
 
         ## Timeout
-        {ANSI_PURPLE}
+        <magenta>
         [apple]
         notarize_timeout = 600   # seconds; default: 600
-        {ANSI_RESET}
+        </>
         Notarization typically completes in under a minute, but Apple's servers can
         occasionally be slow.
 
@@ -513,13 +507,13 @@ fn print_notarize() {
 
         ## See also
 
-        {ANSI_BLUE}strudel help signing{ANSI_RESET}
-        {ANSI_BLUE}strudel help ci{ANSI_RESET}
+        <blue>strudel help signing</>
+        <blue>strudel help ci</>
     "#});
 }
 
 fn print_entitlements() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Entitlements and provisioning profiles
 
         ## Entitlements file
@@ -567,17 +561,17 @@ fn print_entitlements() {
           2. Run fetches the profile and caches it automatically:
                strudel run --device
 
-        The profile is cached at .strudel/<bundle_id>.mobileprovision (gitignored). On every
+        The profile is cached at .strudel/<<bundle_id>>.mobileprovision (gitignored). On every
         build strudel checks whether the cached profile is still current (not expired, includes
         all tracked devices); if not, it re-fetches automatically.
 
         To manage the profile manually instead, set:
-        {ANSI_PURPLE}
+        <magenta>
           [build]
           provisioning_profile = "path/to/MyApp.mobileprovision"
-        {ANSI_RESET}
+        </>
         When provisioning_profile is set strudel uses that file as-is and warns if it looks
-        stale, but does not overwrite it. See {ANSI_BLUE}strudel help ios-device{ANSI_RESET} for the full workflow.
+        stale, but does not overwrite it. See <blue>strudel help ios-device</> for the full workflow.
 
         ## Ad-hoc + entitlements
 
@@ -592,12 +586,12 @@ fn print_entitlements() {
           [[extensions]]
           entitlements_json_path = "extension/entitlements.json"
 
-        See: {ANSI_BLUE}strudel help extensions{ANSI_RESET}
+        See: <blue>strudel help extensions</>
     "#});
 }
 
 fn print_extensions() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # App and system extensions
 
         App extensions (safari_web_extension, app_extension) are embedded as .appex bundles
@@ -607,7 +601,7 @@ fn print_extensions() {
         all nested bundles.
 
         ## Common fields (all kinds)
-        {ANSI_PURPLE}
+        <magenta>
         [[extensions]]
         kind                   = "safari_web_extension"  # or "app_extension", "system_extension"
         target_name            = "MyExtension"                 # SPM executableTarget
@@ -615,30 +609,30 @@ fn print_extensions() {
         # name                 = "MyExtension"                 # defaults to target_name
         entitlements_json_path = "ext/entitlements.json"       # required
         # info_json_path       = "ext/info.json"               # optional extra Info.plist keys
-        {ANSI_RESET}
+        </>
         The SPM target must be an executableTarget in Package.swift.
 
         ## kind = "safari_web_extension"
 
         Embeds a Safari Web Extension. The resources_dir is copied wholesale into
         Contents/Resources/ (manifest.json, JS, HTML, icons, etc.).
-        {ANSI_PURPLE}
+        <magenta>
         [[extensions]]
         kind          = "safari_web_extension"
         target_name   = "MyAppExtension"
         bundle_id     = "com.example.myapp.Extension"
         resources_dir = "extension/dist"                  # required; webpack output dir
         # principal_class = "MyAppExtension.SafariWebExtensionHandler"  # default shown
-        {ANSI_RESET}
+        </>
         strudel auto-injects NSExtension with:
           NSExtensionPointIdentifier = "com.apple.Safari.web-extension"
-          NSExtensionPrincipalClass  = <principal_class>
+          NSExtensionPrincipalClass  = <<principal_class>>
           SFSafariWebExtensionManifestPath = "Resources/manifest.json"
 
         ## kind = "app_extension"
 
         Generic macOS app extension (Share, Finder Sync, Notification Service, Quick Look, etc.)
-        {ANSI_PURPLE}
+        <magenta>
         [[extensions]]
         kind                       = "app_extension"
         target_name                = "MyShareExtension"
@@ -646,7 +640,7 @@ fn print_extensions() {
         entitlements_json_path     = "share/entitlements.json"
         extension_point_identifier = "com.apple.share-services"   # required
         # principal_class          = "MyShareExtension.ShareViewController"  # optional
-        {ANSI_RESET}
+        </>
         Common extension_point_identifier values:
           "com.apple.share-services"              Share Extension
           "com.apple.FinderSync"                  Finder Sync Extension
@@ -662,7 +656,7 @@ fn print_extensions() {
         sandboxed alongside the host app: once installed it runs as its own long-lived,
         OS-managed process, activated at runtime by the host app via `SystemExtensions.framework` (`OSSystemExtensionRequest`). strudel only assembles and signs the bundle, it does not
         call that API for you.
-        {ANSI_PURPLE}
+        <magenta>
         [[extensions]]
         kind                  = "system_extension"
         target_name           = "MyNetworkExtension"
@@ -670,7 +664,7 @@ fn print_extensions() {
         entitlements_json_path = "netext/entitlements.json"
         system_extension_type = "network_extension"   # or "endpoint_security"
         # principal_class     = "MyNetworkExtension.FilterDataProvider"  # rarely needed
-        {ANSI_RESET}
+        </>
         system_extension_type values and their NSExtensionPointIdentifier:
           "network_extension"    com.apple.system_extension.network_extension
           "endpoint_security"    com.apple.system_extension.endpoint_security
@@ -703,7 +697,7 @@ fn print_extensions() {
 }
 
 fn print_ios_device() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # iOS device builds
 
         ## Provisioning backends
@@ -719,40 +713,40 @@ fn print_ios_device() {
                                Run `strudel login` first, then the normal device workflow.
 
         Set the backend in strudel.toml (required):
-        {ANSI_PURPLE}
+        <magenta>
           [ios]
           provisioning = "app_store_connect"  # or "free"
-        {ANSI_RESET}
-        For the free path, see: {ANSI_BLUE}strudel help ios-free-provisioning{ANSI_RESET}
+        </>
+        For the free path, see: <blue>strudel help ios-free-provisioning</>
 
         ## One-time setup (App Store Connect path)
 
         Register your device on the App Store Connect portal and track it locally:
-        {ANSI_BLUE}
+        <blue>
           strudel devices add
-        {ANSI_RESET}
+        </>
         With a device connected and Developer Mode enabled, this registers it on the portal
         (if not already) and adds it to .strudel/devices.toml (gitignored). Repeat whenever
         you add a device.
 
         To add a specific subset of connected devices:
-        {ANSI_BLUE}
+        <blue>
           strudel devices add --device "iPhone 15" --device "iPad Air"
-        {ANSI_RESET}
+        </>
         To register a device on the portal only, without a connection or local tracking
         (e.g. a teammate's device):
-        {ANSI_BLUE}
-          strudel devices register --udid <UDID> --name "Their iPhone"
-        {ANSI_RESET}
+        <blue>
+          strudel devices register --udid <<UDID>> --name "Their iPhone"
+        </>
         ## Building and installing
-        {ANSI_BLUE}
+        <blue>
           strudel run --device
-        {ANSI_RESET}
+        </>
         On first run, strudel calls the App Store Connect API to:
           1. Look up (or create) the bundle ID
           2. Find your development certificate(s)
           3. Create a development profile embedding all tracked devices
-          4. Cache the profile at .strudel/<bundle_id>.mobileprovision
+          4. Cache the profile at .strudel/<<bundle_id>>.mobileprovision
 
         On subsequent runs the cached profile is reused if it is still current. A profile
         is considered stale when it has expired (within 5 minutes), is missing a device
@@ -760,37 +754,37 @@ fn print_ios_device() {
         re-fetched.
 
         To target specific devices for one build (all must be in devices.toml):
-        {ANSI_BLUE}
+        <blue>
           strudel run --device "iPhone 15" --device "iPhone 16 Pro"
-        {ANSI_RESET}
+        </>
         ## Managing the profile manually
 
         To check the cached profile's status without building:
-        {ANSI_BLUE}
+        <blue>
           strudel profile
-        {ANSI_RESET}
+        </>
         To fetch or force-refresh the cached profile without building:
-        {ANSI_BLUE}
+        <blue>
           strudel profile fetch
           strudel profile fetch --force
-        {ANSI_RESET}
+        </>
         To opt out of auto-management and use your own profile, set in strudel.toml:
-        {ANSI_PURPLE}
+        <magenta>
           [build]
           provisioning_profile = "path/to/MyApp.mobileprovision"
-        {ANSI_RESET}
+        </>
         ## Credentials required (App Store Connect path only)
 
         Profile auto-fetch uses the same App Store Connect API key as notarization:
-        {ANSI_GREEN}
+        <green>
           APPLE_API_KEY_PATH   path to your .p8 key file
           APPLE_API_KEY        key ID (shown in App Store Connect)
           APPLE_API_ISSUER     issuer ID (shown in App Store Connect)
-        {ANSI_RESET}
-        See {ANSI_BLUE}strudel help notarize{ANSI_RESET} for how to configure these credentials.
+        </>
+        See <blue>strudel help notarize</> for how to configure these credentials.
 
         Note: registering devices and creating bundle IDs and profiles requires an API key
-        with the {ANSI_GREEN}Admin{ANSI_RESET} role. A {ANSI_GREEN}Developer{ANSI_RESET} key
+        with the <green>Admin</> role. A <green>Developer</> key
         is fine for notarization but will fail with "insufficient permissions" on
         `strudel devices add`, `strudel run --device`, and `strudel profile fetch`. Either use
         an Admin key or register the device and create the profile manually and set
@@ -802,24 +796,24 @@ fn print_ios_device() {
         automatically by .strudel/.gitignore (written by strudel). Do not commit it.
 
         Example:
-        {ANSI_PURPLE}
+        <magenta>
           [[device]]
           name = "My iPhone"
           udid = "00008101-001234AB3456001E"
-        {ANSI_RESET}
+        </>
     "#});
 }
 
 fn print_dylibs() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Embedding dynamic libraries and frameworks
 
         For C FFI dylibs, or .framework bundles (e.g. Sparkle, vendored as a SwiftPM
         binaryTarget) that must ship inside the app bundle:
-        {ANSI_PURPLE}
+        <magenta>
         [build]
         embed_libs = ["libFoo.dylib", "Sparkle.framework", "vendor/libBar.dylib"]
-        {ANSI_RESET}
+        </>
         strudel tells dylibs and frameworks apart by extension (.framework vs.
         everything else).
 
@@ -828,7 +822,7 @@ fn print_dylibs() {
         Every entry resolves relative to the config file's directory unless absolute,
         same as any other path - including a bare name like `libFoo.dylib`. If the
         resolved location doesn't exist, strudel falls back to whichever
-        `.build/<triple>/release/` directory it just built for this invocation.
+        `.build/<<triple>>/release/` directory it just built for this invocation.
 
         The fallback is what makes a bare name work for anything swift build produces
         or links per-platform: it stays correct across build destinations (e.g.
@@ -858,7 +852,7 @@ fn print_dylibs() {
         already linked with an @rpath install name.
 
         strudel injects -rpath @executable_path/../Frameworks at link time via
-        {ANSI_BLUE}-Xlinker -rpath -Xlinker @executable_path/../Frameworks{ANSI_RESET} in {ANSI_BLUE}swift build{ANSI_RESET}
+        <blue>-Xlinker -rpath -Xlinker @executable_path/../Frameworks</> in <blue>swift build</>
         whenever embed_libs is non-empty.
 
         ## Build-time flags
@@ -866,7 +860,7 @@ fn print_dylibs() {
         Compile-time flags (-I, -L, -l, module maps) and linker flags still belong in
         Package.swift (cSettings / linkerSettings, or a binaryTarget declaration for a
         vendored .framework/.xcframework). strudel's embed_libs only handles the bundle
-        assembly and signing step; it does not affect how {ANSI_BLUE}swift build{ANSI_RESET} finds or links
+        assembly and signing step; it does not affect how <blue>swift build</> finds or links
         the library.
 
         ## Static libraries
@@ -877,7 +871,7 @@ fn print_dylibs() {
 }
 
 fn print_copy() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Copying arbitrary files into the bundle
 
         `[[build.copy]]` copies a file or directory, under its own file name, into a
@@ -886,13 +880,13 @@ fn print_copy() {
         (Contents/Resources). Use it for things like a helper binary, a
         command-line tool, or any other file that needs to land somewhere else in
         the bundle:
-        {ANSI_PURPLE}
+        <magenta>
         [[build.copy]]
         src      = "path/to/helper"     # relative to the config file's directory
         dest_dir = "Contents/MacOS"     # relative to the bundle root
         sign     = true                  # codesign after copying; default: false
         entitlements_json_path = "helper-entitlements.json"  # optional, requires sign = true
-        {ANSI_RESET}
+        </>
         This copies `path/to/helper` to `Contents/MacOS/helper` - same file name,
         just relocated. `dest_dir` is created (including parent directories) if it
         doesn't already exist. Repeat `[[build.copy]]` for multiple entries.
@@ -923,16 +917,16 @@ fn print_copy() {
 }
 
 fn print_universal() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Universal binaries
 
         To produce a universal (fat) binary that runs natively on both Apple Silicon
         and Intel Macs:
-        {ANSI_PURPLE}
+        <magenta>
         [build]
         archs = ["arm64", "x86_64"]
-        {ANSI_RESET}
-        strudel passes --arch arm64 --arch x86_64 to {ANSI_BLUE}swift build{ANSI_RESET}, which invokes the
+        </>
+        strudel passes --arch arm64 --arch x86_64 to <blue>swift build</>, which invokes the
         compiler twice and uses lipo to merge the outputs.
 
         ## Default behavior
@@ -953,32 +947,32 @@ fn print_universal() {
 }
 
 fn print_global_config() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Global config
 
-        {ANSI_BLUE}~/.config/strudel/config.toml{ANSI_RESET} stores machine-wide defaults shared across all
+        <blue>~/.config/strudel/config.toml</> stores machine-wide defaults shared across all
         projects on this machine. It is the lowest-priority source for each value:
 
           env var  >  strudel.toml  >  ~/.config/strudel/config.toml
 
         ## Editing
-        {ANSI_BLUE}
+        <blue>
         strudel config global edit
-        {ANSI_RESET}
-        Opens the file in {ANSI_GREEN}$VISUAL{ANSI_RESET} / {ANSI_GREEN}$EDITOR{ANSI_RESET}, creating it with a template if it doesn't
+        </>
+        Opens the file in <green>$VISUAL</> / <green>$EDITOR</>, creating it with a template if it doesn't
         exist yet. The XDG_CONFIG_HOME env var overrides the default location.
 
         ## Supported keys
-        {ANSI_PURPLE}
+        <magenta>
         [apple]
         identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
         team_id      = "XXXXXXXXXX"
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         api_key      = "2X9R4HXF34"
         api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
-        {ANSI_RESET}
-        Only {ANSI_PURPLE}[apple]{ANSI_RESET} is supported here. {ANSI_PURPLE}[app]{ANSI_RESET}, {ANSI_PURPLE}[build]{ANSI_RESET}, {ANSI_PURPLE}[ios]{ANSI_RESET}, {ANSI_PURPLE}[dmg]{ANSI_RESET}, and
-        {ANSI_PURPLE}[[extensions]]{ANSI_RESET} are project-specific and belong only in strudel.toml.
+        </>
+        Only <magenta>[apple]</> is supported here. <magenta>[app]</>, <magenta>[build]</>, <magenta>[ios]</>, <magenta>[dmg]</>, and
+        <magenta>[[extensions]]</> are project-specific and belong only in strudel.toml.
 
         ## Typical use
 
@@ -992,29 +986,29 @@ fn print_global_config() {
 
         ## See also
 
-        {ANSI_BLUE}strudel help signing{ANSI_RESET}
-        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
+        <blue>strudel help signing</>
+        <blue>strudel help notarize</>
     "#});
 }
 
 fn print_ci() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # CI/CD setup
 
         ## Required secrets
 
         Set these as CI environment secrets (never commit them):
 
-          {ANSI_GREEN}APPLE_SIGNING_IDENTITY{ANSI_RESET}      "Developer ID Application: Your Name (XXXXXXXXXX)"
-          {ANSI_GREEN}APPLE_TEAM_ID{ANSI_RESET}               10-character team ID
-          {ANSI_GREEN}APPLE_CERTIFICATE{ANSI_RESET}           base64-encoded Developer ID .p12
-          {ANSI_GREEN}APPLE_CERTIFICATE_PASSWORD{ANSI_RESET}  export password for the .p12
+          <green>APPLE_SIGNING_IDENTITY</>      "Developer ID Application: Your Name (XXXXXXXXXX)"
+          <green>APPLE_TEAM_ID</>               10-character team ID
+          <green>APPLE_CERTIFICATE</>           base64-encoded Developer ID .p12
+          <green>APPLE_CERTIFICATE_PASSWORD</>  export password for the .p12
 
         For notarization (App Store Connect API key):
 
-          {ANSI_GREEN}APPLE_API_ISSUER{ANSI_RESET}    issuer UUID from App Store Connect
-          {ANSI_GREEN}APPLE_API_KEY{ANSI_RESET}       key ID (e.g. "2X9R4HXF34")
-          {ANSI_GREEN}APPLE_API_KEY_PATH{ANSI_RESET}  path to the .p8 file (or set inline, see below)
+          <green>APPLE_API_ISSUER</>    issuer UUID from App Store Connect
+          <green>APPLE_API_KEY</>       key ID (e.g. "2X9R4HXF34")
+          <green>APPLE_API_KEY_PATH</>  path to the .p8 file (or set inline, see below)
 
         ## GitHub Actions example
 
@@ -1040,7 +1034,7 @@ fn print_ci() {
                   echo "$APPLE_API_KEY_CONTENTS" > AuthKey.p8
                   strudel release --ci
 
-        Pass {ANSI_BLUE}--ci{ANSI_RESET} to trim the per-second notarization countdown, which
+        Pass <blue>--ci</> to trim the per-second notarization countdown, which
         otherwise spams captured CI logs with a line for every tick. Other output
         (steps, errors, submission IDs) is unaffected, so it's safe to leave on
         while debugging a CI run.
@@ -1049,7 +1043,7 @@ fn print_ci() {
 
         1. Open Keychain Access -> find your Developer ID Application certificate
         2. Right-click -> Export -> save as DeveloperID.p12, set an export password
-        3. Encode: {ANSI_BLUE}base64 -i DeveloperID.p12 | pbcopy{ANSI_RESET}
+        3. Encode: <blue>base64 -i DeveloperID.p12 | pbcopy</>
         4. Paste the result as the APPLE_CERTIFICATE secret
 
         ## Storing the .p8 API key in CI
@@ -1063,13 +1057,13 @@ fn print_ci() {
 
         ## See also
 
-        {ANSI_BLUE}strudel help signing{ANSI_RESET}
-        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
+        <blue>strudel help signing</>
+        <blue>strudel help notarize</>
     "#});
 }
 
 fn print_ios_free_provisioning() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # Free Apple ID provisioning
 
         strudel can provision iOS device builds using any Apple ID - no paid Apple
@@ -1090,38 +1084,38 @@ fn print_ios_free_provisioning() {
         ## Setup
 
         1. Enable the free backend in strudel.toml:
-        {ANSI_PURPLE}
+        <magenta>
            [ios]
            provisioning = "free"
            apple_id     = "you@example.com"   # optional; pre-fills login prompt
-        {ANSI_RESET}
+        </>
         2. Sign in with your Apple ID:
-        {ANSI_BLUE}
+        <blue>
            strudel login
-        {ANSI_RESET}
+        </>
            Prompts for your Apple ID, password, and a 2FA code if your account has
            two-factor authentication enabled. The session token (never the password)
-           is saved to {ANSI_GREEN}~/.local/share/strudel/session.json{ANSI_RESET}.
+           is saved to <green>~/.local/share/strudel/session.json</>.
 
         3. Register your device and build as usual:
-        {ANSI_BLUE}
+        <blue>
            strudel devices add
            strudel run --device
-        {ANSI_RESET}
+        </>
         ## Session management
-        {ANSI_BLUE}
+        <blue>
         strudel login                        # interactive sign-in
         strudel login --apple-id you@ex.com  # pre-fill the email
         strudel login clear                  # clear session and cached credentials
         strudel login status                 # show just the Apple ID session
         strudel status                       # show full config + session + project state
-        {ANSI_RESET}
+        </>
         The session token expires. If a `strudel run --device` run fails with an auth
         error, re-run `strudel login`.
 
         ## What strudel stores
 
-        All data lives in {ANSI_GREEN}~/.local/share/strudel/{ANSI_RESET} (per-machine, not per-project):
+        All data lives in <green>~/.local/share/strudel/</> (per-machine, not per-project):
 
           session.json             GSA token + DSID (no password stored)
           dev-cert.der             Cached DER-encoded developer certificate
@@ -1136,10 +1130,10 @@ fn print_ios_free_provisioning() {
         A fresh profile is fetched whenever the cached one is stale (expired or
         missing a device). `strudel run --device` does this automatically. To trigger
         manually:
-        {ANSI_BLUE}
+        <blue>
         strudel profile fetch           # fetch if stale
         strudel profile fetch --force   # force-refresh
-        {ANSI_RESET}
+        </>
         Each refresh revokes the previous dev certificate for this machine (to stay
         within the 2-cert limit per team) and generates a new RSA keypair + CSR.
 
@@ -1147,22 +1141,22 @@ fn print_ios_free_provisioning() {
 
         strudel implements the Apple developer-services provisioning protocol natively:
           - Authenticates via Apple's GrandSlam SRP-6a flow (SHA-256, custom pre-hash)
-          - Generates anisette headers via {ANSI_GREEN}AOSKit.framework{ANSI_RESET} (no Docker required)
-          - Calls {ANSI_GREEN}developerservices2.apple.com{ANSI_RESET} endpoints used by Xcode itself
-          - Shells {ANSI_GREEN}openssl{ANSI_RESET} to generate the RSA keypair + CSR
+          - Generates anisette headers via <green>AOSKit.framework</> (no Docker required)
+          - Calls <green>developerservices2.apple.com</> endpoints used by Xcode itself
+          - Shells <green>openssl</> to generate the RSA keypair + CSR
 
-        Known issue: {ANSI_GREEN}AOSKit.retrieveOTPHeadersForDSID:{ANSI_RESET} returned -45070 in early
+        Known issue: <green>AOSKit.retrieveOTPHeadersForDSID:</> returned -45070 in early
         macOS 27 betas. If you see anisette errors, file an issue.
 
         ## See also
 
-        {ANSI_BLUE}strudel help ios-device{ANSI_RESET}
-        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
+        <blue>strudel help ios-device</>
+        <blue>strudel help entitlements</>
     "#});
 }
 
 fn print_ios_app() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # iOS app checklist
 
         Things that are easy to skip, don't fail the build, but are visibly wrong
@@ -1170,11 +1164,11 @@ fn print_ios_app() {
 
         ## Info.plist data are set in info_json_path
 
-        strudel generates Info.plist itself from the JSON file at {ANSI_PURPLE}build.info_json_path{ANSI_RESET}.
+        strudel generates Info.plist itself from the JSON file at <magenta>build.info_json_path</>.
         Note that the CFBundle* identity keys (identifier, name, version, build number)
         are always written by strudel and override anything in that file. With no
         info_json_path at all, the app ships with only strudel's defaults.
-        See {ANSI_BLUE}strudel help config{ANSI_RESET}.
+        See <blue>strudel help config</>.
 
         ## UILaunchScreen
 
@@ -1182,9 +1176,9 @@ fn print_ios_app() {
         launch instead of using the full screen. strudel does not inject a
         default, so a target with no info_json_path has no launch screen.
         Minimal working value:
-        {ANSI_PURPLE}
+        <magenta>
         {{ "UILaunchScreen": {{}} }}
-        {ANSI_RESET}
+        </>
         ## Permission usage strings
 
         Any API that needs user consent (camera, photos, microphone, location,
@@ -1194,10 +1188,10 @@ fn print_ios_app() {
 
         ## App icon
 
-        With {ANSI_PURPLE}[build.icon]{ANSI_RESET}, strudel renders the complete iPhone appiconset
+        With <magenta>[build.icon]</>, strudel renders the complete iPhone appiconset
         (every size/scale plus the 1024x1024 ios-marketing rendition) from your
-        single source image. Use {ANSI_BLUE}strudel icon{ANSI_RESET} to render that source image to
-        a PNG (written to {ANSI_BLUE}--out{ANSI_RESET}, default the current directory) to preview.
+        single source image. Use <blue>strudel icon</> to render that source image to
+        a PNG (written to <blue>--out</>, default the current directory) to preview.
 
         ## Dark mode
 
@@ -1216,26 +1210,26 @@ fn print_ios_app() {
         icons are compiled with --target-device iphone, so the generated appiconset
         carries no iPad renditions. For a universal app, set UIDeviceFamily
         yourself in info_json_path:
-        {ANSI_PURPLE}
+        <magenta>
         {{ "UIDeviceFamily": [1, 2] }}
-        {ANSI_RESET}
-        and supply a hand-authored {ANSI_PURPLE}ios.assets_dir{ANSI_RESET} with ipad idiom icons, since
+        </>
+        and supply a hand-authored <magenta>ios.assets_dir</> with ipad idiom icons, since
         [build.icon] won't generate them. Then check layout at iPad multitasking
         widths, e.g:
-        {ANSI_BLUE}
+        <blue>
         strudel run --sim "iPad Pro 13-inch (M4)"
-        {ANSI_RESET}
+        </>
 
         ## See also
 
-        {ANSI_BLUE}strudel help config{ANSI_RESET}
-        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
-        {ANSI_BLUE}strudel help ios-device{ANSI_RESET}
+        <blue>strudel help config</>
+        <blue>strudel help entitlements</>
+        <blue>strudel help ios-device</>
     "#});
 }
 
 fn print_macos_app() {
-    print_help(&formatdoc! {r#"
+    print_help(&cformatdoc! {r#"
         # macOS app checklist
 
         Things that don't fail the build but read as unpolished, or break
@@ -1243,24 +1237,24 @@ fn print_macos_app() {
 
         ## Info.plist data are set in info_json_path
 
-        strudel generates Info.plist itself from the JSON file at {ANSI_PURPLE}build.info_json_path{ANSI_RESET}.
+        strudel generates Info.plist itself from the JSON file at <magenta>build.info_json_path</>.
         It always writes CFBundleExecutable, CFBundleIdentifier, CFBundlePackageType
         and the version keys, overriding anything in that file.
-        See {ANSI_BLUE}strudel help config{ANSI_RESET}.
+        See <blue>strudel help config</>.
 
         ## App display name
 
         Unlike the iOS builder, this one writes no CFBundleName/CFBundleDisplayName,
         so the menu bar and About box fall back to the executable name. If the name
         users should see differs (spaces, capitalization), set it yourself:
-        {ANSI_PURPLE}
+        <magenta>
         {{ "CFBundleName": "My App" }}
-        {ANSI_RESET}
+        </>
         ## Settings/Preferences window
 
         Use SwiftUI's Settings {{ }} scene with a TabView shell: one Label per
         tab, a fixed .frame(width:height:), top-aligned content.
-        {ANSI_PURPLE}
+        <magenta>
         Settings {{
             TabView {{
                 GeneralSettingsView()
@@ -1270,7 +1264,7 @@ fn print_macos_app() {
             .frame(width: 400, height: 300, alignment: .top)
             .navigationTitle("My App")
         }}
-        {ANSI_RESET}
+        </>
         Persist values with @AppStorage directly in the views, or a shared
         wrapper class reading the same UserDefaults keys for code that isn't a
         SwiftUI view (e.g. a background service reading preferences at runtime).
@@ -1294,12 +1288,12 @@ fn print_macos_app() {
 
         Decide sandboxing up front; retrofitting it onto an app that assumed
         unrestricted file access is the most common late-stage rework. See
-        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}.
+        <blue>strudel help entitlements</>.
 
         ## See also
 
-        {ANSI_BLUE}strudel help entitlements{ANSI_RESET}
-        {ANSI_BLUE}strudel help signing{ANSI_RESET}
-        {ANSI_BLUE}strudel help notarize{ANSI_RESET}
+        <blue>strudel help entitlements</>
+        <blue>strudel help signing</>
+        <blue>strudel help notarize</>
     "#});
 }
