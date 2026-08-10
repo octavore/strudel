@@ -95,6 +95,13 @@ impl IosBuilder {
             &self.cfg.bundle_id,
         ]))?;
 
+        if !self.dry_run {
+            cprintln!(
+                "\n<yellow>warning:</yellow> Signed ad-hoc for the Simulator; this build \
+                 cannot be distributed. See <blue>strudel help signing</>."
+            );
+        }
+
         Ok(())
     }
 

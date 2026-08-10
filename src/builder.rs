@@ -304,6 +304,18 @@ impl MacosBuilder {
         Ok(())
     }
 
+    /// Print a reminder that the bundle was ad-hoc signed. No-op unless
+    /// `adhoc` is set and this is a real (non-dry) run.
+    fn warn_if_adhoc(&self, adhoc: bool) {
+        if !adhoc || self.dry_run {
+            return;
+        }
+        cprintln!(
+            "\n<yellow>warning:</yellow> Signed ad-hoc (no signing identity configured); \
+             app entitlements may not work correctly. See <blue>strudel help signing</>."
+        );
+    }
+
     /// Build bundle only (clean -> binary -> assemble).
     pub fn bundle(&self) -> Result<()> {
         self.clean()?;
@@ -337,7 +349,7 @@ impl MacosBuilder {
             self.core.cfg.sign_identity = identity;
             keychain
         });
-        self.sign()?;
+        let adhoc = self.sign()?;
 
         let status = if self.dry_run {
             cformat!("<dim>[dry-run]</dim> Dry run complete. Signed app bundle would be at:")
@@ -348,6 +360,7 @@ impl MacosBuilder {
             "\n{status}\n<cyan>{}</cyan>",
             app_bundle.display()
         ));
+        self.warn_if_adhoc(adhoc);
         self.open_app()?;
         Ok(())
     }
@@ -430,7 +443,7 @@ impl MacosBuilder {
             self.core.cfg.sign_identity = identity;
             keychain
         });
-        self.sign()?;
+        let adhoc = self.sign()?;
         self.package_dmg()?;
 
         if self.skip_notarization {
@@ -469,6 +482,7 @@ impl MacosBuilder {
             }
         }
 
+        self.warn_if_adhoc(adhoc);
         self.open_app()?;
         Ok(())
     }

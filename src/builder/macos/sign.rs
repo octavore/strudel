@@ -11,7 +11,10 @@ use crate::paths::ExtensionPaths;
 use crate::shell::ShellCommand;
 
 impl MacosBuilder {
-    pub fn sign(&self) -> Result<()> {
+    /// Signs the app bundle (and any extensions). Returns whether the
+    /// signature ended up ad-hoc (no signing identity configured), so
+    /// callers can warn about it once the pipeline finishes.
+    pub fn sign(&self) -> Result<bool> {
         let app_bundle = self.paths.app_bundle.to_str().unwrap();
         let ent_plist_path = self.paths.entitlements_plist.to_str().unwrap();
 
@@ -180,7 +183,7 @@ impl MacosBuilder {
             app_bundle,
         ])?;
 
-        Ok(())
+        Ok(adhoc)
     }
 
     /// Sign one nested extension bundle (`.appex` or `.systemextension`) with
