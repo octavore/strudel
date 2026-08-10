@@ -9,7 +9,7 @@ license = "Apache-2.0"
 
 [dependencies]
 image = {version = "0.25", default-features = false, features = ["png"]}
-resvg = "0.47.0"
+resvg = "0.48.1"
 thiserror = "2"
 tiny-skia = "0.12"
 

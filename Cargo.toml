@@ -24,7 +24,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 appleid = {package = "strudel-appleid", path = "crates/appleid", version = "0.6.0"}
-base64 = "0.22"
+base64 = "0.23"
 clap = {version = "4", features = ["derive"]}
 clml = { version = "0.2", features = ["anstream", "doc"] }
 dmg = {package = "strudel-dmg", path = "crates/dmg", version = "0.6.0"}
@@ -32,9 +32,9 @@ icon = {package = "strudel-icon", path = "crates/icon", version = "0.6.0"}
 image = {version = "0.25", default-features = false, features = ["png"]}
 indoc = "2"
 inquire = "0.9"
-jsonwebtoken = {version = "10", features = ["rust_crypto"]}
+jsonwebtoken = {version = "11", features = ["rust_crypto"]}
 plist = "1"
-regex = "1.13.0"
+regex = "1.13.1"
 secrecy = "0.10.3"
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
@@ -42,7 +42,7 @@ shellexpand = "3"
 srp = "=0.7.0-rc.3"
 tempfile = "3"
 toml = "1.1"
-toml_edit = "0.25.12"
+toml_edit = "0.25.13"
 ureq = {version = "3", features = ["json"]}
 xdg = "3.0.0"
 

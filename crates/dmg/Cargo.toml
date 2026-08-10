@@ -9,6 +9,6 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-binrw = "0.15.1"
+binrw = "0.15.2"
 plist = "1"
 tempfile = "3"
