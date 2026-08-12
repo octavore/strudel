@@ -5,6 +5,7 @@ use crate::config::build_config::BuildConfig;
 use crate::config::build_target::IosProvisioningBackend;
 use crate::config::{
     GlobalConfig, ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform,
+    ValueSource,
 };
 
 pub const FULL: &str = indoc::indoc! {r#"
@@ -76,6 +77,7 @@ fn resolved(target_platform: ResolvedTargetPlatform) -> ResolvedConfig {
         archs: vec!["arm64".into()],
         target_name: "A".into(),
         sign_identity: String::new(),
+        sign_identity_source: ValueSource::None,
         notarize_timeout: 600,
         build_env: HashMap::new(),
         embed_libs: Vec::new(),
@@ -86,8 +88,11 @@ fn resolved(target_platform: ResolvedTargetPlatform) -> ResolvedConfig {
         copy: Vec::new(),
         target_platform,
         team_id: String::new(),
+        team_id_source: ValueSource::None,
         apple_api_issuer: String::new(),
+        apple_api_issuer_source: ValueSource::None,
         apple_api_key: String::new(),
+        apple_api_key_source: ValueSource::None,
         apple_api_key_path: None,
         apple_certificate: String::new().into(),
         apple_certificate_password: String::new().into(),

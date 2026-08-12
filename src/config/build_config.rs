@@ -14,6 +14,7 @@ use crate::config::extension::ExtensionSection;
 use crate::config::global::GlobalConfig;
 use crate::config::resolved::{
     ResolvedCopy, ResolvedDmg, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
+    ValueSource,
 };
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
 use crate::config::{IosProvisioningBackend, ResolvedConfig};
@@ -280,8 +281,8 @@ fn resolve_target(
     // Identifiers: env var > strudel.toml > global config. A certificate
     // (env-only) always wins over any project/global identity default: the
     // real identity is derived from the imported certificate at build time.
-    let sign_identity = if has_certificate {
-        String::new()
+    let (sign_identity, sign_identity_source) = if has_certificate {
+        (String::new(), ValueSource::None)
     } else {
         env_or_global(
             apple.identity.clone(),
@@ -289,6 +290,21 @@ fn resolve_target(
             "APPLE_SIGNING_IDENTITY",
         )
     };
+    let (team_id, team_id_source) = env_or_global(
+        apple.team_id.clone(),
+        global.signing_team_id.clone(),
+        "APPLE_TEAM_ID",
+    );
+    let (apple_api_issuer, apple_api_issuer_source) = env_or_global(
+        apple.api_issuer.clone(),
+        global.notarize_api_issuer.clone(),
+        "APPLE_API_ISSUER",
+    );
+    let (apple_api_key, apple_api_key_source) = env_or_global(
+        apple.api_key.clone(),
+        global.notarize_api_key.clone(),
+        "APPLE_API_KEY",
+    );
 
     Ok(ResolvedConfig {
         platform: Some(platform),
@@ -309,21 +325,13 @@ fn resolve_target(
             vec![arch.to_string()]
         }),
         sign_identity,
-        team_id: env_or_global(
-            apple.team_id.clone(),
-            global.signing_team_id.clone(),
-            "APPLE_TEAM_ID",
-        ),
-        apple_api_issuer: env_or_global(
-            apple.api_issuer.clone(),
-            global.notarize_api_issuer.clone(),
-            "APPLE_API_ISSUER",
-        ),
-        apple_api_key: env_or_global(
-            apple.api_key.clone(),
-            global.notarize_api_key.clone(),
-            "APPLE_API_KEY",
-        ),
+        sign_identity_source,
+        team_id,
+        team_id_source,
+        apple_api_issuer,
+        apple_api_issuer_source,
+        apple_api_key,
+        apple_api_key_source,
         // Like other input paths, resolved relative to the config file directory.
         // Global config path is already absolute (resolved at load time).
         apple_api_key_path: std::env::var("APPLE_API_KEY_PATH")

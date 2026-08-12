@@ -167,6 +167,22 @@ fn target_ids(targets: &[&ResolvedConfig]) -> String {
         .join(", ")
 }
 
+/// Where a resolved value (sign identity, team id, API issuer/key, ...) came
+/// from, in priority order: env var, then this project's strudel.toml, then
+/// the global config. Lets `strudel status` explain e.g. that a value was
+/// inherited from the global config rather than set locally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueSource {
+    /// An `APPLE_*` env var.
+    Env,
+    /// Set in this project's strudel.toml.
+    Project,
+    /// Inherited from the global config (`~/.config/strudel/config.toml`).
+    Global,
+    /// Not configured anywhere.
+    None,
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub platform: Option<Platform>,
@@ -188,6 +204,7 @@ pub struct ResolvedConfig {
     pub archs: Vec<String>,
     pub target_name: String,
     pub sign_identity: String,
+    pub sign_identity_source: ValueSource,
     pub notarize_timeout: u64,
     /// Extra environment variables forwarded to `swift build`.
     pub build_env: HashMap<String, String>,
@@ -209,8 +226,11 @@ pub struct ResolvedConfig {
 
     // Notarization identifiers (from strudel.toml or the environment).
     pub team_id: String,
+    pub team_id_source: ValueSource,
     pub apple_api_issuer: String,
+    pub apple_api_issuer_source: ValueSource,
     pub apple_api_key: String,
+    pub apple_api_key_source: ValueSource,
     pub apple_api_key_path: Option<PathBuf>,
 
     // Secrets (read from the environment only, never from strudel.toml).
