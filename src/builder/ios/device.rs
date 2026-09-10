@@ -1,14 +1,13 @@
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use clml::{cformat, cformatdoc, cprintln};
 
-use crate::apple::fingerprint::parse_fingerprint;
 use crate::apple::provisioning::{self, ensure_keychain_ready};
 use crate::builder::ios::IosTarget;
-use crate::builder::ios::profile::decode_profile;
 use crate::builder::keychain::parse_identity_line;
+use crate::builder::profile::{check_identity_authorized, decode_profile};
 use crate::builder::{IosBuilder, is_framework};
 use crate::config::IosProvisioningBackend;
 use crate::shell::ShellCommand;
@@ -143,7 +142,11 @@ impl IosBuilder {
         let profile_plist = decode_profile(profile_path)?;
 
         self.step("Checking certificate is authorized by profile...");
-        self.check_identity_in_profile(identity, &profile_plist)?;
+        check_identity_authorized(
+            identity,
+            &profile_plist,
+            "Run: strudel profile fetch --force",
+        )?;
 
         let entitlements = profile_plist
             .as_dictionary()
@@ -253,61 +256,6 @@ impl IosBuilder {
              Valid identities:\n{}\n\
              Set [ios] sign_identity in strudel.toml to match one of the above.",
             valid_stdout.trim()
-        );
-    }
-
-    /// Verify that the signing identity's certificate is listed in the
-    /// profile's DeveloperCertificates. Mismatches cause iOS to reject the
-    /// app at install time even when the local signature verifies cleanly.
-    fn check_identity_in_profile(&self, identity: &str, profile: &plist::Value) -> Result<()> {
-        let Some(certs) = profile
-            .as_dictionary()
-            .and_then(|d| d.get("DeveloperCertificates"))
-            .and_then(|v| v.as_array())
-        else {
-            return Ok(());
-        };
-
-        // Extract the SHA1 fingerprint for our identity from the keychain.
-        let id_out = std::process::Command::new("security")
-            .args(["find-identity", "-v", "-p", "codesigning"])
-            .output()
-            .context("Failed to run `security find-identity`")?;
-        let id_stdout = String::from_utf8_lossy(&id_out.stdout);
-
-        let Some(signing_fp) = id_stdout
-            .lines()
-            .find(|l| l.contains(identity))
-            .and_then(|l| parse_identity_line(l).map(|(hash, _)| hash.to_ascii_uppercase()))
-        else {
-            return Ok(());
-        };
-
-        for cert_val in certs {
-            let Some(cert_data) = cert_val.as_data() else {
-                continue;
-            };
-
-            let mut child = std::process::Command::new("openssl")
-                .args(["x509", "-inform", "DER", "-noout", "-fingerprint", "-sha1"])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .context("Failed to run `openssl x509`")?;
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(cert_data);
-            }
-            let fp_out = child.wait_with_output().context("openssl x509 failed")?;
-            let fp_str = String::from_utf8_lossy(&fp_out.stdout);
-            if parse_fingerprint(&fp_str).as_deref() == Some(&signing_fp) {
-                return Ok(());
-            }
-        }
-
-        bail!(
-            "Signing identity {identity:?} is not authorized by the provisioning profile.\n\
-             The profile was created with an older certificate.\n\
-             Run: strudel profile fetch --force"
         );
     }
 }

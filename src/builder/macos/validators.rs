@@ -8,6 +8,7 @@ use clml::{cformat, cprintln};
 use serde_json::Value;
 
 use crate::builder::MacosBuilder;
+use crate::builder::profile::application_identifier;
 
 impl MacosBuilder {
     /// Describe any signing/notarization credentials that are missing or
@@ -156,8 +157,7 @@ impl MacosBuilder {
         if let Some(app_id) = dict
             .get("Entitlements")
             .and_then(plist::Value::as_dictionary)
-            .and_then(|e| e.get("application-identifier"))
-            .and_then(plist::Value::as_string)
+            .and_then(application_identifier)
         {
             let matches = app_id.ends_with(&format!(".{}", self.cfg.bundle_id))
                 || app_id == self.cfg.bundle_id.as_str();

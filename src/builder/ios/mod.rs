@@ -17,7 +17,6 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clml::cprintln;
-pub use profile::decode_profile;
 
 use crate::builder::IosBuilder;
 use crate::shell::ShellCommand;

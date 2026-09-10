@@ -13,6 +13,8 @@
 //! - [`bundle`] bundle-layout helpers shared by both platforms
 //! - [`fs`] dry-run-aware filesystem helpers (on [`BuilderCore`])
 //! - [`keychain`] signing-credential preflight and certificate import
+//! - [`profile`] provisioning-profile decoding and validity checks, shared by
+//!   both platforms
 //! - [`macos`] the macOS pipeline stages (todo: move MacOSBuilder here)
 //! - [`ios`] the iOS pipeline stages (todo: move IosBuilder here)
 
@@ -21,6 +23,7 @@ mod fs;
 mod ios;
 pub(crate) mod keychain;
 mod macos;
+pub(crate) mod profile;
 
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -29,7 +32,7 @@ use anyhow::{Context, Result, bail};
 pub(crate) use bundle::{is_framework, resolve_build_artifact};
 use clml::{cformat, cprintln};
 use indoc::formatdoc;
-pub(crate) use ios::decode_profile;
+pub(crate) use profile::decode_profile;
 
 use crate::config::{
     ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform,

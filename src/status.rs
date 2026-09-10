@@ -346,8 +346,7 @@ fn print_profile_details(dict: Option<&plist::Dictionary>, expected_owner: Optio
     if let Some(app_id) = dict
         .get("Entitlements")
         .and_then(|v| v.as_dictionary())
-        .and_then(|d| d.get("application-identifier"))
-        .and_then(|v| v.as_string())
+        .and_then(crate::builder::profile::application_identifier)
     {
         subfield("app id", app_id.to_string());
     }
