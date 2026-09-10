@@ -15,7 +15,7 @@ use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder;
 use crate::config::{
     GlobalConfig, IosProvisioningBackend, Platform, ResolvedConfig, ResolvedIosSection,
-    ResolvedTargetPlatform, load_config,
+    ResolvedTargetPlatform, SignIdentitySource, load_config,
 };
 use crate::devices::DeviceSet;
 use crate::paths::{Paths, StrudelData};
@@ -243,16 +243,30 @@ fn target_block(cfg: &ResolvedConfig, session: Option<&Session>) {
     field2("platform", platform.to_string());
     match &cfg.target_platform {
         ResolvedTargetPlatform::Mac(_) => {
-            field2(
-                "sign identity",
-                if_empty(&cfg.sign_identity, "ad-hoc / none configured"),
-            );
+            macos_sign_identity_block(cfg);
             macos_profile_block(cfg);
         },
         ResolvedTargetPlatform::Ios(ios) => {
+            ios_sign_identity_block(cfg, ios);
             ios_provisioning_block(cfg, ios, session);
         },
     }
+}
+
+/// Print the signing identity a macOS target will use and the config layer it
+/// was resolved from, matching the selection in `builder::macos::sign`.
+fn macos_sign_identity_block(cfg: &ResolvedConfig) {
+    if cfg.sign_identity_source == SignIdentitySource::Certificate {
+        field2("sign identity", "imported from APPLE_CERTIFICATE".to_string());
+        subfield("source", cfg.sign_identity_source.label().to_string());
+        return;
+    }
+    if cfg.sign_identity.is_empty() {
+        field2("sign identity", "ad-hoc (no identity configured)".to_string());
+        return;
+    }
+    field2("sign identity", cfg.sign_identity.clone());
+    subfield("source", cfg.sign_identity_source.label().to_string());
 }
 
 /// Print the manually-pinned provisioning profile for a macOS target, if any.
@@ -285,6 +299,28 @@ fn macos_profile_block(cfg: &ResolvedConfig) {
 /// one iOS target. Shared by `strudel login status` (as part of the full
 /// project dump) and `strudel profile` (on its own), so the two commands
 /// don't drift out of sync.
+/// Print the signing identity strudel will use for an iOS target, matching the
+/// selection in `builder::ios::device`. Free provisioning always signs with the
+/// certificate strudel mints, ignoring any configured `sign_identity`.
+fn ios_sign_identity_block(cfg: &ResolvedConfig, ios: &ResolvedIosSection) {
+    if matches!(ios.provisioning, IosProvisioningBackend::Free) {
+        field2(
+            "sign identity",
+            "Apple Development (minted by free provisioning)".to_string(),
+        );
+        return;
+    }
+    if cfg.sign_identity.is_empty() {
+        field2(
+            "sign identity",
+            "Apple Development (first match in keychain)".to_string(),
+        );
+        return;
+    }
+    field2("sign identity", cfg.sign_identity.clone());
+    subfield("source", cfg.sign_identity_source.label().to_string());
+}
+
 fn ios_provisioning_block(
     cfg: &ResolvedConfig,
     ios: &ResolvedIosSection,
@@ -556,14 +592,6 @@ fn opt_path(v: &Option<PathBuf>) -> String {
     v.as_ref()
         .map(|p| shorten(p))
         .unwrap_or_else(|| "(unset)".to_string())
-}
-
-fn if_empty(v: &str, fallback: &str) -> String {
-    if v.is_empty() {
-        fallback.to_string()
-    } else {
-        v.to_string()
-    }
 }
 
 /// Mask a secret, keeping only the last 4 characters.

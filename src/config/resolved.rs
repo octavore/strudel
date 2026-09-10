@@ -63,6 +63,34 @@ pub enum ResolvedIcon {
     },
 }
 
+/// Which configuration layer supplied the resolved signing identity. Reported
+/// by `strudel status` so the chosen value can be traced back to its source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignIdentitySource {
+    /// `APPLE_SIGNING_IDENTITY` environment variable.
+    Env,
+    /// `[apple] identity` in strudel.toml.
+    Project,
+    /// `identity` in the global config.
+    Global,
+    /// Derived at build time from an imported `APPLE_CERTIFICATE`.
+    Certificate,
+    /// Nothing configured; signing is ad-hoc.
+    None,
+}
+
+impl SignIdentitySource {
+    pub fn label(self) -> &'static str {
+        match self {
+            SignIdentitySource::Env => "APPLE_SIGNING_IDENTITY env var",
+            SignIdentitySource::Project => "strudel.toml [apple] identity",
+            SignIdentitySource::Global => "global config identity",
+            SignIdentitySource::Certificate => "derived from APPLE_CERTIFICATE at build time",
+            SignIdentitySource::None => "not configured",
+        }
+    }
+}
+
 /// All resolved targets from a `strudel.toml`. Single-target configs produce
 /// exactly one entry; `[[target]]` configs produce one per block.
 #[derive(Debug)]
@@ -188,6 +216,8 @@ pub struct ResolvedConfig {
     pub archs: Vec<String>,
     pub target_name: String,
     pub sign_identity: String,
+    /// Which configuration layer supplied `sign_identity`.
+    pub sign_identity_source: SignIdentitySource,
     pub notarize_timeout: u64,
     /// Extra environment variables forwarded to `swift build`.
     pub build_env: HashMap<String, String>,

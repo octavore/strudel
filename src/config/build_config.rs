@@ -14,6 +14,7 @@ use crate::config::extension::ExtensionSection;
 use crate::config::global::GlobalConfig;
 use crate::config::resolved::{
     ResolvedCopy, ResolvedDmg, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject,
+    SignIdentitySource,
 };
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
 use crate::config::{IosProvisioningBackend, ResolvedConfig};
@@ -280,14 +281,16 @@ fn resolve_target(
     // Identifiers: env var > strudel.toml > global config. A certificate
     // (env-only) always wins over any project/global identity default: the
     // real identity is derived from the imported certificate at build time.
-    let sign_identity = if has_certificate {
-        String::new()
+    let (sign_identity, sign_identity_source) = if has_certificate {
+        (String::new(), SignIdentitySource::Certificate)
+    } else if let Ok(v) = std::env::var("APPLE_SIGNING_IDENTITY") {
+        (v, SignIdentitySource::Env)
+    } else if let Some(v) = apple.identity.clone() {
+        (v, SignIdentitySource::Project)
+    } else if let Some(v) = global.signing_identity.clone() {
+        (v, SignIdentitySource::Global)
     } else {
-        env_or_global(
-            apple.identity.clone(),
-            global.signing_identity.clone(),
-            "APPLE_SIGNING_IDENTITY",
-        )
+        (String::new(), SignIdentitySource::None)
     };
 
     Ok(ResolvedConfig {
@@ -309,6 +312,7 @@ fn resolve_target(
             vec![arch.to_string()]
         }),
         sign_identity,
+        sign_identity_source,
         team_id: env_or_global(
             apple.team_id.clone(),
             global.signing_team_id.clone(),
@@ -1106,6 +1110,7 @@ mod tests {
                     .resolve(Path::new("/cfg"), Some(&global_config()))
                     .unwrap();
                 assert_eq!(r.sign_identity, "env-identity");
+                assert_eq!(r.sign_identity_source, SignIdentitySource::Env);
                 assert_eq!(r.team_id, "env-team");
                 assert_eq!(r.apple_api_issuer, "env-issuer");
                 assert_eq!(r.apple_api_key, "env-key");
@@ -1145,6 +1150,7 @@ mod tests {
                 .resolve(Path::new("/cfg"), Some(&global_config()))
                 .unwrap();
             assert_eq!(r.sign_identity, "Developer ID Application: Me (TEAM123456)");
+            assert_eq!(r.sign_identity_source, SignIdentitySource::Project);
             assert_eq!(r.team_id, "TEAM123456");
             assert_eq!(r.apple_api_issuer, "issuer-uuid");
             assert_eq!(r.apple_api_key, "KEYID123");
@@ -1162,6 +1168,7 @@ mod tests {
                 .resolve(Path::new("/cfg"), Some(&global_config()))
                 .unwrap();
             assert_eq!(r.sign_identity, "global-identity");
+            assert_eq!(r.sign_identity_source, SignIdentitySource::Global);
             assert_eq!(r.team_id, "global-team");
             assert_eq!(r.apple_api_issuer, "global-issuer");
             assert_eq!(r.apple_api_key, "global-key");
@@ -1182,6 +1189,7 @@ mod tests {
             let cfg = parse_build_config(NO_APPLE_SECTION).unwrap();
             let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
             assert_eq!(r.sign_identity, "");
+            assert_eq!(r.sign_identity_source, SignIdentitySource::None);
             assert_eq!(r.team_id, "");
             assert_eq!(r.apple_api_issuer, "");
             assert_eq!(r.apple_api_key, "");
