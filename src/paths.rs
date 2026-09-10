@@ -49,9 +49,13 @@ impl ExtensionPaths {
         ext: &ResolvedExtension,
     ) -> Self {
         let bundle = match ext.kind {
+            // `sysextd` looks up system extensions at activation time by
+            // deriving the expected bundle identifier from the *folder name*
+            // and comparing it against the identifier the host app requested,
+            // so the folder must be named after `bundle_id`.
             ExtensionKind::SystemExtension => app_bundle
                 .join("Contents/Library/SystemExtensions")
-                .join(format!("{}.systemextension", ext.name)),
+                .join(format!("{}.systemextension", ext.bundle_id)),
             ExtensionKind::SafariWebExtension | ExtensionKind::AppExtension => app_bundle
                 .join("Contents/PlugIns")
                 .join(format!("{}.appex", ext.name)),
@@ -273,13 +277,13 @@ mod tests {
         assert_eq!(
             e.bundle,
             PathBuf::from(
-                "/out/MyApp.app/Contents/Library/SystemExtensions/MyNetworkExtension.systemextension"
+                "/out/MyApp.app/Contents/Library/SystemExtensions/com.example.myapp.NetworkExtension.systemextension"
             )
         );
         assert_eq!(
             e.binary,
             PathBuf::from(
-                "/out/MyApp.app/Contents/Library/SystemExtensions/MyNetworkExtension.systemextension/Contents/MacOS/MyNetworkExtension"
+                "/out/MyApp.app/Contents/Library/SystemExtensions/com.example.myapp.NetworkExtension.systemextension/Contents/MacOS/MyNetworkExtension"
             )
         );
     }
