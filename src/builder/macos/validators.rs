@@ -101,8 +101,14 @@ impl MacosBuilder {
     }
 
     /// Decode a provisioning profile with `security cms` and warn about
-    /// expiry, team ID mismatches, and bundle ID mismatches.
-    pub(crate) fn validate_provisioning_profile(&self, profile_path: &Path) -> Result<()> {
+    /// expiry, team ID mismatches, and bundle ID mismatches. `bundle_id` is
+    /// the bundle ID the profile is expected to authorize - the host app's,
+    /// or an extension's own, since each embeds its own profile.
+    pub(crate) fn validate_provisioning_profile(
+        &self,
+        profile_path: &Path,
+        bundle_id: &str,
+    ) -> Result<()> {
         self.step("Validating provisioning profile...");
         let profile_str = profile_path.to_str().unwrap();
 
@@ -159,13 +165,11 @@ impl MacosBuilder {
             .and_then(plist::Value::as_dictionary)
             .and_then(application_identifier)
         {
-            let matches = app_id.ends_with(&format!(".{}", self.cfg.bundle_id))
-                || app_id == self.cfg.bundle_id.as_str();
+            let matches = app_id.ends_with(&format!(".{bundle_id}")) || app_id == bundle_id;
             if !matches {
                 cprintln!(
                     "<yellow>warning:</yellow> Provisioning profile app identifier \
-                     \"{app_id}\" does not match bundle ID \"{}\".",
-                    self.cfg.bundle_id
+                     \"{app_id}\" does not match bundle ID \"{bundle_id}\"."
                 );
             }
         }

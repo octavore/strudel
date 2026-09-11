@@ -594,6 +594,10 @@ After downloading and installing the certificate into the keychain on your machi
 
 Then set `identity` (and, for a team account, `team_id`) in `strudel.toml` under `[apple]`, or pass them via `APPLE_SIGNING_IDENTITY` / `APPLE_TEAM_ID`.
 
+`identity` and the embedded provisioning profile must agree: when a `provisioning_profile` is configured, strudel checks that `identity`'s certificate is actually listed in the profile's `DeveloperCertificates` and fails the build otherwise. A mismatch here still passes `codesign --verify`, but the OS refuses to launch or install the result (Gatekeeper/launchd/springboard rejection), so this is caught at sign time instead.
+
+When `identity` and `team_id` are both set, strudel also injects `application-identifier` (`<team_id>.<bundle id>`) and `com.apple.developer.team-identifier` (`team_id`) into the entitlements it signs with, for the app and for each `[[extensions]]` bundle - mirroring what Xcode writes automatically. It leaves either key alone if your `entitlements_json_path` already sets it, and skips injection entirely for ad-hoc builds (no `identity` configured).
+
 #### Signing in CI
 
 In CI the system keychain is not available, so set the `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` env vars instead. These cannot be stored in `strudel.toml`.

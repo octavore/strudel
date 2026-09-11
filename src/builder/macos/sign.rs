@@ -18,7 +18,7 @@ impl MacosBuilder {
         let app_bundle = self.paths.app_bundle.to_str().unwrap();
         let ent_plist_path = self.paths.entitlements_plist.to_str().unwrap();
 
-        let ent_value: Value = match self.cfg.entitlements_json_path {
+        let mut ent_value: Value = match self.cfg.entitlements_json_path {
             Some(ref path) => {
                 let ent_raw = fs::read_to_string(path).with_context(|| {
                     format!("Failed to read entitlements JSON at {}", path.display())
@@ -29,6 +29,7 @@ impl MacosBuilder {
             },
             None => Value::Object(Default::default()),
         };
+        self.inject_identifier_entitlements(&mut ent_value, &self.cfg.bundle_id);
 
         let ent_bytes = serde_json::to_vec_pretty(&ent_value)?;
         self.sh.run_stdin(
@@ -37,7 +38,7 @@ impl MacosBuilder {
         )?;
 
         if let Some(profile_path) = &self.cfg.provisioning_profile {
-            self.validate_provisioning_profile(profile_path)?;
+            self.validate_provisioning_profile(profile_path, &self.cfg.bundle_id)?;
         }
 
         // With no identity configured, sign ad-hoc (`--sign -`): no certificate or
@@ -186,6 +187,26 @@ impl MacosBuilder {
         Ok(adhoc)
     }
 
+    /// Insert application identifier and team identifier into `ent_value`.
+    ///
+    /// Skipped for ad-hoc builds (empty `sign_identity`) or when `team_id`
+    /// isn't configured, because there's no team to attribute the entitlement
+    /// to. User provided values are preserved.
+    fn inject_identifier_entitlements(&self, ent_value: &mut Value, bundle_id: &str) {
+        if self.cfg.sign_identity.is_empty() || self.cfg.team_id.is_empty() {
+            return;
+        }
+        let Value::Object(map) = ent_value else {
+            return;
+        };
+        let team_id = &self.cfg.team_id;
+        // note: on ios etc this would be just be `application-identifier` unprefixed
+        map.entry("com.apple.application-identifier")
+            .or_insert_with(|| format!("{team_id}.{bundle_id}").into());
+        map.entry("com.apple.developer.team-identifier")
+            .or_insert_with(|| team_id.clone().into());
+    }
+
     /// Sign one nested extension bundle (`.appex` or `.systemextension`) with
     /// its own entitlements. Called by [`sign`] for each configured
     /// extension, after embedded dylibs are signed and before the host
@@ -217,17 +238,19 @@ impl MacosBuilder {
                 ext.name
             )
         })?;
-        let ent_value: Value = serde_json::from_str(&ent_raw).with_context(|| {
+        let mut ent_value: Value = serde_json::from_str(&ent_raw).with_context(|| {
             format!("Extension entitlements file is not valid JSON: {ent_json_str}")
         })?;
-        self.sh.run(&[
-            "plutil",
-            "-convert",
-            "xml1",
-            ent_json_str,
-            "-o",
-            ent_plist_str,
-        ])?;
+        self.inject_identifier_entitlements(&mut ent_value, &ext.bundle_id);
+        let ent_bytes = serde_json::to_vec_pretty(&ent_value)?;
+        self.sh.run_stdin(
+            &["plutil", "-convert", "xml1", "-o", ent_plist_str, "-"],
+            &ent_bytes,
+        )?;
+
+        if let Some(profile_path) = &ext.provisioning_profile {
+            self.validate_provisioning_profile(profile_path, &ext.bundle_id)?;
+        }
 
         self.step(&format!("Signing extension `{}`...{msg}", ext.name));
         if adhoc {
