@@ -79,6 +79,7 @@ impl IosBuilder {
             // back to a plain, non-blocking launch there instead.
             if target_udids.len() == 1 {
                 self.note(cformat!("<dim>Streaming logs. Press Ctrl+C to stop.</dim>"));
+                self.note(self.log_stream_hint(Some(udid)));
                 retry_while_locked(udid, || {
                     self.sh
                         .run_streamed_stdout(ShellCommand::new("xcrun").args([
@@ -112,6 +113,9 @@ impl IosBuilder {
             "\n<green>Done!</green> App installed and launched on {} device(s).",
             target_udids.len()
         ));
+        for udid in &target_udids {
+            self.note(self.log_stream_hint(Some(udid)));
+        }
         Ok(())
     }
 

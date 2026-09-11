@@ -176,6 +176,23 @@ impl BuilderCore {
         self.sh.echo_suppressed()
     }
 
+    /// Hint for how to stream logs for this app. `device` optionally targets a
+    /// specific iOS device's log stream via `log`'s `--device` option
+    /// instead of the local Mac.
+    pub(crate) fn log_stream_hint(&self, device: Option<&str>) -> String {
+        let predicate = std::iter::once(&self.cfg.bundle_id)
+            .chain(self.cfg.extensions.iter().map(|ext| &ext.bundle_id))
+            .map(|id| format!("subsystem == \"{id}\""))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let device_flag = device
+            .map(|udid| format!(" --device {udid}"))
+            .unwrap_or_default();
+        cformat!(
+            "<dim>To view logs:</dim> <cyan>log stream{device_flag} --predicate '{predicate}' --level debug</cyan>"
+        )
+    }
+
     /// Locate the binary for `target_name` in the swift build output dir. In
     /// dry-run, returns the expected path without checking the filesystem.
     /// On a real run with the binary missing, emits a hint listing the
@@ -303,6 +320,7 @@ impl MacosBuilder {
         if self.open {
             let app_bundle = self.paths.app_bundle.to_str().unwrap();
             self.sh.run(&["open", app_bundle])?;
+            self.note(self.log_stream_hint(None));
         }
         Ok(())
     }

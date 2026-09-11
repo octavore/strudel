@@ -100,6 +100,7 @@ impl IosBuilder {
                 "\n<yellow>warning:</yellow> Signed ad-hoc for the Simulator; this build \
                  cannot be distributed. See <blue>strudel help signing</>."
             );
+            self.note(self.log_stream_hint(None));
         }
 
         Ok(())
