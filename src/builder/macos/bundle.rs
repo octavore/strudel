@@ -42,6 +42,8 @@ impl MacosBuilder {
             HashMap::from([
                 ("CFBundleExecutable".into(), self.cfg.app_name.clone()),
                 ("CFBundleIdentifier".into(), self.cfg.bundle_id.clone()),
+                ("CFBundleName".into(), self.cfg.app_name.clone()),
+                ("CFBundleDisplayName".into(), self.cfg.app_name.clone()),
                 ("CFBundlePackageType".into(), "APPL".into()),
             ]),
         )?;
