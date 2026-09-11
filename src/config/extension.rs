@@ -57,9 +57,11 @@ pub struct ExtensionSection {
     pub name: Option<String>,
 
     /// JSON describing extra `Info.plist` keys for the extension. strudel
-    /// always injects `CFBundle*` identity keys and the kind-specific
-    /// `NSExtension` dict on top of this. Optional; defaults to an empty
-    /// object.
+    /// always injects `CFBundle*` identity keys on top of this. An
+    /// `NSExtension` object here is merged with the kind-specific dict strudel
+    /// generates: strudel owns `NSExtensionPointIdentifier` and
+    /// `NSExtensionPrincipalClass`, any other subkeys pass through. Optional;
+    /// defaults to an empty object.
     pub info_json_path: Option<PathBuf>,
 
     /// JSON entitlements for the extension. Required, since extensions are
@@ -143,6 +145,7 @@ impl ExtensionSection {
             name: resolved_name,
             info_json_path,
             entitlements_json_path,
+            provisioning_profile: None,
             resources_dir,
             principal_class,
             extension_point_identifier,

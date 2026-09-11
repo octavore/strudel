@@ -379,44 +379,18 @@ impl MacosBuilder {
             ]),
         )?;
 
-        match ext.kind {
-            ExtensionKind::SafariWebExtension => {
-                // `NSExtensionPrincipalClass` was filled in during resolve (todo: clean up, a
-                // little spooky?)
-                let principal = ext.principal_class.as_deref().unwrap_or("");
-                info_json.insert(
-                    "NSExtension".into(),
-                    json!({
-                        "NSExtensionPointIdentifier": "com.apple.Safari.web-extension",
-                        "NSExtensionPrincipalClass": principal,
-                        "SFSafariWebExtensionManifestPath": "Resources/manifest.json",
-                    }),
-                );
-            },
-            ExtensionKind::AppExtension => {
-                let ident = ext.extension_point_identifier.as_deref().unwrap_or("");
-                let mut ns_ext = serde_json::Map::new();
-                ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
-                if let Some(class) = ext.principal_class.as_deref() {
-                    ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
-                } else {
-                    cprintln!(
-                        "<yellow>warning:</yellow> App Extension `{}` is missing `principal_class`, which may be required depending on the extension point.",
-                        ext.name
-                    );
-                }
-                info_json.insert("NSExtension".into(), Value::Object(ns_ext));
-            },
-            ExtensionKind::SystemExtension => {
-                let ident = ext.extension_point_identifier.as_deref().unwrap_or("");
-                let mut ns_ext = serde_json::Map::new();
-                ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
-                if let Some(class) = ext.principal_class.as_deref() {
-                    ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
-                }
-                info_json.insert("NSExtension".into(), Value::Object(ns_ext));
-            },
-        }
+        // Any `NSExtension` object supplied via `info_json_path` is merged with
+        // the kind-specific dict strudel generates. See `build_ns_extension`.
+        let user_ns_ext = match info_json.remove("NSExtension") {
+            Some(Value::Object(m)) => m,
+            Some(_) => bail!(
+                "`NSExtension` in the info json for extension `{}` must be an object",
+                ext.name
+            ),
+            None => serde_json::Map::new(),
+        };
+        let ns_ext = build_ns_extension(ext, user_ns_ext);
+        info_json.insert("NSExtension".into(), Value::Object(ns_ext));
 
         let json_bytes = serde_json::to_vec_pretty(&info_json)?;
         let plist_path = paths
@@ -469,6 +443,57 @@ impl MacosBuilder {
     }
 }
 
+/// Build the extension's `NSExtension` dict by layering strudel's
+/// config-derived keys over `user_ns_ext` (an `NSExtension` object taken from
+/// `info_json_path`, empty if none). strudel owns `NSExtensionPointIdentifier`
+/// and `NSExtensionPrincipalClass`; every other subkey the user provides
+/// (`NSExtensionAttributes`, `NSExtensionActivationRule`,
+/// `NSExtensionMainStoryboard`, etc) passes through untouched. For Safari web
+/// extensions `SFSafariWebExtensionManifestPath` defaults to
+/// `Resources/manifest.json` but can be overridden.
+fn build_ns_extension(
+    ext: &ResolvedExtension,
+    mut ns_ext: serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    match ext.kind {
+        ExtensionKind::SafariWebExtension => {
+            let principal = ext.principal_class.as_deref().unwrap_or("");
+            ns_ext.insert(
+                "NSExtensionPointIdentifier".into(),
+                json!("com.apple.Safari.web-extension"),
+            );
+            ns_ext.insert("NSExtensionPrincipalClass".into(), json!(principal));
+            ns_ext
+                .entry("SFSafariWebExtensionManifestPath".to_string())
+                .or_insert_with(|| json!("Resources/manifest.json"));
+        },
+        ExtensionKind::AppExtension => {
+            let ident = ext.extension_point_identifier.as_deref().unwrap_or("");
+            ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
+            match ext.principal_class.as_deref() {
+                Some(class) => {
+                    ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
+                },
+                None if !ns_ext.contains_key("NSExtensionPrincipalClass") => {
+                    cprintln!(
+                        "<yellow>warning:</yellow> App Extension `{}` is missing `principal_class`, which may be required depending on the extension point.",
+                        ext.name
+                    );
+                },
+                None => {},
+            }
+        },
+        ExtensionKind::SystemExtension => {
+            let ident = ext.extension_point_identifier.as_deref().unwrap_or("");
+            ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
+            if let Some(class) = ext.principal_class.as_deref() {
+                ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
+            }
+        },
+    }
+    ns_ext
+}
+
 /// Pull the macOS deployment target out of `swift package dump-package`'s
 /// JSON output (its `platforms: [{platformName, version}]` array). Falls
 /// back to `"14.0"` when the manifest declares no macOS platform minimum.
@@ -486,7 +511,109 @@ fn parse_macos_deployment_target(dump_package_json: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_macos_deployment_target;
+    use serde_json::{Value, json};
+
+    use super::{build_ns_extension, parse_macos_deployment_target};
+    use crate::config::{ExtensionKind, ResolvedExtension};
+
+    fn ext(kind: ExtensionKind) -> ResolvedExtension {
+        ResolvedExtension {
+            kind,
+            target_name: "Ext".into(),
+            bundle_id: "com.example.app.Ext".into(),
+            name: "Ext".into(),
+            info_json_path: None,
+            entitlements_json_path: "e.json".into(),
+            provisioning_profile: None,
+            resources_dir: None,
+            principal_class: None,
+            extension_point_identifier: None,
+        }
+    }
+
+    fn user_ns_ext(v: Value) -> serde_json::Map<String, Value> {
+        match v {
+            Value::Object(m) => m,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn ns_extension_passes_through_user_subkeys() {
+        let mut e = ext(ExtensionKind::AppExtension);
+        e.extension_point_identifier = Some("com.apple.share-services".into());
+        e.principal_class = Some("Ext.ShareViewController".into());
+        let ns = build_ns_extension(
+            &e,
+            user_ns_ext(json!({
+                "NSExtensionAttributes": { "NSExtensionActivationRule": "TRUEPREDICATE" },
+                "NSExtensionMainStoryboard": "MainInterface",
+            })),
+        );
+        assert_eq!(
+            ns["NSExtensionPointIdentifier"],
+            json!("com.apple.share-services")
+        );
+        assert_eq!(
+            ns["NSExtensionPrincipalClass"],
+            json!("Ext.ShareViewController")
+        );
+        assert_eq!(ns["NSExtensionMainStoryboard"], json!("MainInterface"));
+        assert_eq!(
+            ns["NSExtensionAttributes"]["NSExtensionActivationRule"],
+            json!("TRUEPREDICATE")
+        );
+    }
+
+    #[test]
+    fn ns_extension_config_keys_win_over_user() {
+        let mut e = ext(ExtensionKind::AppExtension);
+        e.extension_point_identifier = Some("com.apple.FinderSync".into());
+        e.principal_class = Some("Ext.FinderSync".into());
+        let ns = build_ns_extension(
+            &e,
+            user_ns_ext(json!({
+                "NSExtensionPointIdentifier": "com.example.wrong",
+                "NSExtensionPrincipalClass": "Wrong",
+            })),
+        );
+        assert_eq!(
+            ns["NSExtensionPointIdentifier"],
+            json!("com.apple.FinderSync")
+        );
+        assert_eq!(ns["NSExtensionPrincipalClass"], json!("Ext.FinderSync"));
+    }
+
+    #[test]
+    fn ns_extension_user_principal_class_suppresses_app_extension_warning() {
+        let mut e = ext(ExtensionKind::AppExtension);
+        e.extension_point_identifier = Some("com.apple.FinderSync".into());
+        let ns = build_ns_extension(
+            &e,
+            user_ns_ext(json!({ "NSExtensionPrincipalClass": "Ext.FromInfoJson" })),
+        );
+        assert_eq!(ns["NSExtensionPrincipalClass"], json!("Ext.FromInfoJson"));
+    }
+
+    #[test]
+    fn ns_extension_safari_manifest_path_is_overridable() {
+        let e = ext(ExtensionKind::SafariWebExtension);
+        let default = build_ns_extension(&e, serde_json::Map::new());
+        assert_eq!(
+            default["SFSafariWebExtensionManifestPath"],
+            json!("Resources/manifest.json")
+        );
+        let overridden = build_ns_extension(
+            &e,
+            user_ns_ext(
+                json!({ "SFSafariWebExtensionManifestPath": "Resources/sub/manifest.json" }),
+            ),
+        );
+        assert_eq!(
+            overridden["SFSafariWebExtensionManifestPath"],
+            json!("Resources/sub/manifest.json")
+        );
+    }
 
     #[test]
     fn deployment_target_reads_macos_platform_version() {

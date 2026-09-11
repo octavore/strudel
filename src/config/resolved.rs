@@ -302,6 +302,10 @@ pub struct ResolvedExtension {
     pub name: String,
     pub info_json_path: Option<PathBuf>,
     pub entitlements_json_path: PathBuf,
+    /// Provisioning profile to embed as this extension's own
+    /// `Contents/embedded.provisionprofile`, if configured or auto-fetched.
+    /// [`crate::builder::MacosBuilder::ensure_capabilities`].
+    pub provisioning_profile: Option<PathBuf>,
     /// Required for [`ExtensionKind::SafariWebExtension`]; the directory whose
     /// contents become the extension's `Resources/`.
     pub resources_dir: Option<PathBuf>,
