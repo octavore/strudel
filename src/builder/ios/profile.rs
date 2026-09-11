@@ -116,7 +116,7 @@ impl IosBuilder {
 
         self.step("Looking up bundle ID on App Store Connect...");
         let bundle_id_ref =
-            client.find_or_create_bundle_id(&self.cfg.bundle_id, &self.cfg.app_name)?;
+            client.find_or_create_bundle_id(&self.cfg.bundle_id, &self.cfg.app_name, "IOS")?;
         self.note(cformat!(
             "<dim>  Bundle ID: {} (portal ID: {})</dim>",
             self.cfg.bundle_id,

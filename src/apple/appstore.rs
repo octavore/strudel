@@ -173,15 +173,13 @@ impl AppStoreClient {
         Ok(())
     }
 
-    /// Find or create the bundle ID resource. Returns the resource ID.
-    pub fn find_or_create_bundle_id(&self, bundle_id: &str, name: &str) -> Result<String> {
+    /// Look up the bundle ID resource by identifier, without creating it.
+    /// Returns `None` if it doesn't exist yet. Read-only: safe to call
+    /// before asking the user for confirmation to make any changes.
+    pub fn find_bundle_id(&self, bundle_id: &str) -> Result<Option<String>> {
         #[derive(Deserialize)]
         struct ListResp {
             data: Vec<BundleIdResource>,
-        }
-        #[derive(Deserialize)]
-        struct SingleResp {
-            data: BundleIdResource,
         }
         #[derive(Deserialize)]
         struct BundleIdResource {
@@ -196,17 +194,38 @@ impl AppStoreClient {
         cprintln!("<dim>Looking for bundle ID on App Store Connect: {bundle_id}</dim>");
         let path = format!("/v1/bundleIds?filter[identifier]={bundle_id}");
         let list: ListResp = self.get_json(&path)?;
-        if let Some(r) = list
+        Ok(list
             .data
             .into_iter()
             .find(|r| r.attributes.identifier == bundle_id)
-        {
-            return Ok(r.id);
+            .map(|r| r.id))
+    }
+
+    /// Find or create the bundle ID resource. Returns the resource ID.
+    /// `platform` is the ASC `BundleIdPlatform` value (`"IOS"` or
+    /// `"MAC_OS"`), used only when the bundle ID doesn't already exist.
+    pub fn find_or_create_bundle_id(
+        &self,
+        bundle_id: &str,
+        name: &str,
+        platform: &str,
+    ) -> Result<String> {
+        #[derive(Deserialize)]
+        struct SingleResp {
+            data: BundleIdResource,
+        }
+        #[derive(Deserialize)]
+        struct BundleIdResource {
+            id: String,
+        }
+
+        if let Some(id) = self.find_bundle_id(bundle_id)? {
+            return Ok(id);
         }
         let body = json!({
             "data": {
                 "type": "bundleIds",
-                "attributes": {"identifier": bundle_id, "name": name, "platform": "IOS"}
+                "attributes": {"identifier": bundle_id, "name": name, "platform": platform}
             }
         });
 
@@ -223,8 +242,128 @@ impl AppStoreClient {
             })
     }
 
+    /// Capability types already enabled on the bundle ID. Read-only: safe to
+    /// call before asking the user for confirmation to make any changes.
+    pub fn enabled_capability_types(
+        &self,
+        bundle_id_resource_id: &str,
+    ) -> Result<std::collections::HashSet<String>> {
+        #[derive(Deserialize)]
+        struct ListResp {
+            data: Vec<CapResource>,
+        }
+        #[derive(Deserialize)]
+        struct CapResource {
+            attributes: CapAttrs,
+        }
+        #[derive(Deserialize)]
+        struct CapAttrs {
+            #[serde(rename = "capabilityType")]
+            capability_type: String,
+        }
+
+        cprintln!("<dim>Checking enabled capabilities on bundle ID...</dim>");
+        let list: ListResp = self.get_json(&format!(
+            "/v1/bundleIds/{bundle_id_resource_id}/bundleIdCapabilities"
+        ))?;
+        Ok(list
+            .data
+            .into_iter()
+            .map(|c| c.attributes.capability_type)
+            .collect())
+    }
+
+    /// Ensure each of `capability_types` is enabled on the bundle ID.
+    /// Capabilities already enabled are left alone.
+    pub fn ensure_capabilities(
+        &self,
+        bundle_id_resource_id: &str,
+        capability_types: &[&str],
+    ) -> Result<()> {
+        if capability_types.is_empty() {
+            return Ok(());
+        }
+
+        let enabled = self.enabled_capability_types(bundle_id_resource_id)?;
+
+        for cap_type in capability_types {
+            if enabled.contains(*cap_type) {
+                continue;
+            }
+            cprintln!("<dim>Enabling capability {cap_type} on bundle ID...</dim>");
+            let body = json!({
+                "data": {
+                    "type": "bundleIdCapabilities",
+                    "attributes": {"capabilityType": cap_type},
+                    "relationships": {
+                        "bundleId": {"data": {"type": "bundleIds", "id": bundle_id_resource_id}}
+                    }
+                }
+            });
+            self.post_json::<_, Value>("/v1/bundleIdCapabilities", &body)
+                .map(|_| ())
+                .or_else(|e| {
+                    if format!("{e}").contains("403") {
+                        bail!(
+                            "Insufficient permissions to enable capability {cap_type}. \
+                             An API key with the Admin role is required to manage capabilities \
+                             on the App Store Connect portal. You can also enable it manually at \
+                             https://developer.apple.com/account/resources/identifiers/list and \
+                             run strudel again."
+                        )
+                    } else {
+                        Err(e)
+                    }
+                })?;
+        }
+        Ok(())
+    }
+
     /// List development certificates in the account. Errors if none exist.
     pub fn list_development_certificates(&self) -> Result<Vec<Cert>> {
+        self.list_certificates("DEVELOPMENT")
+    }
+
+    /// List Developer ID Application certificates, covering both CA
+    /// generations Apple issues under: the classic `DEVELOPER_ID_APPLICATION`
+    /// chain, and the newer `DEVELOPER_ID_APPLICATION_G2` chain that a fresh
+    /// CSR comes back on by default today. A profile that only embeds one
+    /// generation silently fails to authorize a signing identity issued
+    /// under the other - see the strudel README's "Signing & notarization"
+    /// section. G2 certificates are listed first, since they're the ones a
+    /// newly-issued identity is actually likely to use.
+    pub fn list_developer_id_application_certificates(&self) -> Result<Vec<Cert>> {
+        let mut certs = self.list_certificates_allow_empty("DEVELOPER_ID_APPLICATION_G2")?;
+        certs.extend(self.list_certificates_allow_empty("DEVELOPER_ID_APPLICATION")?);
+        if certs.is_empty() {
+            bail!(
+                "No Developer ID Application certificates found in your Apple Developer \
+                 account.\n\
+                 Create one at: https://developer.apple.com/account/resources/certificates/list"
+            );
+        }
+        Ok(certs)
+    }
+
+    /// List certificates of `certificate_type` (an ASC `CertificateType`,
+    /// e.g. `"DEVELOPMENT"` or `"DEVELOPER_ID_APPLICATION"`) in the account.
+    /// Errors if none exist.
+    pub fn list_certificates(&self, certificate_type: &str) -> Result<Vec<Cert>> {
+        let certs = self.list_certificates_allow_empty(certificate_type)?;
+        if certs.is_empty() {
+            bail!(
+                "No {certificate_type} certificates found in your Apple Developer account.\n\
+                 Create one at: https://developer.apple.com/account/resources/certificates/list"
+            );
+        }
+        Ok(certs)
+    }
+
+    /// Same as [`Self::list_certificates`] but returns an empty `Vec` instead
+    /// of erroring when the account has none of `certificate_type` - for
+    /// callers that check multiple types and only care whether the union is
+    /// empty.
+    fn list_certificates_allow_empty(&self, certificate_type: &str) -> Result<Vec<Cert>> {
         #[derive(Deserialize)]
         struct ListResp {
             data: Vec<CertResource>,
@@ -239,15 +378,10 @@ impl AppStoreClient {
             name: String,
         }
 
-        cprintln!("<dim>Listing development certificates on App Store Connect...</dim>");
-        let list: ListResp =
-            self.get_json("/v1/certificates?filter[certificateType]=DEVELOPMENT&limit=200")?;
-        if list.data.is_empty() {
-            bail!(
-                "No development certificates found in your Apple Developer account.\n\
-                 Create one at: https://developer.apple.com/account/resources/certificates/list"
-            );
-        }
+        cprintln!("<dim>Listing {certificate_type} certificates on App Store Connect...</dim>");
+        let list: ListResp = self.get_json(&format!(
+            "/v1/certificates?filter[certificateType]={certificate_type}&limit=200"
+        ))?;
         Ok(list
             .data
             .into_iter()
@@ -310,12 +444,35 @@ impl AppStoreClient {
         Ok(resp.data.id)
     }
 
-    /// Create a development provisioning profile. Deletes any existing profile
-    /// with `name` first so the device set is always current. Returns the raw
-    /// `.mobileprovision` bytes.
+    /// Create an `IOS_APP_DEVELOPMENT` provisioning profile embedding
+    /// `device_ids`. Deletes any existing profile with `name` first so the
+    /// device set is always current. Returns the raw `.mobileprovision`
+    /// bytes.
     pub fn create_development_profile(
         &self,
         name: &str,
+        bundle_id_resource_id: &str,
+        cert_ids: &[String],
+        device_ids: &[String],
+    ) -> Result<Vec<u8>> {
+        self.create_profile(
+            name,
+            "IOS_APP_DEVELOPMENT",
+            bundle_id_resource_id,
+            cert_ids,
+            device_ids,
+        )
+    }
+
+    /// Create a provisioning profile of `profile_type` (an ASC `ProfileType`,
+    /// e.g. `"IOS_APP_DEVELOPMENT"` or `"MAC_APP_DIRECT"`). Deletes any
+    /// existing profile with `name` first so it's always current. `device_ids`
+    /// is empty for profile types with no device relationship (e.g. macOS
+    /// Developer ID profiles). Returns the raw profile bytes.
+    pub fn create_profile(
+        &self,
+        name: &str,
+        profile_type: &str,
         bundle_id_resource_id: &str,
         cert_ids: &[String],
         device_ids: &[String],
@@ -334,8 +491,9 @@ impl AppStoreClient {
             name: String,
         }
 
-        let list: ListResp =
-            self.get_json("/v1/profiles?filter[profileType]=IOS_APP_DEVELOPMENT&limit=200")?;
+        let list: ListResp = self.get_json(&format!(
+            "/v1/profiles?filter[profileType]={profile_type}&limit=200"
+        ))?;
         for p in list.data {
             if p.attributes.name == name {
                 self.delete(&format!("/v1/profiles/{}", p.id))?;
@@ -347,25 +505,29 @@ impl AppStoreClient {
             .iter()
             .map(|id| json!({"type": "certificates", "id": id}))
             .collect();
-        let device_data: Vec<Value> = device_ids
-            .iter()
-            .map(|id| json!({"type": "devices", "id": id}))
-            .collect();
+
+        let mut relationships = json!({
+            "bundleId": {
+                "data": {"type": "bundleIds", "id": bundle_id_resource_id}
+            },
+            "certificates": {"data": cert_data}
+        });
+        if !device_ids.is_empty() {
+            let device_data: Vec<Value> = device_ids
+                .iter()
+                .map(|id| json!({"type": "devices", "id": id}))
+                .collect();
+            relationships["devices"] = json!({"data": device_data});
+        }
 
         let body = json!({
             "data": {
                 "type": "profiles",
                 "attributes": {
                     "name": name,
-                    "profileType": "IOS_APP_DEVELOPMENT"
+                    "profileType": profile_type
                 },
-                "relationships": {
-                    "bundleId": {
-                        "data": {"type": "bundleIds", "id": bundle_id_resource_id}
-                    },
-                    "certificates": {"data": cert_data},
-                    "devices": {"data": device_data}
-                }
+                "relationships": relationships
             }
         });
 
