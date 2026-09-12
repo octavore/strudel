@@ -20,9 +20,7 @@ pub(crate) struct ProfileCmd {
 
 #[derive(Subcommand)]
 enum ProfileAction {
-    /// Create or refresh the provisioning profiles strudel manages: the
-    /// development profile for iOS device builds, and the Developer ID
-    /// profiles for macOS bundle IDs that need one
+    /// Create or refresh strudel-managed provisioning profiles.
     Fetch {
         /// Print commands without executing them
         #[arg(long)]
