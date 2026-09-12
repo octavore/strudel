@@ -21,7 +21,7 @@ pub use crate::config::extension::ExtensionKind;
 pub use crate::config::global::{GLOBAL_CONFIG_TEMPLATE, GlobalConfig};
 pub use crate::config::resolved::{
     ResolvedConfig, ResolvedExtension, ResolvedIcon, ResolvedIosSection, ResolvedMacOsSection,
-    ResolvedProject, ResolvedTargetPlatform, SignIdentitySource,
+    ResolvedProject, ResolvedTargetPlatform, Sourced, ValueSource,
 };
 
 pub fn load_config(config_path: &Path) -> Result<ResolvedProject> {

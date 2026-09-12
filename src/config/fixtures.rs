@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use crate::config::build_config::BuildConfig;
 use crate::config::build_target::IosProvisioningBackend;
-use crate::config::resolved::SignIdentitySource;
 use crate::config::{
     GlobalConfig, ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform,
+    Sourced,
 };
 
 pub const FULL: &str = indoc::indoc! {r#"
@@ -76,8 +76,7 @@ fn resolved(target_platform: ResolvedTargetPlatform) -> ResolvedConfig {
         icon: None,
         archs: vec!["arm64".into()],
         target_name: "A".into(),
-        sign_identity: String::new(),
-        sign_identity_source: SignIdentitySource::None,
+        sign_identity: Sourced::default(),
         notarize_timeout: 600,
         build_env: HashMap::new(),
         embed_libs: Vec::new(),
@@ -88,9 +87,9 @@ fn resolved(target_platform: ResolvedTargetPlatform) -> ResolvedConfig {
         resources: Vec::new(),
         copy: Vec::new(),
         target_platform,
-        team_id: String::new(),
-        apple_api_issuer: String::new(),
-        apple_api_key: String::new(),
+        team_id: Sourced::default(),
+        apple_api_issuer: Sourced::default(),
+        apple_api_key: Sourced::default(),
         apple_api_key_path: None,
         apple_certificate: String::new().into(),
         apple_certificate_password: String::new().into(),

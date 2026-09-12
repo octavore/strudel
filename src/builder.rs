@@ -35,7 +35,8 @@ use indoc::formatdoc;
 pub(crate) use profile::decode_profile;
 
 use crate::config::{
-    ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform,
+    ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform, Sourced,
+    ValueSource,
 };
 use crate::paths::Paths;
 use crate::shell::Shell;
@@ -368,7 +369,7 @@ impl MacosBuilder {
         // No-op unless APPLE_CERTIFICATE is set; supports signing with an
         // imported Developer ID identity here too, but ad-hoc needs nothing.
         let _keychain = self.import_certificate()?.map(|(keychain, identity)| {
-            self.core.cfg.sign_identity = identity;
+            self.core.cfg.sign_identity = Sourced::new(identity, ValueSource::Certificate);
             keychain
         });
         let adhoc = self.sign()?;
@@ -463,7 +464,7 @@ impl MacosBuilder {
         // only steps that need it. Dropped at the end of this function, which
         // tears the temporary keychain back down.
         let _keychain = self.import_certificate()?.map(|(keychain, identity)| {
-            self.core.cfg.sign_identity = identity;
+            self.core.cfg.sign_identity = Sourced::new(identity, ValueSource::Certificate);
             keychain
         });
         let adhoc = self.sign()?;

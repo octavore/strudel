@@ -58,8 +58,8 @@ impl AppStoreClient {
             .build()
             .new_agent();
         Ok(AppStoreClient {
-            key_id: cfg.apple_api_key.clone(),
-            issuer: cfg.apple_api_issuer.clone(),
+            key_id: cfg.apple_api_key.value.clone(),
+            issuer: cfg.apple_api_issuer.value.clone(),
             key_pem,
             agent,
         })

@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::config::resolved::{Sourced, ValueSource};
+
 /// Expand a leading `~` or `~/` to the user's home directory.
 pub fn expand_tilde(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();
@@ -16,15 +18,20 @@ pub fn resolve_path(base: &Path, p: impl AsRef<Path>) -> PathBuf {
     resolve_to(base, p.as_ref().to_path_buf())
 }
 
-/// Select config var by checking the following in order: env, project, global.
+/// Select a config var by checking, in order: env, project, global.
 pub fn env_or_global(
     project_val: Option<String>,
     global_val: Option<String>,
     env_key: &str,
-) -> String {
-    std::env::var(env_key)
-        .ok()
-        .or(project_val)
-        .or(global_val)
-        .unwrap_or_default()
+) -> Sourced {
+    if let Ok(v) = std::env::var(env_key) {
+        return Sourced::new(v, ValueSource::Env);
+    }
+    if let Some(v) = project_val {
+        return Sourced::new(v, ValueSource::Project);
+    }
+    if let Some(v) = global_val {
+        return Sourced::new(v, ValueSource::Global);
+    }
+    Sourced::default()
 }

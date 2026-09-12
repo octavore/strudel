@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use appleid::Session;
-use clml::cprintln;
+use clml::{cformat, cprintln};
 
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder;
 use crate::config::{
     GlobalConfig, IosProvisioningBackend, Platform, ResolvedConfig, ResolvedIosSection,
-    ResolvedTargetPlatform, SignIdentitySource, load_config,
+    ResolvedTargetPlatform, ValueSource, load_config,
 };
 use crate::devices::DeviceSet;
 use crate::paths::{Paths, StrudelData};
@@ -29,17 +29,28 @@ pub fn run(config_path: &Path, target: Option<&str>) -> Result<()> {
     println!();
     global_config_section()?;
     println!();
-    let session = apple_id_section()?;
+    let uses_free_provisioning = load_config(config_path)
+        .ok()
+        .map(|p| p.targets.iter().any(is_free_provisioning_target));
+    let session = apple_id_section(uses_free_provisioning)?;
     println!();
     project_section(config_path, target, session.as_ref());
     Ok(())
 }
 
 /// `strudel login status`: print just the Apple ID session block (no global
-/// config or project state).
+/// config or project state). No project is loaded here, so the sign-in hint
+/// stays generic.
 pub fn login_status() -> Result<()> {
-    apple_id_section()?;
+    apple_id_section(None)?;
     Ok(())
+}
+
+fn is_free_provisioning_target(cfg: &ResolvedConfig) -> bool {
+    matches!(
+        &cfg.target_platform,
+        ResolvedTargetPlatform::Ios(ios) if matches!(ios.provisioning, IosProvisioningBackend::Free)
+    )
 }
 
 /// Best-effort local toolchain versions; useful context when diagnosing a
@@ -60,7 +71,7 @@ fn tool_version(cmd: &str, args: &[&str]) -> String {
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.lines().next().map(str::to_string))
-        .unwrap_or_else(|| "not found".to_string())
+        .unwrap_or_else(|| dim("not found"))
 }
 
 /// `strudel profile` (no subcommand): print the current provisioning-profile
@@ -126,13 +137,17 @@ fn global_config_section() -> Result<()> {
     let g = GlobalConfig::load()?;
     field("signing identity", opt(&g.signing_identity));
     field("signing team id", opt(&g.signing_team_id));
-    field("notarize issuer", opt(&g.notarize_api_issuer));
-    field("notarize api key", mask_opt(&g.notarize_api_key));
-    field("notarize key path", opt_path(&g.notarize_api_key_path));
+    field("app store connect", String::new());
+    subfield("issuer", opt(&g.notarize_api_issuer));
+    subfield("api key", mask_opt(&g.notarize_api_key));
+    subfield("key path", opt_path(&g.notarize_api_key_path));
     Ok(())
 }
 
-fn apple_id_section() -> Result<Option<Session>> {
+/// `uses_free_provisioning` is `Some(bool)` when the caller could load the
+/// project and check whether any target has `[ios] provisioning = "free"`;
+/// `None` when there's no project context (e.g. `strudel login status`).
+fn apple_id_section(uses_free_provisioning: Option<bool>) -> Result<Option<Session>> {
     let data = StrudelData::locate()?;
     let dir = data.session_json.parent().unwrap_or(Path::new("~"));
     header("Apple ID session", Some(dir));
@@ -146,17 +161,33 @@ fn apple_id_section() -> Result<Option<Session>> {
             account_lines(session);
         },
         None => {
-            cprintln!("  <dim>○ not signed in (run `strudel login` for free provisioning)</dim>");
+            // Not signed in but no free-provisioning target needs it: purely
+            // informational, so it stays dim like other neutral state.
+            // Otherwise it's an actionable gap - call it out in yellow.
+            match uses_free_provisioning {
+                Some(false) => cprintln!(
+                    "  <dim>○ not signed in - not required (no target here uses free \
+                     provisioning)</dim>"
+                ),
+                _ => cprintln!(
+                    "  <yellow>○ not signed in</yellow> <dim>(run `strudel login` for free \
+                     provisioning; not required if a target uses `app_store_connect` \
+                     provisioning instead)</dim>"
+                ),
+            }
         },
     }
 
-    field(
-        "dev cert apple id",
-        opt(&apple_id_from_cert(&data.cert_der)),
-    );
-    field("dev cert", describe_cert(&data.cert_der));
-    field("dev key", present(&data.key_pem));
-    field("dev keychain", present(&data.keychain_db));
+    // explicitly hide when not free provisioning
+    if uses_free_provisioning != Some(false) {
+        field(
+            "dev cert apple id",
+            opt(&apple_id_from_cert(&data.cert_der)),
+        );
+        field("dev cert", describe_cert(&data.cert_der));
+        field("dev key", present(&data.key_pem));
+        field("dev keychain", present(&data.keychain_db));
+    }
     Ok(session)
 }
 
@@ -179,16 +210,16 @@ fn account_lines(session: &Session) {
 
     match details {
         Ok(teams) if teams.is_empty() => {
-            field2("developer teams", "none found on this account".to_string());
+            field2("developer teams", dim("none found on this account"));
         },
         Ok(teams) => {
             for (team, devices) in teams {
                 field2(
                     "team",
-                    format!("{} ({}) [{}]", team.name, team.id, team.status),
+                    cformat!("{} <dim>({})</dim> [{}]", team.name, team.id, team.status),
                 );
                 if devices.is_empty() {
-                    subfield("devices", "none registered on the portal".to_string());
+                    subfield("devices", dim("none registered on the portal"));
                     continue;
                 }
                 subfield("devices", devices.len().to_string());
@@ -243,55 +274,150 @@ fn target_block(cfg: &ResolvedConfig, session: Option<&Session>) {
     field2("platform", platform.to_string());
     match &cfg.target_platform {
         ResolvedTargetPlatform::Mac(_) => {
-            macos_sign_identity_block(cfg);
+            macos_sign_identity_field(cfg);
             macos_profile_block(cfg);
         },
         ResolvedTargetPlatform::Ios(ios) => {
-            ios_sign_identity_block(cfg, ios);
+            ios_sign_identity_field(cfg, ios);
             ios_provisioning_block(cfg, ios, session);
         },
     }
+    api_credentials_block(cfg);
 }
 
-/// Print the signing identity a macOS target will use and the config layer it
-/// was resolved from, matching the selection in `builder::macos::sign`.
-fn macos_sign_identity_block(cfg: &ResolvedConfig) {
-    if cfg.sign_identity_source == SignIdentitySource::Certificate {
-        field2("sign identity", "imported from APPLE_CERTIFICATE".to_string());
-        subfield("source", cfg.sign_identity_source.label().to_string());
+/// Print the signing identity a macOS target will use, noting when it wasn't
+/// set in this project's strudel.toml (i.e. inherited from the global
+/// config, read from `APPLE_SIGNING_IDENTITY`, or derived from an imported
+/// `APPLE_CERTIFICATE`) so `strudel status` doesn't look like it's pinned
+/// locally when it isn't. Matches the selection in `builder::macos::sign`.
+fn macos_sign_identity_field(cfg: &ResolvedConfig) {
+    if cfg.sign_identity.source == ValueSource::Certificate {
+        field2(
+            "sign identity",
+            with_source(
+                dim("imported from APPLE_CERTIFICATE"),
+                cfg.sign_identity.source,
+                "APPLE_SIGNING_IDENTITY",
+            ),
+        );
+        return;
+    }
+    let value = if_empty(&cfg.sign_identity, "ad-hoc / none configured");
+    field2(
+        "sign identity",
+        with_source(value, cfg.sign_identity.source, "APPLE_SIGNING_IDENTITY"),
+    );
+}
+
+/// Print the signing identity strudel will use for an iOS target, matching the
+/// selection in `builder::ios::device`. Free provisioning always signs with the
+/// certificate strudel mints, ignoring any configured `sign_identity`.
+fn ios_sign_identity_field(cfg: &ResolvedConfig, ios: &ResolvedIosSection) {
+    if matches!(ios.provisioning, IosProvisioningBackend::Free) {
+        field2(
+            "sign identity",
+            dim("Apple Development (minted by free provisioning)"),
+        );
         return;
     }
     if cfg.sign_identity.is_empty() {
-        field2("sign identity", "ad-hoc (no identity configured)".to_string());
+        field2(
+            "sign identity",
+            dim("Apple Development (first match in keychain)"),
+        );
         return;
     }
-    field2("sign identity", cfg.sign_identity.clone());
-    subfield("source", cfg.sign_identity_source.label().to_string());
+    field2(
+        "sign identity",
+        with_source(
+            cfg.sign_identity.value.clone(),
+            cfg.sign_identity.source,
+            "APPLE_SIGNING_IDENTITY",
+        ),
+    );
 }
 
-/// Print the manually-pinned provisioning profile for a macOS target, if any.
-/// Unlike iOS, macOS has no auto-fetch backend: a profile is only needed for
-/// certain entitlements, and must be supplied via `build.provisioning_profile`
-/// in strudel.toml.
+/// Print the resolved App Store Connect API identifiers (for notarization,
+/// other App Store Connect calls)
+fn api_credentials_block(cfg: &ResolvedConfig) {
+    field2(
+        "team id",
+        with_source(
+            if_empty(&cfg.team_id, "(unset)"),
+            cfg.team_id.source,
+            "APPLE_TEAM_ID",
+        ),
+    );
+    field2("app store connect", String::new());
+    subfield(
+        "issuer",
+        with_source(
+            if_empty(&cfg.apple_api_issuer, "(unset)"),
+            cfg.apple_api_issuer.source,
+            "APPLE_API_ISSUER",
+        ),
+    );
+    subfield(
+        "api key",
+        with_source(
+            if cfg.apple_api_key.is_empty() {
+                dim("(unset)")
+            } else {
+                mask(&cfg.apple_api_key)
+            },
+            cfg.apple_api_key.source,
+            "APPLE_API_KEY",
+        ),
+    );
+    subfield("key path", opt_path(&cfg.apple_api_key_path));
+}
+
+/// Annotate a resolved value with where it came from, when that isn't
+/// obvious from the value itself (i.e. it wasn't set in this project's
+/// strudel.toml).
+fn with_source(value: String, source: ValueSource, env_key: &str) -> String {
+    match source.describe(env_key) {
+        Some(desc) => format!("{value}  {}", dim(&format!("({desc})"))),
+        None => value,
+    }
+}
+
+/// Print the provisioning profile for a macOS target, if any: either fetched
+/// automatically (`build.provisioning_profile = "auto"`, see
+/// `builder::macos::profile`) or pinned to an explicit path. Most macOS
+/// builds need neither - a profile is only required for a handful of
+/// entitlements (e.g. App Groups, Network Extensions).
 fn macos_profile_block(cfg: &ResolvedConfig) {
     let Some(path) = &cfg.provisioning_profile else {
         field2(
             "provisioning profile",
-            "not configured (only required for some entitlements)".to_string(),
+            dim("not configured (only required for some entitlements)"),
         );
         return;
+    };
+    let mode = if cfg.manage_provisioning_profile {
+        "auto"
+    } else {
+        "pinned"
     };
     if !path.exists() {
         field2(
             "provisioning profile",
-            format!("{} (missing)", shorten(path)),
+            cformat!(
+                "{} <red>(missing)</red>  {}",
+                shorten(path),
+                dim(&format!("({mode})"))
+            ),
         );
         return;
     }
-    field2("provisioning profile", shorten(path));
+    field2(
+        "provisioning profile",
+        format!("{}  {}", shorten(path), dim(&format!("({mode})"))),
+    );
     match builder::decode_profile(path) {
         Ok(value) => print_profile_details(value.as_dictionary(), None),
-        Err(e) => cprintln!("      <yellow>could not decode: {}</yellow>", e),
+        Err(e) => cprintln!("      <red>could not decode: {}</red>", e),
     }
 }
 
@@ -299,28 +425,6 @@ fn macos_profile_block(cfg: &ResolvedConfig) {
 /// one iOS target. Shared by `strudel login status` (as part of the full
 /// project dump) and `strudel profile` (on its own), so the two commands
 /// don't drift out of sync.
-/// Print the signing identity strudel will use for an iOS target, matching the
-/// selection in `builder::ios::device`. Free provisioning always signs with the
-/// certificate strudel mints, ignoring any configured `sign_identity`.
-fn ios_sign_identity_block(cfg: &ResolvedConfig, ios: &ResolvedIosSection) {
-    if matches!(ios.provisioning, IosProvisioningBackend::Free) {
-        field2(
-            "sign identity",
-            "Apple Development (minted by free provisioning)".to_string(),
-        );
-        return;
-    }
-    if cfg.sign_identity.is_empty() {
-        field2(
-            "sign identity",
-            "Apple Development (first match in keychain)".to_string(),
-        );
-        return;
-    }
-    field2("sign identity", cfg.sign_identity.clone());
-    subfield("source", cfg.sign_identity_source.label().to_string());
-}
-
 fn ios_provisioning_block(
     cfg: &ResolvedConfig,
     ios: &ResolvedIosSection,
@@ -352,19 +456,19 @@ fn profile_lines(paths: &Paths, cfg: &ResolvedConfig, expected_owner: Option<&st
         None => ("profile (cached)", paths.cached_profile.clone()),
     };
     if !path.exists() {
-        field2(label, format!("{} (none)", shorten(&path)));
+        field2(label, format!("{} {}", shorten(&path), dim("(none)")));
         return;
     }
     field2(label, shorten(&path));
     match builder::decode_profile(&path) {
         Ok(value) => print_profile_details(value.as_dictionary(), expected_owner),
-        Err(e) => cprintln!("      <yellow>could not decode: {}</yellow>", e),
+        Err(e) => cprintln!("      <red>could not decode: {}</red>", e),
     }
 }
 
 fn print_profile_details(dict: Option<&plist::Dictionary>, expected_owner: Option<&str>) {
     let Some(dict) = dict else {
-        cprintln!("      <yellow>unexpected profile format</yellow>");
+        cprintln!("      <red>unexpected profile format</red>");
         return;
     };
     if let Some(name) = dict.get("Name").and_then(|v| v.as_string()) {
@@ -401,7 +505,7 @@ fn print_owner_check(dict: &plist::Dictionary, expected: &str) {
     let Some(certs) = certs else {
         subfield(
             "owner",
-            "unknown (profile has no embedded certificate)".to_string(),
+            dim("unknown (profile has no embedded certificate)"),
         );
         return;
     };
@@ -413,15 +517,15 @@ fn print_owner_check(dict: &plist::Dictionary, expected: &str) {
         .collect();
 
     if emails.iter().any(|e| e.eq_ignore_ascii_case(expected)) {
-        subfield("owner", emails.join(", "));
+        subfield("owner", cformat!("<green>{}</green>", emails.join(", ")));
     } else if emails.is_empty() {
         subfield(
             "owner",
-            "unknown (could not read embedded certificate)".to_string(),
+            dim("unknown (could not read embedded certificate)"),
         );
     } else {
         cprintln!(
-            "      <yellow>owner mismatch: profile belongs to {}, signed in as {}</yellow>",
+            "      <red>owner mismatch: profile belongs to {}, signed in as {}</red>",
             emails.join(", "),
             expected
         );
@@ -434,18 +538,19 @@ fn device_lines(paths: &Paths) {
         Err(_) => return,
     };
     if set.device.is_empty() {
-        field2(
-            "tracked devices",
-            "none (run `strudel devices add`)".to_string(),
-        );
+        field2("tracked devices", dim("none (run `strudel devices add`)"));
         return;
     }
     field2(
         "tracked devices",
-        format!("{} ({})", set.device.len(), shorten(&paths.devices_toml)),
+        format!(
+            "{} {}",
+            set.device.len(),
+            dim(&format!("({})", shorten(&paths.devices_toml)))
+        ),
     );
     for d in &set.device {
-        subfield("-", format!("{} ({})", d.name, d.udid));
+        subfield("-", cformat!("{} <dim>({})</dim>", d.name, d.udid));
     }
 }
 
@@ -461,15 +566,15 @@ fn header(title: &str, path: Option<&Path>) {
 }
 
 fn field(label: &str, value: String) {
-    cprintln!("  {:<18} <dim>{}</dim>", format!("{label}:"), value);
+    cprintln!("  <dim>{:<20}</dim> {}", format!("{label}:"), value);
 }
 
 fn field2(label: &str, value: String) {
-    cprintln!("    {:<16} <dim>{}</dim>", format!("{label}:"), value);
+    cprintln!("    <dim>{:<24}</dim> {}", format!("{label}:"), value);
 }
 
 fn subfield(label: &str, value: String) {
-    cprintln!("      {:<14} <dim>{}</dim>", format!("{label}"), value);
+    cprintln!("      <dim>{:<14}</dim> {}", format!("{label}"), value);
 }
 
 fn read_session(path: &Path) -> Option<Session> {
@@ -531,9 +636,9 @@ fn email_from_cn(cn: &str) -> Option<String> {
 /// Describe the cached dev certificate: expiry + short SHA-1 fingerprint.
 fn describe_cert(cert_der: &Path) -> String {
     if !cert_der.exists() {
-        return "not cached".to_string();
+        return dim("not cached");
     }
-    let mut parts = vec!["cached".to_string()];
+    let mut parts = vec![cformat!("<green>cached</green>")];
     // "notAfter=Jul  5 12:00:00 2027 GMT" -> keep the value.
     if let Some(end) = openssl_field(cert_der, "-enddate")
         && let Some(v) = end.split_once('=').map(|(_, v)| v.trim())
@@ -564,49 +669,67 @@ fn openssl_field(cert_der: &Path, flag: &str) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+/// Free-provisioning profiles only live 7 days; a profile this close to
+/// expiring is worth flagging before it fails a build.
+const EXPIRY_WARNING_DAYS: u64 = 2;
+
 fn format_expiry(exp: plist::Date) -> String {
     use std::time::SystemTime;
     let exp = SystemTime::from(exp);
     match exp.duration_since(SystemTime::now()) {
         Ok(d) => {
             let days = d.as_secs() / 86_400;
-            format!("in {days} day(s)")
+            if days <= EXPIRY_WARNING_DAYS {
+                cformat!("<yellow>in {days} day(s)</yellow>")
+            } else {
+                format!("in {days} day(s)")
+            }
         },
-        Err(_) => "expired".to_string(),
+        Err(_) => cformat!("<red>expired</red>"),
     }
 }
 
 fn present(path: &Path) -> String {
     if path.exists() {
-        format!("present ({})", shorten(path))
+        cformat!("<green>present</green> <dim>({})</dim>", shorten(path))
     } else {
-        "absent".to_string()
+        dim("absent")
     }
 }
 
 fn opt(v: &Option<String>) -> String {
-    v.clone().unwrap_or_else(|| "(unset)".to_string())
+    v.clone().unwrap_or_else(|| dim("(unset)"))
 }
 
 fn opt_path(v: &Option<PathBuf>) -> String {
     v.as_ref()
         .map(|p| shorten(p))
-        .unwrap_or_else(|| "(unset)".to_string())
+        .unwrap_or_else(|| dim("(unset)"))
+}
+
+fn if_empty(v: &str, fallback: &str) -> String {
+    if v.is_empty() {
+        dim(fallback)
+    } else {
+        v.to_string()
+    }
 }
 
 /// Mask a secret, keeping only the last 4 characters.
 fn mask(v: &str) -> String {
     match v.len() {
-        0 => "(empty)".to_string(),
+        0 => dim("(empty)"),
         n if n <= 4 => "****".to_string(),
         n => format!("****{}", &v[n - 4..]),
     }
 }
 
 fn mask_opt(v: &Option<String>) -> String {
-    v.as_deref()
-        .map(mask)
-        .unwrap_or_else(|| "(unset)".to_string())
+    v.as_deref().map(mask).unwrap_or_else(|| dim("(unset)"))
+}
+
+fn dim(v: &str) -> String {
+    cformat!("<dim>{}</dim>", v)
 }
 
 /// Shorten a path by replacing the home-directory prefix with `~`.
@@ -639,7 +762,7 @@ mod tests {
     fn mask_keeps_last_four() {
         assert_eq!(mask("ABCD1234"), "****1234");
         assert_eq!(mask("XY"), "****");
-        assert_eq!(mask(""), "(empty)");
+        assert_eq!(mask(""), dim("(empty)"));
     }
 
     #[test]

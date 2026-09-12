@@ -199,12 +199,12 @@ impl MacosBuilder {
         let Value::Object(map) = ent_value else {
             return;
         };
-        let team_id = &self.cfg.team_id;
+        let team_id = self.cfg.team_id.value.as_str();
         // note: on ios etc this would be just be `application-identifier` unprefixed
         map.entry("com.apple.application-identifier")
             .or_insert_with(|| format!("{team_id}.{bundle_id}").into());
         map.entry("com.apple.developer.team-identifier")
-            .or_insert_with(|| team_id.clone().into());
+            .or_insert_with(|| team_id.into());
     }
 
     /// Sign one nested extension bundle (`.appex` or `.systemextension`) with

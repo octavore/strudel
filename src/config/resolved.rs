@@ -63,31 +63,68 @@ pub enum ResolvedIcon {
     },
 }
 
-/// Which configuration layer supplied the resolved signing identity. Reported
-/// by `strudel status` so the chosen value can be traced back to its source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignIdentitySource {
-    /// `APPLE_SIGNING_IDENTITY` environment variable.
+/// Source of a resolved value, so `strudel status` can report where a
+/// value comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ValueSource {
+    /// The matching `APPLE_*` environment variable.
     Env,
-    /// `[apple] identity` in strudel.toml.
+    /// Set in this project's strudel.toml.
     Project,
-    /// `identity` in the global config.
+    /// Inherited from the global config (`~/.config/strudel/config.toml`).
     Global,
     /// Derived at build time from an imported `APPLE_CERTIFICATE`.
     Certificate,
-    /// Nothing configured; signing is ad-hoc.
+    /// Not configured anywhere.
+    #[default]
     None,
 }
 
-impl SignIdentitySource {
-    pub fn label(self) -> &'static str {
+impl ValueSource {
+    /// Additional description of this source.
+    pub fn describe(self, env_key: &str) -> Option<String> {
         match self {
-            SignIdentitySource::Env => "APPLE_SIGNING_IDENTITY env var",
-            SignIdentitySource::Project => "strudel.toml [apple] identity",
-            SignIdentitySource::Global => "global config identity",
-            SignIdentitySource::Certificate => "derived from APPLE_CERTIFICATE at build time",
-            SignIdentitySource::None => "not configured",
+            ValueSource::Env => Some(format!("from {env_key}")),
+            ValueSource::Global => Some("inherited from global config".to_string()),
+            ValueSource::Certificate => {
+                Some("derived from APPLE_CERTIFICATE at build time".to_string())
+            },
+            ValueSource::Project | ValueSource::None => None,
         }
+    }
+}
+
+/// A resolved string value paired with its source so `strudel status` can
+/// show e.g. that a team id was inherited from the global config rather than
+/// set in the project's strudel.toml.
+#[derive(Debug, Clone, Default)]
+pub struct Sourced {
+    pub value: String,
+    pub source: ValueSource,
+}
+
+impl Sourced {
+    pub fn new(value: String, source: ValueSource) -> Self {
+        Self { value, source }
+    }
+}
+
+impl std::ops::Deref for Sourced {
+    type Target = String;
+    fn deref(&self) -> &String {
+        &self.value
+    }
+}
+
+impl std::fmt::Display for Sourced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.value, f)
+    }
+}
+
+impl From<&str> for Sourced {
+    fn from(value: &str) -> Self {
+        Self::new(value.to_string(), ValueSource::None)
     }
 }
 
@@ -215,9 +252,7 @@ pub struct ResolvedConfig {
     pub icon: Option<ResolvedIcon>,
     pub archs: Vec<String>,
     pub target_name: String,
-    pub sign_identity: String,
-    /// Which configuration layer supplied `sign_identity`.
-    pub sign_identity_source: SignIdentitySource,
+    pub sign_identity: Sourced,
     pub notarize_timeout: u64,
     /// Extra environment variables forwarded to `swift build`.
     pub build_env: HashMap<String, String>,
@@ -244,9 +279,9 @@ pub struct ResolvedConfig {
     pub target_platform: ResolvedTargetPlatform,
 
     // Notarization identifiers (from strudel.toml or the environment).
-    pub team_id: String,
-    pub apple_api_issuer: String,
-    pub apple_api_key: String,
+    pub team_id: Sourced,
+    pub apple_api_issuer: Sourced,
+    pub apple_api_key: Sourced,
     pub apple_api_key_path: Option<PathBuf>,
 
     // Secrets (read from the environment only, never from strudel.toml).
@@ -263,8 +298,9 @@ impl ResolvedConfig {
         {
             return Some(NotaryAuth {
                 key_path: key_path.clone(),
-                key_id: self.apple_api_key.clone(),
-                issuer: (!self.apple_api_issuer.is_empty()).then(|| self.apple_api_issuer.clone()),
+                key_id: self.apple_api_key.value.clone(),
+                issuer: (!self.apple_api_issuer.is_empty())
+                    .then(|| self.apple_api_issuer.value.clone()),
             });
         }
         None
