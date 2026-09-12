@@ -1,14 +1,151 @@
-//! Provisioning-profile decoding and validity checks shared by the iOS and
-//! macOS pipelines.
+//! Provisioning-profile decoding, validity checks, and creation, shared by the
+//! iOS and macOS pipelines.
 
 use std::io::{Cursor, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 
+use crate::apple::appstore::AppStoreClient;
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder::keychain::parse_identity_line;
+use crate::paths::ensure_strudel_dir;
+
+/// The App Store Connect certificate type a profile is issued against. A
+/// profile only authorizes signatures made with a certificate it embeds, so
+/// this has to match how the bundle is actually signed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CertKind {
+    /// Development certificates, for iOS device builds.
+    Development,
+    /// Developer ID Application certificates, for directly-distributed macOS
+    /// apps. Covers both CA generations Apple issues under.
+    DeveloperIdApplication,
+}
+
+impl CertKind {
+    /// Resource IDs of every certificate of this kind in the account. Errors
+    /// when the account has none, since a profile embedding no certificate
+    /// authorizes no signature.
+    pub fn list(self, client: &AppStoreClient) -> Result<Vec<String>> {
+        let certs = match self {
+            CertKind::Development => client.list_development_certificates()?,
+            CertKind::DeveloperIdApplication => {
+                client.list_developer_id_application_certificates()?
+            },
+        };
+        Ok(certs.into_iter().map(|c| c.id).collect())
+    }
+}
+
+/// One provisioning profile strudel manages, for the host app or for a single
+/// extension. Both platforms describe their profiles this way and share
+/// [`ProfileRequest::is_current`] and [`ProfileRequest::provision`]; the
+/// platform differences live entirely in these fields.
+pub struct ProfileRequest {
+    pub bundle_id: String,
+    /// App or extension name. Registers the bundle ID and labels progress
+    /// output.
+    pub label: String,
+    /// Where the fetched profile is cached, and what gets embedded.
+    pub cache_path: PathBuf,
+    /// Profile name on the portal. Reused across fetches so refreshing
+    /// replaces the profile rather than accumulating copies.
+    pub name: String,
+    /// ASC `BundleIdPlatform`: `"IOS"` or `"MAC_OS"`.
+    pub platform: &'static str,
+    /// ASC `ProfileType`, e.g. `"IOS_APP_DEVELOPMENT"` or `"MAC_APP_DIRECT"`.
+    pub profile_type: &'static str,
+    /// Portal device resource IDs to embed. Empty for profile types with no
+    /// device relationship, which is every macOS type.
+    pub device_ids: Vec<String>,
+    /// Device UDIDs the cached profile must already cover to count as current.
+    /// Empty on macOS, whose profiles carry no `ProvisionedDevices` at all.
+    pub required_udids: Vec<String>,
+}
+
+impl ProfileRequest {
+    /// A Developer ID profile for a macOS bundle ID.
+    pub fn macos(bundle_id: String, label: String, cache_path: PathBuf) -> Self {
+        let name = format!("strudel {label} Developer ID");
+        ProfileRequest {
+            bundle_id,
+            label,
+            cache_path,
+            name,
+            platform: "MAC_OS",
+            // "MAC_APP_DIRECT" is the ASC ProfileType for Developer ID
+            // (direct, non-App-Store) distribution. A wrong value surfaces as
+            // the API's own error rather than failing silently.
+            profile_type: "MAC_APP_DIRECT",
+            device_ids: Vec::new(),
+            required_udids: Vec::new(),
+        }
+    }
+
+    /// A development profile for an iOS bundle ID, embedding `device_ids`.
+    pub fn ios(
+        bundle_id: String,
+        label: String,
+        cache_path: PathBuf,
+        device_ids: Vec<String>,
+        required_udids: Vec<String>,
+    ) -> Self {
+        let name = format!("strudel {label} Development");
+        ProfileRequest {
+            bundle_id,
+            label,
+            cache_path,
+            name,
+            platform: "IOS",
+            profile_type: "IOS_APP_DEVELOPMENT",
+            device_ids,
+            required_udids,
+        }
+    }
+
+    /// Whether the cached profile can be reused as-is. A profile that is
+    /// absent, undecodable, expiring, missing a required device, or issued for
+    /// another bundle ID or team counts as not current and is replaced.
+    pub fn is_current(&self, team_id: &str) -> bool {
+        let udids: Vec<&str> = self.required_udids.iter().map(String::as_str).collect();
+        matches!(
+            profile_is_current(&self.cache_path, &udids, &self.bundle_id, team_id),
+            Ok(true)
+        )
+    }
+
+    /// Find or create the bundle ID, create the profile against `cert_ids`,
+    /// and write it to the cache path. `cert_ids` must be of the [`CertKind`]
+    /// this profile type is issued against; callers list them once per run
+    /// rather than per profile. Prints nothing: the App Store Connect client
+    /// narrates its own lookups, and callers frame this with their own
+    /// progress lines.
+    pub fn provision(
+        &self,
+        client: &AppStoreClient,
+        cert_ids: &[String],
+        strudel_dir: &Path,
+    ) -> Result<()> {
+        let bundle_id_ref =
+            client.find_or_create_bundle_id(&self.bundle_id, &self.label, self.platform)?;
+        let bytes = client.create_profile(
+            &self.name,
+            self.profile_type,
+            &bundle_id_ref,
+            cert_ids,
+            &self.device_ids,
+        )?;
+        ensure_strudel_dir(strudel_dir)?;
+        std::fs::write(&self.cache_path, &bytes).with_context(|| {
+            format!(
+                "Failed to write provisioning profile to {}",
+                self.cache_path.display()
+            )
+        })
+    }
+}
 
 /// Decode a provisioning profile's (`.mobileprovision`/`.provisionprofile`)
 /// CMS envelope and return the plist value.

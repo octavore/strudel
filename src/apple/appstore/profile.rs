@@ -8,26 +8,6 @@ use super::client::AppStoreClient;
 use super::types::{ListEnvelope, Resource, SingleEnvelope};
 
 impl AppStoreClient {
-    /// Create an `IOS_APP_DEVELOPMENT` provisioning profile embedding
-    /// `device_ids`. Deletes any existing profile with `name` first so the
-    /// device set is always current. Returns the raw `.mobileprovision`
-    /// bytes.
-    pub fn create_development_profile(
-        &self,
-        name: &str,
-        bundle_id_resource_id: &str,
-        cert_ids: &[String],
-        device_ids: &[String],
-    ) -> Result<Vec<u8>> {
-        self.create_profile(
-            name,
-            "IOS_APP_DEVELOPMENT",
-            bundle_id_resource_id,
-            cert_ids,
-            device_ids,
-        )
-    }
-
     /// Create a provisioning profile of `profile_type` (an ASC `ProfileType`,
     /// e.g. `"IOS_APP_DEVELOPMENT"` or `"MAC_APP_DIRECT"`). Deletes any
     /// existing profile with `name` first so it's always current. `device_ids`
