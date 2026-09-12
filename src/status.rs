@@ -97,8 +97,49 @@ pub fn profile_info(config_path: &Path, target: Option<&str>) -> Result<()> {
             ResolvedTargetPlatform::Ios(ios) => ios_provisioning_block(cfg, ios, session.as_ref()),
             ResolvedTargetPlatform::Mac(_) => macos_profile_block(cfg),
         }
+        extensions_block(cfg);
     }
     Ok(())
+}
+
+/// Print each extension's own provisioning-profile status. Extensions carry
+/// their own bundle id and (optionally) their own profile, separate from the
+/// host app's, so they're broken out under the host target here.
+fn extensions_block(cfg: &ResolvedConfig) {
+    for ext in &cfg.extensions {
+        field2(&format!("extension: {}", ext.name), ext.bundle_id.clone());
+        let Some(path) = &ext.provisioning_profile else {
+            subfield(
+                "profile",
+                dim("not configured (only required for some entitlements)"),
+            );
+            continue;
+        };
+        let mode = if ext.manage_provisioning_profile {
+            "auto"
+        } else {
+            "pinned"
+        };
+        if !path.exists() {
+            subfield(
+                "profile",
+                cformat!(
+                    "{} <red>(missing)</red>  {}",
+                    shorten(path),
+                    dim(&format!("({mode})"))
+                ),
+            );
+            continue;
+        }
+        subfield(
+            "profile",
+            format!("{}  {}", shorten(path), dim(&format!("({mode})"))),
+        );
+        match builder::decode_profile(path) {
+            Ok(value) => print_profile_details(value.as_dictionary(), None),
+            Err(e) => cprintln!("      <red>could not decode: {}</red>", e),
+        }
+    }
 }
 
 /// `strudel devices` (no subcommand): list devices tracked in
@@ -282,6 +323,7 @@ fn target_block(cfg: &ResolvedConfig, session: Option<&Session>) {
             ios_provisioning_block(cfg, ios, session);
         },
     }
+    extensions_block(cfg);
     api_credentials_block(cfg);
 }
 
