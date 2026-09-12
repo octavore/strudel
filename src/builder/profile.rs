@@ -68,7 +68,7 @@ pub struct ProfileRequest {
 impl ProfileRequest {
     /// A Developer ID profile for a macOS bundle ID.
     pub fn macos(bundle_id: String, label: String, cache_path: PathBuf) -> Self {
-        let name = format!("strudel {label} Developer ID");
+        let name = format!("[strudel] {label} Developer ID");
         ProfileRequest {
             bundle_id,
             label,
@@ -92,7 +92,7 @@ impl ProfileRequest {
         device_ids: Vec<String>,
         required_udids: Vec<String>,
     ) -> Self {
-        let name = format!("strudel {label} Development");
+        let name = format!("[strudel] {label} Development");
         ProfileRequest {
             bundle_id,
             label,
