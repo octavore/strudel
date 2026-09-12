@@ -83,7 +83,7 @@ impl Paths {
         } = cfg;
         let app_bundle = build_dir.join(format!("{app_name}.app"));
         let dmg_name = format!("{app_name}-{version}.dmg");
-        let strudel_dir = source_dir.join(".strudel");
+        let strudel_dir = strudel_dir(source_dir);
         let extension_paths = extensions
             .iter()
             .map(|ext| ExtensionPaths::for_extension(&app_bundle, build_dir, ext))
@@ -145,6 +145,20 @@ impl StrudelData {
             keychain_db: dir.join("strudel-dev.keychain-db"),
         })
     }
+}
+
+/// The project's `.strudel` state directory, holding cached profiles, the
+/// tracked device set, and pending notarization submissions.
+pub fn strudel_dir(source_dir: &Path) -> PathBuf {
+    source_dir.join(".strudel")
+}
+
+/// Cache path for a strudel-managed macOS provisioning profile. Uses macOS's
+/// `.provisionprofile` extension, matching what strudel embeds at
+/// `Contents/embedded.provisionprofile`, and is keyed by bundle ID so the host
+/// app and each extension get their own.
+pub fn managed_profile_path(source_dir: &Path, bundle_id: &str) -> PathBuf {
+    strudel_dir(source_dir).join(format!("{bundle_id}.provisionprofile"))
 }
 
 /// Create the `.strudel` directory and write a self-ignoring `.gitignore`
@@ -224,6 +238,7 @@ mod tests {
             info_json_path: None,
             entitlements_json_path: PathBuf::from("/ext/e.json"),
             provisioning_profile: None,
+            manage_provisioning_profile: false,
             resources_dir: Some(PathBuf::from("/ext/dist")),
             principal_class: Some("MyAppExtension.SafariWebExtensionHandler".into()),
             extension_point_identifier: None,
@@ -270,6 +285,7 @@ mod tests {
             info_json_path: None,
             entitlements_json_path: PathBuf::from("/ext/e.json"),
             provisioning_profile: None,
+            manage_provisioning_profile: false,
             resources_dir: None,
             principal_class: None,
             extension_point_identifier: Some("com.apple.system_extension.network_extension".into()),

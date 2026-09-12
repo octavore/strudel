@@ -3,9 +3,9 @@ use std::path::Path;
 use anyhow::Result;
 use clap::Subcommand;
 
-use crate::builder::{IosBuilder, OutputFlags};
-use crate::cli::helpers::for_each_selected;
-use crate::config::{self, Platform};
+use crate::builder::{IosBuilder, MacosBuilder, OutputFlags};
+use crate::cli::helpers::{all_or_named, run_for_targets};
+use crate::config::{self, ResolvedTargetPlatform};
 use crate::status;
 
 #[derive(clap::Args)]
@@ -20,8 +20,9 @@ pub(crate) struct ProfileCmd {
 
 #[derive(Subcommand)]
 enum ProfileAction {
-    /// Fetch (or refresh) the development provisioning profile for iOS device
-    /// builds
+    /// Create or refresh the provisioning profiles strudel manages: the
+    /// development profile for iOS device builds, and the Developer ID
+    /// profiles for macOS bundle IDs that need one
     Fetch {
         /// Print commands without executing them
         #[arg(long)]
@@ -47,12 +48,27 @@ impl ProfileCmd {
                 target,
             }) => {
                 let project = config::load_config(config)?;
-                for_each_selected(&project, target.as_deref(), Platform::Ios, false, |cfg| {
+                let targets = all_or_named(&project, target.as_deref())?;
+                run_for_targets(targets, |cfg| {
                     let output = OutputFlags {
                         dry_run,
                         ..Default::default()
                     };
-                    IosBuilder::new(cfg.clone(), output, false)?.profile_fetch(force)
+                    match &cfg.target_platform {
+                        ResolvedTargetPlatform::Mac(_) => MacosBuilder::new(
+                            cfg.clone(),
+                            output,
+                            false,
+                            false,
+                            None,
+                            false,
+                            false,
+                        )?
+                        .profile_fetch(force),
+                        ResolvedTargetPlatform::Ios(_) => {
+                            IosBuilder::new(cfg.clone(), output, false)?.profile_fetch(force)
+                        },
+                    }
                 })
             },
         }

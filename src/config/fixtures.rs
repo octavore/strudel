@@ -82,6 +82,7 @@ fn resolved(target_platform: ResolvedTargetPlatform) -> ResolvedConfig {
         build_env: HashMap::new(),
         embed_libs: Vec::new(),
         provisioning_profile: None,
+        manage_provisioning_profile: false,
         extensions: Vec::new(),
         resources_dir: None,
         resources: Vec::new(),

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
 use crate::config::build_target::{
-    AppSection, BuildSection, BuildTarget, DmgSection, IosSection, TargetPlatform,
+    AppSection, BuildSection, BuildTarget, DmgSection, IosSection, Platform, TargetPlatform,
 };
 use crate::config::extension::ExtensionSection;
 use crate::config::global::GlobalConfig;
@@ -255,10 +255,34 @@ fn resolve_target(
         .into(),
     };
 
-    let extensions = extensions
+    let mut extensions = extensions
         .into_iter()
-        .map(|ext| ext.resolve(config_dir))
+        .map(|ext| ext.resolve(config_dir, &source_dir))
         .collect::<Result<Vec<_>>>()?;
+
+    // iOS manages profiles by default, so "auto" there asks for what leaving
+    // the key unset already does. Accept it as a synonym, spelled the way a
+    // macOS target spells it, and normalize it back to unset: which backend
+    // supplies an iOS profile is `[ios] provisioning`, and `[ios]` extensions
+    // have no profile of their own to manage.
+    let mut host_profile = build.provisioning_profile;
+    if platform == Platform::Ios {
+        host_profile = host_profile.filter(|p| !p.is_auto());
+        for ext in &mut extensions {
+            if ext.manage_provisioning_profile {
+                ext.provisioning_profile = None;
+                ext.manage_provisioning_profile = false;
+            }
+        }
+    }
+
+    let (provisioning_profile, manage_provisioning_profile) = match host_profile {
+        Some(p) => {
+            let (path, managed) = p.resolve(config_dir, &source_dir, &app.bundle_id);
+            (Some(path), managed)
+        },
+        None => (None, false),
+    };
 
     // Secrets: environment only. These are never deserialized from the file.
     let apple_certificate: SecretString = std::env::var("APPLE_CERTIFICATE")
@@ -352,9 +376,8 @@ fn resolve_target(
             .into_iter()
             .map(|p| resolve_to(config_dir, p))
             .collect(),
-        provisioning_profile: build
-            .provisioning_profile
-            .map(|p| resolve_to(config_dir, p)),
+        provisioning_profile,
+        manage_provisioning_profile,
         resources_dir: build.resources_dir.map(|p| resolve_to(config_dir, p)),
         resources: build
             .resources
@@ -648,6 +671,118 @@ mod tests {
             r.build_env.get("PKG_CONFIG_PATH").map(String::as_str),
             Some("/opt/homebrew/lib/pkgconfig")
         );
+    }
+
+    #[test]
+    fn auto_provisioning_resolves_to_the_managed_cache_path() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "com.example.x"
+            version = "1"
+
+            [build]
+            source_dir = "src"
+            provisioning_profile = "auto"
+
+            [[extensions]]
+            kind = "system_extension"
+            system_extension_type = "network_extension"
+            target_name = "Ext"
+            bundle_id = "com.example.x.ext"
+            entitlements_json_path = "ext.json"
+            provisioning_profile = "auto"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert!(r.manage_provisioning_profile);
+        assert_eq!(
+            r.provisioning_profile,
+            Some(PathBuf::from(
+                "/cfg/src/.strudel/com.example.x.provisionprofile"
+            ))
+        );
+        // Each extension is provisioned against its own bundle ID; the host's
+        // profile does not cover it.
+        assert!(r.extensions[0].manage_provisioning_profile);
+        assert_eq!(
+            r.extensions[0].provisioning_profile,
+            Some(PathBuf::from(
+                "/cfg/src/.strudel/com.example.x.ext.provisionprofile"
+            ))
+        );
+    }
+
+    #[test]
+    fn an_explicit_profile_path_is_not_managed() {
+        let cfg = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "com.example.x"
+            version = "1"
+
+            [build]
+            provisioning_profile = "profiles/X.provisionprofile"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert!(!r.manage_provisioning_profile);
+        assert_eq!(
+            r.provisioning_profile,
+            Some(PathBuf::from("/cfg/profiles/X.provisionprofile"))
+        );
+    }
+
+    #[test]
+    fn auto_provisioning_on_ios_means_the_same_as_leaving_it_unset() {
+        // iOS already manages profiles unless a path is pinned, so "auto" is a
+        // synonym for the default rather than an error - one spelling works on
+        // both platforms in a multi-target config.
+        let cfg = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "X"
+            app.bundle_id = "com.example.x"
+            app.version = "1"
+            ios.provisioning = "app_store_connect"
+            build.provisioning_profile = "auto"
+
+            [[target.extensions]]
+            kind = "app_extension"
+            extension_point_identifier = "com.apple.widgetkit-extension"
+            target_name = "Ext"
+            bundle_id = "com.example.x.ext"
+            entitlements_json_path = "ext.json"
+            provisioning_profile = "auto"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(r.provisioning_profile, None);
+        assert!(!r.manage_provisioning_profile);
+        // Nothing in the iOS pipeline provisions an extension, so "auto" there
+        // must not leave behind a cache path no step ever writes.
+        assert_eq!(r.extensions[0].provisioning_profile, None);
+        assert!(!r.extensions[0].manage_provisioning_profile);
+    }
+
+    #[test]
+    fn a_pinned_profile_path_still_wins_on_ios() {
+        let cfg = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "X"
+            app.bundle_id = "com.example.x"
+            app.version = "1"
+            ios.provisioning = "app_store_connect"
+            build.provisioning_profile = "profiles/X.mobileprovision"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(
+            r.provisioning_profile,
+            Some(PathBuf::from("/cfg/profiles/X.mobileprovision"))
+        );
+        assert!(!r.manage_provisioning_profile);
     }
 
     #[test]

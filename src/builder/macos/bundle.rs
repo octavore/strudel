@@ -410,6 +410,15 @@ impl MacosBuilder {
             self.copy_tree(src_resources, &paths.resources)?;
         }
 
+        // Extensions are sandboxed independently of the host app and may contain
+        // capabilities that require their own provisioning profile.
+        if let Some(profile_path) = &ext.provisioning_profile {
+            self.copy_file(
+                profile_path,
+                &paths.bundle.join("Contents/embedded.provisionprofile"),
+            )?;
+        }
+
         Ok(())
     }
 
@@ -527,6 +536,7 @@ mod tests {
             info_json_path: None,
             entitlements_json_path: "e.json".into(),
             provisioning_profile: None,
+            manage_provisioning_profile: false,
             resources_dir: None,
             principal_class: None,
             extension_point_identifier: None,

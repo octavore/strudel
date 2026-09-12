@@ -223,8 +223,14 @@ pub struct ResolvedConfig {
     pub build_env: HashMap<String, String>,
     /// Dynamic libraries resolved and ready to embed in `Contents/Frameworks`.
     pub embed_libs: Vec<PathBuf>,
-    /// Provisioning profile to embed in the bundle, if configured.
+    /// Provisioning profile to embed in the bundle, if configured. When
+    /// `manage_provisioning_profile` is set this is the cache path strudel
+    /// writes, which may not exist until the profile step has run.
     pub provisioning_profile: Option<PathBuf>,
+    /// `provisioning_profile = "auto"`: strudel creates and refreshes the
+    /// profile at `provisioning_profile` rather than expecting one to exist.
+    /// See [`crate::builder::MacosBuilder::ensure_profiles`].
+    pub manage_provisioning_profile: bool,
     /// App extensions to assemble and sign inside `Contents/PlugIns/`.
     pub extensions: Vec<ResolvedExtension>,
     /// Directory whose contents are merged into `Contents/Resources/`.
@@ -303,9 +309,11 @@ pub struct ResolvedExtension {
     pub info_json_path: Option<PathBuf>,
     pub entitlements_json_path: PathBuf,
     /// Provisioning profile to embed as this extension's own
-    /// `Contents/embedded.provisionprofile`, if configured or auto-fetched.
-    /// [`crate::builder::MacosBuilder::ensure_capabilities`].
+    /// `Contents/embedded.provisionprofile`, if configured.
     pub provisioning_profile: Option<PathBuf>,
+    /// `provisioning_profile = "auto"` on this extension. See
+    /// [`crate::builder::MacosBuilder::ensure_profiles`].
+    pub manage_provisioning_profile: bool,
     /// Required for [`ExtensionKind::SafariWebExtension`]; the directory whose
     /// contents become the extension's `Resources/`.
     pub resources_dir: Option<PathBuf>,

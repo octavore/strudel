@@ -8,7 +8,8 @@ use clml::{cformat, cprintln};
 use serde_json::Value;
 
 use crate::builder::MacosBuilder;
-use crate::builder::profile::application_identifier;
+use crate::builder::profile::{application_identifier, check_identity_authorized};
+use crate::paths::managed_profile_path;
 
 impl MacosBuilder {
     /// Describe any signing/notarization credentials that are missing or
@@ -172,6 +173,28 @@ impl MacosBuilder {
                      \"{app_id}\" does not match bundle ID \"{bundle_id}\"."
                 );
             }
+        }
+
+        // 5. Confirm the configured signing identity's certificate is actually
+        // named in the profile. Ad-hoc builds (empty sign_identity) have no
+        // real identity to check; every other combination is a bug caught
+        // early, not just a warning, because the mismatch otherwise surfaces
+        // as an unexplained launchd/springboard refusal after signing.
+        if !self.cfg.sign_identity.is_empty() {
+            let managed_profile = managed_profile_path(&self.cfg.source_dir, bundle_id);
+            let remedy = if profile_path == managed_profile {
+                format!(
+                    "Delete the cached profile and rebuild to fetch a current one: rm {} && \
+                     strudel build",
+                    profile_path.display()
+                )
+            } else {
+                "It's pinned via `build.provisioning_profile` in strudel.toml - issue a new \
+                 profile for this certificate in the Apple Developer portal, or point \
+                 `build.provisioning_profile` at one that does authorize it."
+                    .to_string()
+            };
+            check_identity_authorized(&self.cfg.sign_identity, &profile, &remedy)?;
         }
 
         self.note(cformat!("<green>✔</green> Provisioning profile validated"));

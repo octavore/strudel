@@ -10,6 +10,7 @@ pub use crate::config::build_target::target_ios::{IosProvisioningBackend, IosSec
 pub use crate::config::build_target::target_macos::DmgSection;
 use crate::config::extension::ExtensionSection;
 use crate::config::icon_section::IconSection;
+use crate::config::provisioning::ProvisioningProfileSetting;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -66,8 +67,12 @@ pub struct BuildSection {
     /// Dynamic libraries and `.framework` bundles (e.g. Sparkle) to embed in
     /// `Contents/Frameworks` and sign.
     pub embed_libs: Option<Vec<PathBuf>>,
-    /// Provisioning profile to embed as `Contents/embedded.provisionprofile`.
-    pub provisioning_profile: Option<PathBuf>,
+    /// Provisioning profile to embed in the bundle: a path to an existing
+    /// profile, or `"auto"` to have strudel create and cache one for the app's
+    /// bundle ID. On iOS `"auto"` is a synonym for leaving this unset, since
+    /// iOS already manages its profile unless a path is pinned; the backend is
+    /// chosen by `[ios] provisioning`.
+    pub provisioning_profile: Option<ProvisioningProfileSetting>,
 
     /// Directory whose contents are merged into `Contents/Resources/`.
     pub resources_dir: Option<PathBuf>,

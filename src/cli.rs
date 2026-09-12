@@ -80,9 +80,11 @@ enum Cmd {
     /// tracked in .strudel/devices.toml.
     #[command(args_conflicts_with_subcommands = true)]
     Devices(DevicesCmd),
-    /// Show provisioning-profile status for each target. iOS profiles are
-    /// auto-managed; run `strudel profile fetch` to fetch or refresh one.
-    /// macOS has no auto-fetch: set `build.provisioning_profile` to pin one.
+    /// Show provisioning-profile status for each target. Run `strudel profile
+    /// fetch` to create or refresh the profiles strudel manages: iOS device
+    /// profiles, and macOS profiles for bundle IDs with capabilities or
+    /// `provisioning_profile = "auto"`. Set `build.provisioning_profile` to a
+    /// path to pin your own instead.
     #[command(args_conflicts_with_subcommands = true)]
     Profile(ProfileCmd),
 

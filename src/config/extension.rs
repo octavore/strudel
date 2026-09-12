@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::config::ResolvedExtension;
+use crate::config::provisioning::ProvisioningProfileSetting;
 use crate::config::utils::resolve_to;
 
 /// The kind of app extension after resolution. A flat discriminator used by
@@ -68,6 +69,13 @@ pub struct ExtensionSection {
     /// sandboxed independently of the host app.
     pub entitlements_json_path: Option<PathBuf>,
 
+    /// Provisioning profile to embed as this extension's own
+    /// `Contents/embedded.provisionprofile`: a path, or `"auto"` to have
+    /// strudel create and cache one for the extension's bundle ID. Extensions
+    /// are sandboxed independently, so a capability enforced against a profile
+    /// needs one issued for this bundle ID - the host's doesn't cover it.
+    pub provisioning_profile: Option<ProvisioningProfileSetting>,
+
     /// Discriminator (`kind = "..."`) plus the kind-specific fields. Internally
     /// tagged so the variant's fields sit flat alongside the common ones.
     #[serde(flatten)]
@@ -78,13 +86,14 @@ impl ExtensionSection {
     /// Resolve a parsed extension entry against the config directory,
     /// applying defaults and validating kind-specific required
     /// fields.
-    pub fn resolve(self, config_dir: &Path) -> Result<ResolvedExtension> {
+    pub fn resolve(self, config_dir: &Path, source_dir: &Path) -> Result<ResolvedExtension> {
         let ExtensionSection {
             target_name,
             bundle_id,
             name,
             info_json_path,
             entitlements_json_path,
+            provisioning_profile,
             kind,
         } = self;
 
@@ -99,6 +108,14 @@ impl ExtensionSection {
         })?;
 
         let info_json_path = info_json_path.map(resolve);
+
+        let (provisioning_profile, manage_provisioning_profile) = match provisioning_profile {
+            Some(p) => {
+                let (path, managed) = p.resolve(config_dir, source_dir, &bundle_id);
+                (Some(path), managed)
+            },
+            None => (None, false),
+        };
 
         let (kind, resources_dir, principal_class, extension_point_identifier) = match kind {
             ExtensionKindConfig::SafariWebExtension {
@@ -145,7 +162,8 @@ impl ExtensionSection {
             name: resolved_name,
             info_json_path,
             entitlements_json_path,
-            provisioning_profile: None,
+            provisioning_profile,
+            manage_provisioning_profile,
             resources_dir,
             principal_class,
             extension_point_identifier,

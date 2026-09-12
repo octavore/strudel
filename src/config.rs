@@ -3,6 +3,7 @@ mod build_target;
 mod extension;
 mod global;
 mod icon_section;
+mod provisioning;
 mod resolved;
 pub(crate) mod utils;
 

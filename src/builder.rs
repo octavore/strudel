@@ -361,6 +361,7 @@ impl MacosBuilder {
         self.clean()?;
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
+        self.ensure_profiles(false)?;
         let app_bundle = self.assemble_bundle(&host_binary, &bin_dir)?;
         self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
@@ -454,6 +455,7 @@ impl MacosBuilder {
         self.clean()?;
         let bin_dir = self.build_binary()?;
         let host_binary = self.find_binary_in(&bin_dir, &self.cfg.target_name)?;
+        self.ensure_profiles(false)?;
         let app_bundle = self.assemble_bundle(&host_binary, &bin_dir)?;
         self.embed_libraries(&app_bundle, &bin_dir)?;
         self.assemble_extensions(&bin_dir)?;
