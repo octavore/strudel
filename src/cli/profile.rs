@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Subcommand;
@@ -33,6 +33,13 @@ enum ProfileAction {
         /// Select a target by id
         #[arg(long)]
         target: Option<String>,
+
+        /// Also copy the fetched profile(s) into this directory, so they can
+        /// be committed and pointed at directly from `provisioning_profile`
+        /// in environments (CI in particular) that can't run the interactive
+        /// fetch. `.strudel` itself is always gitignored.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -44,6 +51,7 @@ impl ProfileCmd {
                 dry_run,
                 force,
                 target,
+                out,
             }) => {
                 let project = config::load_config(config)?;
                 let targets = all_or_named(&project, target.as_deref())?;
@@ -62,9 +70,10 @@ impl ProfileCmd {
                             false,
                             false,
                         )?
-                        .profile_fetch(force),
+                        .profile_fetch(force, out.as_deref()),
                         ResolvedTargetPlatform::Ios(_) => {
-                            IosBuilder::new(cfg.clone(), output, false)?.profile_fetch(force)
+                            IosBuilder::new(cfg.clone(), output, false)?
+                                .profile_fetch(force, out.as_deref())
                         },
                     }
                 })

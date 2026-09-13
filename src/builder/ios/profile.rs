@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clml::{cformat, cformatdoc, cprintln};
 
 use crate::apple::appstore::AppStoreClient;
@@ -13,32 +13,51 @@ use crate::devices::DeviceSet;
 impl IosBuilder {
     /// Fetch (or force-refresh) the development provisioning profile and write
     /// it to `.strudel/<bundle_id>.mobileprovision`.
-    pub fn profile_fetch(&self, force: bool) -> Result<()> {
+    ///
+    /// `out`, when given, also copies the fetched profile into that directory.
+    /// `.strudel` is gitignored, so this is how a profile ends up somewhere
+    /// trackable: commit the copy, then point `provisioning_profile` at it
+    /// directly for environments that can't run the interactive fetch.
+    pub fn profile_fetch(&self, force: bool, out: Option<&Path>) -> Result<()> {
         let cached = &self.paths.cached_profile;
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;
         let udids = device_set.udids();
 
-        if !force
+        let current = !force
             && cached.exists()
-            && profile_is_current(cached, &udids, &self.cfg.bundle_id, &self.cfg.team_id)?
-        {
+            && profile_is_current(cached, &udids, &self.cfg.bundle_id, &self.cfg.team_id)?;
+        if current {
             self.note(cformat!(
                 "<green>✔</green> Cached profile is current: {}",
                 cached.display()
             ));
-            return Ok(());
-        }
-
-        if self.dry_run {
+        } else if self.dry_run {
             self.echo(cformatdoc! {"
                 <dim>[dry-run]</dim> Would fetch provisioning profile via App Store Connect API
                 <dim>[dry-run]</dim> Would write to {}",
                 cached.display()
             });
             return Ok(());
+        } else {
+            self.auto_fetch_profile()?;
         }
 
-        self.auto_fetch_profile()?;
+        if let Some(out) = out {
+            if self.dry_run {
+                self.echo(cformat!(
+                    "<dim>[dry-run]</dim> Would copy fetched profile to {}",
+                    out.display()
+                ));
+                return Ok(());
+            }
+            std::fs::create_dir_all(out)
+                .with_context(|| format!("Failed to create {}", out.display()))?;
+            let dest = out.join(cached.file_name().unwrap());
+            std::fs::copy(cached, &dest).with_context(|| {
+                format!("Failed to copy {} to {}", cached.display(), dest.display())
+            })?;
+            self.note(cformat!("<green>✔</green> Copied to {}", dest.display()));
+        }
         Ok(())
     }
 
