@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::Result;
+use clml::cprintln;
 
 use crate::builder::{IosBuilder, MacosBuilder, OutputFlags};
 use crate::cli::helpers::{all_or_named, run_for_targets};
@@ -55,6 +56,11 @@ impl BuildCmd {
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
         let project = config::load_config(config)?;
         let targets = all_or_named(&project, self.target.as_deref())?;
+        let macos_target_ids: Vec<&str> = targets
+            .iter()
+            .filter(|t| matches!(t.target_platform, ResolvedTargetPlatform::Mac(_)))
+            .map(|t| t.target_id.as_str())
+            .collect();
         run_for_targets(targets, |cfg| match &cfg.target_platform {
             ResolvedTargetPlatform::Mac(_) => {
                 let mut builder = MacosBuilder::new(
@@ -78,7 +84,15 @@ impl BuildCmd {
             },
             ResolvedTargetPlatform::Ios(_) => {
                 if self.install {
-                    anyhow::bail!("--install is only supported for macOS targets");
+                    if macos_target_ids.is_empty() {
+                        anyhow::bail!("--install is only supported for macOS targets");
+                    }
+                    cprintln!(
+                        "<yellow>[warning]</yellow> --install is only supported for macOS targets; skipping {}. Build it separately: <blue>strudel build {}</blue>",
+                        cfg.target_id,
+                        cfg.target_id
+                    );
+                    return Ok(());
                 }
                 IosBuilder::new(cfg.clone(), self.output_flags(), self.debug)?.build()
             },
