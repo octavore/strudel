@@ -91,7 +91,13 @@ impl MacosBuilder {
         // copy provisioning profile if provided (for non-app-store macos apps)
         // macOS expects MyApp.app/Contents/embedded.provisionprofile
         // see: https://developer.apple.com/Documentation/technotes/tn3125-inside-code-signing-provisioning-profiles
-        if let Some(profile_path) = &self.cfg.provisioning_profile {
+        //
+        // A managed ("auto") profile that isn't cached yet is skipped rather
+        // than an error (happens when ensure_profiles is not called, e.g. on an
+        // unsigned build). A pinned path still throws an error if it's missing.
+        if let Some(profile_path) = &self.cfg.provisioning_profile
+            && (profile_path.exists() || !self.cfg.manage_provisioning_profile)
+        {
             self.copy_file(
                 profile_path,
                 &app_bundle.join("Contents/embedded.provisionprofile"),
@@ -411,8 +417,12 @@ impl MacosBuilder {
         }
 
         // Extensions are sandboxed independently of the host app and may contain
-        // capabilities that require their own provisioning profile.
-        if let Some(profile_path) = &ext.provisioning_profile {
+        // capabilities that require their own provisioning profile. See the
+        // comment on the host copy above: managed profiles missing from the
+        // cache are skipped so unsigned bundles can still be built.
+        if let Some(profile_path) = &ext.provisioning_profile
+            && (profile_path.exists() || !ext.manage_provisioning_profile)
+        {
             self.copy_file(
                 profile_path,
                 &paths.bundle.join("Contents/embedded.provisionprofile"),
