@@ -254,7 +254,7 @@ The sections below describe a single target. In a multi-target config they nest 
 | [`[[extensions]]`](#extensions-optional)| no   | Embedded `.appex` bundles                                   |
 | [`assets_dir`](#assets_dir-optional-macos)| no | `.xcassets` catalog compiled into `Contents/Resources/Assets.car` |
 | [`[dmg]`](#dmg-optional)            | no       | Finder window layout of the release DMG                     |
-| [`[apple]`](#apple-optional-in-strudeltoml)| no| Signing, notarization, and provisioning identifiers        |
+| [`[apple]`](#apple-optional)| no| Signing, notarization, and provisioning identifiers        |
 
 ### `[app]` (required)
 
@@ -584,7 +584,7 @@ To opt out of auto-management and supply your own profile, set `provisioning_pro
 
 `strudel release` signs the bundle with a certificate and notarizes it with Apple. An **App Store Connect API key** is required for notarization.
 
-Every value below is configurable as a `[apple]` key in `strudel.toml`, as an env var, or in the [global config](#global-config); see the [`[apple]` table](#apple-optional-in-strudeltoml) for the full list and resolution order. The only exceptions are the CI secrets, which are environment-only.
+Every value below is configurable as a `[apple]` key in `strudel.toml`, as an env var, or in the [global config](#global-config); see the [`[apple]` table](#apple-optional) for the full list and resolution order. The only exceptions are the CI secrets, which are environment-only.
 
 #### Signing
 
@@ -763,19 +763,19 @@ After any change to the extension (JS, HTML, manifest, handler), you should re-r
 
 #### Common gotchas
 
-**Extension doesn't show up in Safari's list**
+##### Extension doesn't show up in Safari's list
 
 The host `.app` wasn't opened after the build, or Safari is remembering a different copy. Run `open <path-to-.app>` explicitly to be sure.
 
-**"Extension is not signed" banner**
+##### "Extension is not signed" banner
 
 Re-enable "Allow Unsigned Extensions" in Safari's Develop menu (it resets per session).
 
-**Stale code keeps loading**
+##### Stale code keeps loading
 
 Safari aggressively caches extension resources. Toggle the extension off/on, or quit Safari entirely.
 
-**Permission prompt repeats**
+##### Permission prompt repeats
 
 Any change to `permissions` in `manifest.json` re-prompts the user on next enable.
 
