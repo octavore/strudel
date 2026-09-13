@@ -440,7 +440,16 @@ impl MacosBuilder {
             None => serde_json::Map::new(),
         };
         for (k, v) in additional_data {
-            info_json.insert(k, json!(v));
+            // CFBundleName/CFBundleDisplayName are user-overridable via
+            // info_json_path, unlike the other strudel-owned keys here.
+            match k.as_str() {
+                "CFBundleName" | "CFBundleDisplayName" => {
+                    info_json.entry(k).or_insert(json!(v));
+                },
+                _ => {
+                    info_json.insert(k, json!(v));
+                },
+            }
         }
         info_json.insert(
             "CFBundleShortVersionString".to_string(),
