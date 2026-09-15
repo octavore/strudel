@@ -277,10 +277,9 @@ pub fn application_identifier(entitlements: &plist::Dictionary) -> Option<&str> 
 /// are reported by other, earlier checks.
 ///
 /// `remedy` is appended to the error and should tell the caller's platform
-/// how to get a profile that actually authorizes `identity` - the fix
-/// differs between iOS (re-fetch via `strudel profile fetch --force`) and
-/// macOS (no such command; the cached profile has to be deleted so the next
-/// build re-fetches one).
+/// how to get a profile that actually authorizes `identity`: `strudel profile
+/// fetch --force` for a strudel-managed profile, or a new profile from the
+/// Apple Developer portal for a pinned one.
 pub fn check_identity_authorized(
     identity: &str,
     profile: &plist::Value,

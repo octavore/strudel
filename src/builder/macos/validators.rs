@@ -184,16 +184,23 @@ impl MacosBuilder {
         if !self.cfg.sign_identity.is_empty() {
             let managed_profile = managed_profile_path(&self.cfg.source_dir, bundle_id);
             let remedy = if profile_path == managed_profile {
+                // A plain rebuild reuses the cached profile, since the
+                // freshness check does not look at certificates.
                 format!(
-                    "Delete the cached profile and rebuild to fetch a current one: rm {} && \
-                     strudel build",
-                    profile_path.display()
+                    "Recreate it: strudel profile fetch --force --target \"{}\"",
+                    self.cfg.target_id
                 )
             } else {
-                "It's pinned via `build.provisioning_profile` in strudel.toml - issue a new \
-                 profile for this certificate in the Apple Developer portal, or point \
-                 `build.provisioning_profile` at one that does authorize it."
-                    .to_string()
+                let setting = if bundle_id == self.cfg.bundle_id {
+                    "`build.provisioning_profile`".to_string()
+                } else {
+                    format!("`provisioning_profile` in the `[[extensions]]` entry for {bundle_id}")
+                };
+                format!(
+                    "It's pinned via {setting} in strudel.toml. Issue a new profile for this \
+                     certificate in the Apple Developer portal, or point {setting} the correct, \
+                     valid profile."
+                )
             };
             check_identity_authorized(&self.cfg.sign_identity, &profile, &remedy)?;
         }
