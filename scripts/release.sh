@@ -16,9 +16,12 @@
 #   2. Computes the new version from the current Cargo workspace version
 #   3. Prompts for confirmation, then runs `cargo set-version`
 #   4. Builds a release binary for aarch64-apple-darwin (to update Cargo.* files)
-#   5. Commits Cargo.toml, Cargo.lock, and crates/dmg/Cargo.toml
+#   5. Commits Cargo.toml and Cargo.lock
 #   6. Creates a git tag (e.g. v1.2.3 or v1.2.4-beta.1)
 #   7. Prompts again, then pushes the commit and tag to origin/main
+#
+# Publishing to crates.io is a separate step: run `axo crates:publish` after
+# the tag is pushed.
 #
 # Publishing the resulting GitHub release as a pre-release (tags with a
 # "-beta.N" suffix are marked pre-release automatically, see release.yml)
@@ -80,3 +83,5 @@ read -r -p "Push v${VERSION} to remote? [y/N] " CONFIRM
 
 git push origin main
 git push origin "v${VERSION}"
+
+echo "Pushed v${VERSION}. To publish to crates.io, run: axo crates:publish"
