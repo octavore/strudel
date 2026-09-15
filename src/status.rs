@@ -105,7 +105,17 @@ pub fn profile_info(config_path: &Path, target: Option<&str>) -> Result<()> {
 /// Print each extension's own provisioning-profile status. Extensions carry
 /// their own bundle id and (optionally) their own profile, separate from the
 /// host app's, so they're broken out under the host target here.
+///
+/// The iOS pipeline ignores `[[extensions]]`, so iOS targets get a single
+/// line instead of per-extension profile state.
 fn extensions_block(cfg: &ResolvedConfig) {
+    if cfg.extensions.is_empty() {
+        return;
+    }
+    if matches!(cfg.target_platform, ResolvedTargetPlatform::Ios(_)) {
+        field2("extensions", dim("not built for iOS targets"));
+        return;
+    }
     for ext in &cfg.extensions {
         field2(&format!("extension: {}", ext.name), ext.bundle_id.clone());
         let Some(path) = &ext.provisioning_profile else {
@@ -707,8 +717,8 @@ fn openssl_field(cert_der: &Path, flag: &str) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-/// Free-provisioning profiles only live 7 days; a profile this close to
-/// expiring is worth flagging before it fails a build.
+/// Free-provisioning profiles only live 7 days. Warn about a profile this
+/// close to expiring before it fails a build.
 const EXPIRY_WARNING_DAYS: u64 = 2;
 
 fn format_expiry(exp: plist::Date) -> String {
