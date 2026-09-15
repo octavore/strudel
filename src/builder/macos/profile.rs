@@ -58,10 +58,13 @@ impl MacosBuilder {
         }
 
         // Read-only: a project whose profiles are all current never prompts
-        // and never touches the network.
+        // and never touches the network. An identity from APPLE_CERTIFICATE is
+        // empty here because it is imported after this step.
+        let identity =
+            (!self.cfg.sign_identity.is_empty()).then_some(self.cfg.sign_identity.as_str());
         let stale: Vec<&ProfileRequest> = targets
             .iter()
-            .filter(|t| force || !t.is_current(&self.cfg.team_id))
+            .filter(|t| force || !t.is_current(&self.cfg.team_id, identity))
             .collect();
         if stale.is_empty() {
             self.note(cformat!(

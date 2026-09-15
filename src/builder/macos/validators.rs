@@ -184,8 +184,9 @@ impl MacosBuilder {
         if !self.cfg.sign_identity.is_empty() {
             let managed_profile = managed_profile_path(&self.cfg.source_dir, bundle_id);
             let remedy = if profile_path == managed_profile {
-                // A plain rebuild reuses the cached profile, since the
-                // freshness check does not look at certificates.
+                // The freshness check compares certificates only when the
+                // identity is known before the build (not for
+                // APPLE_CERTIFICATE), so suggest an explicit refetch.
                 format!(
                     "Recreate it: strudel profile fetch --force --target \"{}\"",
                     self.cfg.target_id

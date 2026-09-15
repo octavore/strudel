@@ -108,12 +108,32 @@ impl ProfileRequest {
     /// Whether the cached profile can be reused as-is. A profile that is
     /// absent, undecodable, expiring, missing a required device, or issued for
     /// another bundle ID or team counts as not current and is replaced.
-    pub fn is_current(&self, team_id: &str) -> bool {
+    ///
+    /// When `identity` is given, a profile that does not list that identity's
+    /// certificate also counts as not current. A certificate belongs to one
+    /// team, so this also covers the team check when `team_id` is unset. Pass
+    /// `None` when the identity is not known yet (e.g. it comes from
+    /// `APPLE_CERTIFICATE`, which is imported later). If the certificate
+    /// comparison cannot be made, the profile is kept and the sign-time check
+    /// in [`check_identity_authorized`] reports any mismatch.
+    pub fn is_current(&self, team_id: &str, identity: Option<&str>) -> bool {
+        if !self.cache_path.exists() {
+            return false;
+        }
+        let Ok(profile) = decode_profile(&self.cache_path) else {
+            return false;
+        };
+        let Some(dict) = profile.as_dictionary() else {
+            return false;
+        };
         let udids: Vec<&str> = self.required_udids.iter().map(String::as_str).collect();
-        matches!(
-            profile_is_current(&self.cache_path, &udids, &self.bundle_id, team_id),
-            Ok(true)
-        )
+        if !dict_is_current(dict, SystemTime::now(), &udids, &self.bundle_id, team_id) {
+            return false;
+        }
+        match identity {
+            Some(identity) => !matches!(identity_authorized(identity, &profile), Ok(Some(false))),
+            None => true,
+        }
     }
 
     /// Find or create the bundle ID, create the profile against `cert_ids`,
@@ -285,12 +305,28 @@ pub fn check_identity_authorized(
     profile: &plist::Value,
     remedy: &str,
 ) -> Result<()> {
+    if identity_authorized(identity, profile)? != Some(false) {
+        return Ok(());
+    }
+    bail!(
+        "Signing identity {identity:?} is not authorized by the provisioning profile: its \
+         certificate is not in the profile's DeveloperCertificates.\n\
+         Either the wrong `identity`/`team_id` is configured, or the profile was issued for a \
+         different certificate. {remedy}"
+    );
+}
+
+/// Whether `profile`'s `DeveloperCertificates` lists `identity`'s
+/// certificate. Returns `None` when this cannot be determined: the profile
+/// has no `DeveloperCertificates` array, or `identity`'s fingerprint is not
+/// found in the keychain (e.g. an empty/ad-hoc identity).
+pub fn identity_authorized(identity: &str, profile: &plist::Value) -> Result<Option<bool>> {
     let Some(certs) = profile
         .as_dictionary()
         .and_then(|d| d.get("DeveloperCertificates"))
         .and_then(|v| v.as_array())
     else {
-        return Ok(());
+        return Ok(None);
     };
 
     let id_out = std::process::Command::new("security")
@@ -304,7 +340,7 @@ pub fn check_identity_authorized(
         .find(|l| l.contains(identity))
         .and_then(|l| parse_identity_line(l).map(|(hash, _)| hash.to_ascii_uppercase()))
     else {
-        return Ok(());
+        return Ok(None);
     };
 
     for cert_val in certs {
@@ -324,16 +360,10 @@ pub fn check_identity_authorized(
         let fp_out = child.wait_with_output().context("openssl x509 failed")?;
         let fp_str = String::from_utf8_lossy(&fp_out.stdout);
         if parse_fingerprint(&fp_str).as_deref() == Some(&signing_fp) {
-            return Ok(());
+            return Ok(Some(true));
         }
     }
-
-    bail!(
-        "Signing identity {identity:?} is not authorized by the provisioning profile: its \
-         certificate is not in the profile's DeveloperCertificates.\n\
-         Either the wrong `identity`/`team_id` is configured, or the profile was issued for a \
-         different certificate. {remedy}"
-    );
+    Ok(Some(false))
 }
 
 #[cfg(test)]
