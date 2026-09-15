@@ -8,6 +8,7 @@
 //! commonly hit. Those projects set `provisioning_profile = "auto"` and let
 //! strudel create, cache, and refresh the profile.
 
+use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -75,7 +76,9 @@ impl MacosBuilder {
 
         self.require_signing_identity()?;
 
-        if self.ci {
+        // The confirmation prompt needs a terminal. Without one (e.g. CI without
+        // `--ci`), fail with instructions instead of a raw prompt error.
+        if self.ci || !std::io::stdin().is_terminal() {
             // `.strudel` is gitignored, so the cached profile cannot be committed
             // where it is. `profile fetch --out` copies it somewhere trackable.
             let files = stale
@@ -84,7 +87,8 @@ impl MacosBuilder {
                 .map(|f| format!("\n  profiles/{}", f.to_string_lossy()))
                 .collect::<String>();
             bail!(
-                "`provisioning_profile = \"auto\"` needs interactive confirmation and is unavailable in CI.\n\
+                "`provisioning_profile = \"auto\"` needs interactive confirmation and is unavailable in CI \
+                 or without a terminal.\n\
                  Run `strudel profile fetch --out profiles` locally, commit the copied profiles, \
                  and point each `provisioning_profile` at its file:{files}\n\
                  Or create a profile manually at \
@@ -148,8 +152,8 @@ impl MacosBuilder {
         };
         if targets.is_empty() {
             self.note(cformat!(
-                "<dim>No managed provisioning profiles for {}: no capabilities are configured \
-                 and `provisioning_profile` isn't set to \"auto\".</dim>",
+                "<dim>No managed provisioning profiles for {}: `provisioning_profile` isn't set \
+                 to \"auto\" on the app or any extension.</dim>",
                 self.cfg.app_name
             ));
             return Ok(());
