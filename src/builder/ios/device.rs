@@ -78,7 +78,11 @@ impl IosBuilder {
             // stream several consoles concurrently to one terminal, so fall
             // back to a plain, non-blocking launch there instead.
             if target_udids.len() == 1 {
-                self.note(cformat!("<dim>Streaming logs. Press Ctrl+C to stop.</dim>"));
+                // Printed under --no-echo too: the console stream below still
+                // runs until Ctrl+C.
+                if !self.quiet() {
+                    cprintln!("<dim>Streaming logs. Press Ctrl+C to stop.</dim>");
+                }
                 self.note(self.log_stream_hint(Some(udid)));
                 retry_while_locked(udid, || {
                     self.sh

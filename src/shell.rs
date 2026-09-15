@@ -163,18 +163,15 @@ impl Shell {
     /// capturing stderr so failures can be inspected programmatically (e.g.
     /// to detect a locked-device error and retry). Captured stderr is still
     /// echoed to the terminal once the command finishes.
+    ///
+    /// `--no-echo` and `--quiet` only hide the "command: ..." line. stdout is
+    /// always streamed, since it is the output the user ran the command to
+    /// see (e.g. `devicectl --console`, which runs until Ctrl+C).
     pub fn run_streamed_stdout(&self, shell_cmd: ShellCommand) -> Result<()> {
         if !self.echo_suppressed() {
             shell_cmd.log(self.dry_run);
         }
         if self.dry_run {
-            return Ok(());
-        }
-        if self.echo_suppressed() {
-            let output = shell_cmd.command().output()?;
-            if !output.status.success() {
-                bail!(format_failure(&shell_cmd, &output));
-            }
             return Ok(());
         }
         let mut child = shell_cmd
