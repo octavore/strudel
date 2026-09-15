@@ -73,10 +73,18 @@ impl MacosBuilder {
         self.require_signing_identity()?;
 
         if self.ci {
+            // `.strudel` is gitignored, so the cached profile cannot be committed
+            // where it is. `profile fetch --out` copies it somewhere trackable.
+            let files = stale
+                .iter()
+                .filter_map(|t| t.cache_path.file_name())
+                .map(|f| format!("\n  profiles/{}", f.to_string_lossy()))
+                .collect::<String>();
             bail!(
                 "`provisioning_profile = \"auto\"` needs interactive confirmation and is unavailable in CI.\n\
-                 Run `strudel profile fetch` locally first and commit the cached profile under \
-                 `.strudel/`, or create one manually at \
+                 Run `strudel profile fetch --out profiles` locally, commit the copied profiles, \
+                 and point each `provisioning_profile` at its file:{files}\n\
+                 Or create a profile manually at \
                  https://developer.apple.com/account/resources/profiles/list and point \
                  `provisioning_profile` at it."
             );
