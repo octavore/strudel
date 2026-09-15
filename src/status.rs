@@ -336,11 +336,7 @@ fn macos_sign_identity_field(cfg: &ResolvedConfig) {
     if cfg.sign_identity.source == ValueSource::Certificate {
         field2(
             "sign identity",
-            with_source(
-                dim("imported from APPLE_CERTIFICATE"),
-                cfg.sign_identity.source,
-                "APPLE_SIGNING_IDENTITY",
-            ),
+            dim("derived from APPLE_CERTIFICATE at build time"),
         );
         return;
     }
