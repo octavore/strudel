@@ -15,7 +15,6 @@ release = "./scripts/release.sh"
 "example:menu-bar" = "cargo run -- --config examples/MenuBarApp/strudel.toml run"
 "example:multi-target" = "cargo run -- --config examples/MultiTargetApp/strudel.toml run"
 "example:safari-extension" = "cargo run -- --config examples/SafariExtension/strudel.toml run"
-
 "crates:publish" = {
   command = [
     "cargo publish -p strudel-appleid",

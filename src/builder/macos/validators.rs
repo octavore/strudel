@@ -104,12 +104,13 @@ impl MacosBuilder {
     /// Decode a provisioning profile with `security cms` and warn about
     /// expiry, team ID mismatches, and bundle ID mismatches. `bundle_id` is
     /// the bundle ID the profile is expected to authorize - the host app's,
-    /// or an extension's own, since each embeds its own profile.
+    /// or an extension's own, since each embeds its own profile. Returns the
+    /// decoded profile.
     pub(crate) fn validate_provisioning_profile(
         &self,
         profile_path: &Path,
         bundle_id: &str,
-    ) -> Result<()> {
+    ) -> Result<plist::Value> {
         self.step("Validating provisioning profile...");
         let profile_str = profile_path.to_str().unwrap();
 
@@ -198,7 +199,7 @@ impl MacosBuilder {
         }
 
         self.note(cformat!("<green>✔</green> Provisioning profile validated"));
-        Ok(())
+        Ok(profile)
     }
 
     pub(crate) fn validate_entitlements_for_adhoc(&self, ent_value: &Value) {

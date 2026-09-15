@@ -592,11 +592,11 @@ In development, you typically codesign with a Developer ID certificate. This is 
 
 After downloading and installing the certificate into the keychain on your machine, you can verify its presence with `security find-identity -p codesigning`.
 
-Then set `identity` (and, for a team account, `team_id`) in `strudel.toml` under `[apple]`, or pass them via `APPLE_SIGNING_IDENTITY` / `APPLE_TEAM_ID`.
+Then set `identity` (and optionally `team_id`) in `strudel.toml` under `[apple]`, or pass them via `APPLE_SIGNING_IDENTITY` / `APPLE_TEAM_ID`.
 
 `identity` and the embedded provisioning profile must agree: when a `provisioning_profile` is configured, strudel checks that `identity`'s certificate is actually listed in the profile's `DeveloperCertificates` and fails the build otherwise. A mismatch here still passes `codesign --verify`, but the OS refuses to launch or install the result (Gatekeeper/launchd/springboard rejection), so this is caught at sign time instead.
 
-When `identity` and `team_id` are both set, strudel also injects `application-identifier` (`<team_id>.<bundle id>`) and `com.apple.developer.team-identifier` (`team_id`) into the entitlements it signs with, for the app and for each `[[extensions]]` bundle - mirroring what Xcode writes automatically. It leaves either key alone if your `entitlements_json_path` already sets it, and skips injection entirely for ad-hoc builds (no `identity` configured).
+When a bundle embeds a provisioning profile, strudel copies `com.apple.application-identifier` and `com.apple.developer.team-identifier` from that profile into the entitlements it signs the bundle with, for the app and for each `[[extensions]]` bundle, as Xcode does. It leaves either key alone if your `entitlements_json_path` already sets it. Bundles without a profile and ad-hoc builds get neither key: they are restricted entitlements, and launchd refuses to start an app that carries them without a profile granting them.
 
 #### Signing in CI
 
