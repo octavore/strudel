@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use clml::cprintln;
+use clml::cformat;
 use serde::Deserialize;
 
 use super::client::AppStoreClient;
@@ -56,7 +56,9 @@ impl AppStoreClient {
             name: String,
         }
 
-        cprintln!("<dim>Listing {certificate_type} certificates on App Store Connect...</dim>");
+        self.progress(cformat!(
+            "<dim>Listing {certificate_type} certificates on App Store Connect...</dim>"
+        ));
         let list: ListEnvelope<Resource<CertAttrs>> = self.get_json(&format!(
             "/v1/certificates?filter[certificateType]={certificate_type}&limit=200"
         ))?;

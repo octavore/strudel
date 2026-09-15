@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clml::cprintln;
+use clml::cformat;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -9,7 +9,9 @@ use super::types::{IdOnly, ListEnvelope, PortalDevice, Resource, SingleEnvelope}
 impl AppStoreClient {
     /// List registered iOS devices with ENABLED status.
     pub fn list_devices(&self) -> Result<Vec<PortalDevice>> {
-        cprintln!("<dim>Listing registered iOS devices on App Store Connect...</dim>");
+        self.progress(cformat!(
+            "<dim>Listing registered iOS devices on App Store Connect...</dim>"
+        ));
         #[derive(Deserialize)]
         struct DeviceAttrs {
             name: String,

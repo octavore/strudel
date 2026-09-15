@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use clml::cprintln;
+use clml::cformat;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -16,7 +16,9 @@ impl AppStoreClient {
             identifier: String,
         }
 
-        cprintln!("<dim>Looking for bundle ID on App Store Connect: {bundle_id}</dim>");
+        self.progress(cformat!(
+            "<dim>Looking for bundle ID on App Store Connect: {bundle_id}</dim>"
+        ));
         let path = format!("/v1/bundleIds?filter[identifier]={bundle_id}");
         let list: ListEnvelope<Resource<BundleIdAttrs>> = self.get_json(&path)?;
         Ok(list
@@ -45,7 +47,9 @@ impl AppStoreClient {
             }
         });
 
-        cprintln!("<dim>Bundle ID not found, creating on App Store Connect...</dim>");
+        self.progress(cformat!(
+            "<dim>Bundle ID not found, creating on App Store Connect...</dim>"
+        ));
         self.post_json::<_, SingleEnvelope<IdOnly>>("/v1/bundleIds", &body).map(|resp| resp.data.id).or_else(|e| {
             if format!("{e}").contains("403") {
                     bail!(

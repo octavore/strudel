@@ -111,7 +111,8 @@ impl MacosBuilder {
             );
         }
 
-        let client = AppStoreClient::from_config(&self.cfg)?;
+        let client =
+            AppStoreClient::from_config(&self.cfg)?.show_progress(!self.echo_suppressed());
         self.step("Finding Developer ID Application certificates...");
         // Listed once for the whole run rather than per profile: every macOS
         // profile here is issued against the same certificates.

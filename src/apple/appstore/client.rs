@@ -2,6 +2,7 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
+use clml::cprintln;
 use indoc::indoc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::Serialize;
@@ -15,6 +16,9 @@ pub struct AppStoreClient {
     issuer: String,
     key_pem: Vec<u8>,
     agent: ureq::Agent,
+    /// Print dim progress lines for each API lookup. Off under `--no-echo`
+    /// and `--quiet`.
+    show_progress: bool,
 }
 
 fn api_error(code: u16, body: &str) -> anyhow::Error {
@@ -62,7 +66,21 @@ impl AppStoreClient {
             issuer: cfg.apple_api_issuer.value.clone(),
             key_pem,
             agent,
+            show_progress: true,
         })
+    }
+
+    /// Set whether progress lines are printed. Defaults to `true`.
+    pub fn show_progress(mut self, show: bool) -> Self {
+        self.show_progress = show;
+        self
+    }
+
+    /// Print a progress line unless progress output is disabled.
+    pub(super) fn progress(&self, msg: impl AsRef<str>) {
+        if self.show_progress {
+            cprintln!("{}", msg.as_ref());
+        }
     }
 
     fn bearer_token(&self) -> Result<String> {

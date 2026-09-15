@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use clml::cprintln;
+use clml::cformat;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -20,7 +20,9 @@ impl AppStoreClient {
             capability_type: String,
         }
 
-        cprintln!("<dim>Checking enabled capabilities on bundle ID...</dim>");
+        self.progress(cformat!(
+            "<dim>Checking enabled capabilities on bundle ID...</dim>"
+        ));
         let list: ListEnvelope<Attrs<CapAttrs>> = self.get_json(&format!(
             "/v1/bundleIds/{bundle_id_resource_id}/bundleIdCapabilities"
         ))?;
@@ -49,7 +51,9 @@ impl AppStoreClient {
             if enabled.contains(*cap_type) {
                 continue;
             }
-            cprintln!("<dim>Enabling capability {cap_type} on bundle ID...</dim>");
+            self.progress(cformat!(
+                "<dim>Enabling capability {cap_type} on bundle ID...</dim>"
+            ));
             let body = json!({
                 "data": {
                     "type": "bundleIdCapabilities",
