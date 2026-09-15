@@ -17,6 +17,7 @@ mod status;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use clap::builder::styling;
 use clap::{Parser, Subcommand};
 
 use crate::cli::build::BuildCmd;
@@ -33,11 +34,18 @@ use crate::cli::run::RunCmd;
 use crate::cli::skill::SkillCmd;
 use crate::cli::status::StatusCmd;
 
+const STYLES: styling::Styles = styling::Styles::styled()
+    .header(styling::AnsiColor::Green.on_default().bold())
+    .usage(styling::AnsiColor::Green.on_default().bold())
+    .literal(styling::AnsiColor::Blue.on_default().bold())
+    .placeholder(styling::AnsiColor::Cyan.on_default());
+
 #[derive(Parser)]
 #[command(
     name = "strudel",
     about = "Build, sign, notarize, and package macOS/iOS Swift apps",
     version,
+    styles = STYLES,
     disable_help_subcommand = true
 )]
 pub struct Cli {
