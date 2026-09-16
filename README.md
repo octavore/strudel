@@ -140,6 +140,8 @@ strudel build --install      # copy the built .app into /Applications
 strudel build --debug        # build with the debug configuration instead of release
 strudel build --unsigned     # macOS: skip codesigning, leave the bundle as-is
 strudel build --dry-run      # print commands without executing them
+strudel build --no-echo      # don't echo the underlying commands
+strudel build --quiet        # no progress output; subprocess output only on failure
 ```
 
 > [!NOTE]
@@ -159,7 +161,10 @@ strudel run --device                  # iOS: launch on a connected device
 strudel run --device "iPhone 15"      # iOS: target a specific tracked device
 strudel run --debug                   # build with the debug configuration instead of release
 strudel run --dry-run                 # print commands without executing them
+strudel run --quiet                   # no progress output; subprocess output only on failure
 ```
+
+`--no-echo` and `--quiet` behave as they do for `build`.
 
 ### `release`
 
@@ -173,6 +178,9 @@ strudel release --skip-notarization  # build and package the DMG, but don't nota
 strudel release --resume             # resume the most recent pending notarization
 strudel release --resume <uuid>      # resume a specific notarization submission
 strudel release --ci                 # trim noisy per-second notarization progress output for captured CI logs
+strudel release --install            # copy the built .app into /Applications
+strudel release --dmg-output-dir ./out  # copy the DMG into another directory
+strudel release --quiet              # no progress output; subprocess output only on failure
 ```
 
 Output artifacts are saved to `build_dir`:
@@ -285,7 +293,7 @@ The relationship between version and build_number is that a version ([`CFBundleS
 | `embed_libs`             | string[] | *(none)*            | Dynamic C FFI libraries to embed in `Contents/Frameworks` and sign. Paths relative to config file                                                          |
 | `resources_dir`          | string   | *(none)*            | Directory whose contents are copied wholesale into `Contents/Resources/`                                                                                   |
 | `resources`              | string[] | *(none)*            | Individual files or folders to copy into `Contents/Resources/` by filename                                                                                 |
-| `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements                                                      |
+| `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements. `"auto"` lets strudel manage it on macOS, see [macOS provisioning profiles](#macos-provisioning-profiles) |
 
 #### `[build.icon]` (optional)
 
@@ -361,6 +369,9 @@ An array of zero or more app extensions embedded under `<app>.app/Contents/PlugI
 | `name`                   | string | value of `target_name` | Display name (`CFBundleName` / `CFBundleDisplayName`) and `.appex` directory name |
 | `entitlements_json_path` | string | *(required)*           | JSON entitlements; each extension is signed with its own, separate from the host  |
 | `info_json_path`         | string | *(none)*               | Extra `Info.plist` keys merged with strudel's auto-injected ones                  |
+| `provisioning_profile`   | string | *(none)*               | Profile for this extension's bundle ID; a path or `"auto"` (macOS), like `[build]` |
+
+`[[extensions]]` are not built for iOS targets yet.
 
 **`safari_web_extension`-specific fields:**
 
@@ -576,6 +587,7 @@ Useful flags and the standalone profile command:
 strudel run --device "iPhone 15"       # target specific tracked device(s)
 strudel profile fetch                  # fetch/refresh the cached profile without building
 strudel profile fetch --force          # recreate the profile even if current
+strudel profile fetch --out profiles   # also copy the profile into ./profiles
 ```
 
 To opt out of auto-management and supply your own profile, set `provisioning_profile` under `[build]`; strudel then uses that file as-is. See `strudel help ios-device` for the full workflow.
@@ -597,6 +609,30 @@ Then set `identity` (and optionally `team_id`) in `strudel.toml` under `[apple]`
 `identity` and the embedded provisioning profile must agree: when a `provisioning_profile` is configured, strudel checks that `identity`'s certificate is actually listed in the profile's `DeveloperCertificates` and fails the build otherwise. A mismatch here still passes `codesign --verify`, but the OS refuses to launch or install the result (Gatekeeper/launchd/springboard rejection), so this is caught at sign time instead.
 
 When a bundle embeds a provisioning profile, strudel copies `com.apple.application-identifier` and `com.apple.developer.team-identifier` from that profile into the entitlements it signs the bundle with, for the app and for each `[[extensions]]` bundle, as Xcode does. It leaves either key alone if your `entitlements_json_path` already sets it. Bundles without a profile and ad-hoc builds get neither key: they are restricted entitlements, and launchd refuses to start an app that carries them without a profile granting them.
+
+#### macOS provisioning profiles
+
+Most Developer ID apps need no provisioning profile. A few capabilities, such as App Groups and Network Extensions, are checked against an embedded profile even outside the Mac App Store. For these, set `provisioning_profile = "auto"` under `[build]` or on an `[[extensions]]` entry:
+
+```toml
+[build]
+provisioning_profile = "auto"
+```
+
+On the next `strudel build`, `run`, or `release`, strudel creates a Developer ID provisioning profile for that bundle ID through the App Store Connect API, after asking for confirmation, and caches it at `.strudel/<bundle_id>.provisionprofile`. Later builds reuse the cached profile while it is current and refetch it if it has expired or does not authorize the signing identity. `"auto"` needs a Developer ID signing identity and an **Admin**-role API key.
+
+`strudel profile` shows the state of each profile, and `strudel profile fetch` creates or refreshes them without building. `strudel status` also reports per-target provisioning state.
+
+`"auto"` requires an interactive terminal, so it fails in CI. Fetch the profiles locally, commit them, and point `provisioning_profile` at the copied files:
+
+```sh
+strudel profile fetch --out profiles
+```
+
+```toml
+[build]
+provisioning_profile = "profiles/com.example.app.provisionprofile"
+```
 
 #### Signing in CI
 
@@ -623,7 +659,7 @@ In CI the system keychain is not available, so set the `APPLE_CERTIFICATE` and `
 
 #### Notarization auth
 
-Notarization uses the App Store Connect API key: `api_key`, `api_key_path`, and (for team accounts) `api_issuer`. A **Developer**-role key is enough for notarization alone. If you also use strudel's iOS auto-provisioning (`[ios] provisioning = "app_store_connect"`), you need an **Admin**-role key instead, see [iOS device builds](#ios-device-builds).
+Notarization uses the App Store Connect API key: `api_key`, `api_key_path`, and (for team accounts) `api_issuer`. A **Developer**-role key is enough for notarization alone. If you also use strudel's iOS auto-provisioning (`[ios] provisioning = "app_store_connect"`) or macOS `provisioning_profile = "auto"`, you need an **Admin**-role key instead, see [iOS device builds](#ios-device-builds) and [macOS provisioning profiles](#macos-provisioning-profiles).
 
 ```sh
 export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (XXXXXXXXXX)"
