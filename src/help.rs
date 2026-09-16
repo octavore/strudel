@@ -264,7 +264,7 @@ fn print_config() {
         archs                  = ["arm64", "x86_64"]       # default: host arch only
         target_name            = "MyApp"                   # Swift executableTarget; default: app.name
         embed_libs             = ["libFoo.dylib"]           # dylibs/.frameworks; see `strudel help dylibs`
-        provisioning_profile   = "MyApp.provisionprofile"  # required for some entitlements
+        provisioning_profile   = "MyApp.provisionprofile"  # required for some entitlements; "auto" on macOS, see `strudel help entitlements`
 
         resources_dir          = "Resources"               # all files here copied into Contents/Resources/
         resources              = ["Assets/logo.png"]       # individual files/folders to copy into Contents/Resources/
@@ -488,8 +488,8 @@ fn print_notarize() {
         ## Key role
 
         A "Developer" role key is enough for macOS app notarization, whether locally or in CI.
-        If you also use strudel's iOS auto-provisioning (<magenta>"app_store_connect"</>),
-        use an "Admin" role key instead - device registration and profile management via the
+        If you also use strudel's iOS auto-provisioning (<magenta>"app_store_connect"</>) or
+        macOS <magenta>provisioning_profile = "auto"</>, use an "Admin" role key instead - device registration and profile management via the
         App Store Connect API require additional permissions.
 
         ## Timeout
@@ -550,6 +550,40 @@ fn print_entitlements() {
         Provisioning profiles are created in the Apple Developer portal (Certificates,
         Identifiers & Profiles -> Profiles).
 
+        ## macOS managed profiles
+
+        Most Developer ID apps need no profile. A few capabilities, such as App Groups
+        and Network Extensions, are checked against an embedded profile even outside the
+        Mac App Store. strudel can create and refresh a Developer ID profile for these:
+        <magenta>
+          [build]
+          provisioning_profile = "auto"
+
+          [[extensions]]
+          provisioning_profile = "auto"   # per extension, for its own bundle ID
+        </>
+        On <blue>strudel build</>, <blue>run</>, or <blue>release</>, strudel asks for confirmation, creates the
+        profile via the App Store Connect API, and caches it at
+        .strudel/<<bundle_id>>.provisionprofile (gitignored). Later builds reuse the cached
+        profile and refetch it if it has expired or does not authorize the signing identity.
+
+        Requirements:
+          - a Developer ID signing identity (ad-hoc builds cannot use "auto")
+          - an "Admin" role App Store Connect API key
+          - an interactive terminal
+
+        Useful commands:
+          <blue>strudel profile</>                      show profile state per target
+          <blue>strudel profile fetch</>                create or refresh profiles without building
+          <blue>strudel profile fetch --force</>        recreate profiles even if current
+          <blue>strudel profile fetch --out profiles</> also copy profiles into ./profiles
+
+        "auto" fails in CI. Run <blue>strudel profile fetch --out profiles</> locally, commit the
+        copied files, and point provisioning_profile at them:
+        <magenta>
+          [build]
+          provisioning_profile = "profiles/com.example.app.provisionprofile"
+        </>
         ## iOS device builds
 
         strudel can auto-manage development provisioning profiles via the App Store Connect
@@ -1038,6 +1072,12 @@ fn print_ci() {
         otherwise spams captured CI logs with a line for every tick. Other output
         (steps, errors, submission IDs) is unaffected, so it's safe to leave on
         while debugging a CI run.
+
+        ## Provisioning profiles
+
+        <magenta>provisioning_profile = "auto"</> needs an interactive terminal and fails in CI.
+        Run <blue>strudel profile fetch --out profiles</> locally, commit the copied profiles,
+        and point each provisioning_profile at its file. See <blue>strudel help entitlements</>.
 
         ## Preparing APPLE_CERTIFICATE
 
