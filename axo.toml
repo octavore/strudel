@@ -1,5 +1,8 @@
 project_name = "strudel-build"
 
+[profiles.crates.env]
+CARGO_REGISTRY_TOKEN = "axo://projects/crates-io/api-token"
+
 [tasks]
 build = "cargo build"
 install = "cargo install --path ."
@@ -15,17 +18,20 @@ release = "./scripts/release.sh"
 "example:menu-bar" = "cargo run -- --config examples/MenuBarApp/strudel.toml run"
 "example:multi-target" = "cargo run -- --config examples/MultiTargetApp/strudel.toml run"
 "example:safari-extension" = "cargo run -- --config examples/SafariExtension/strudel.toml run"
+
 "crates:publish:dry-run" = "cargo publish --workspace --locked --dry-run"
+"crates:publish:appleid" = { command = "cargo publish --locked -p strudel-appleid", profile = "crates" }
+"crates:publish:dmg" = { command = "cargo publish --locked -p strudel-dmg", profile = "crates" }
+"crates:publish:icon" = { command = "cargo publish --locked -p strudel-icon", profile = "crates" }
+"crates:publish:cli" = { command = "cargo publish --locked -p strudel-cli", profile = "crates" }
+
 "crates:publish" = {
   command = [
-    "cargo publish --locked -p strudel-appleid",
-    "cargo publish --locked -p strudel-dmg",
-    "cargo publish --locked -p strudel-icon",
-    "cargo publish --locked -p strudel-cli",
+    ":crates:publish:appleid",
+    ":crates:publish:dmg",
+    ":crates:publish:icon",
+    ":crates:publish:cli",
   ],
-  env = {
-    "CARGO_REGISTRY_TOKEN" = "axo://projects/crates-io/api-token",
-  }
 }
 
 [global_packages]
