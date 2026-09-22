@@ -27,15 +27,18 @@ enum SkillAction {
         /// Overwrite files that already exist
         #[arg(long)]
         force: bool,
-        /// Print the generated SKILL.md to stdout instead of writing it
-        #[arg(long)]
-        preview: bool,
         /// Install into this project instead of the user-global dir
         #[arg(long, conflicts_with = "path")]
         project: bool,
         /// Use the .agents/skills convention instead of .claude/skills
         #[arg(long, conflicts_with = "path")]
         agents: bool,
+    },
+    /// Print a skill's SKILL.md to stdout without writing anything. With no
+    /// argument, prompts with a multi-select of every installable skill.
+    Preview {
+        /// Which skill to preview; omit to pick interactively
+        kind: Option<SkillKind>,
     },
 }
 
@@ -46,7 +49,6 @@ impl SkillCmd {
                 kind,
                 path,
                 force,
-                preview,
                 project,
                 agents,
             } => {
@@ -62,15 +64,27 @@ impl SkillCmd {
                 let dir = path.unwrap_or_else(|| skill::resolve_skills_dir(project, agents));
                 let app = Cli::command();
 
+                for kind in kinds {
+                    skill::run_install(&dir, kind, &app, force)?;
+                }
+                Ok(())
+            },
+            SkillAction::Preview { kind } => {
+                let kinds = match kind {
+                    Some(k) => vec![k],
+                    None => select_kinds()?,
+                };
+                if kinds.is_empty() {
+                    println!("Nothing selected.");
+                    return Ok(());
+                }
+
+                let app = Cli::command();
                 for (i, kind) in kinds.into_iter().enumerate() {
-                    if preview {
-                        if i > 0 {
-                            println!("\n---\n");
-                        }
-                        skill::print_preview(kind, &app);
-                    } else {
-                        skill::run_install(&dir, kind, &app, force)?;
+                    if i > 0 {
+                        println!("\n---\n");
                     }
+                    skill::print_preview(kind, &app);
                 }
                 Ok(())
             },

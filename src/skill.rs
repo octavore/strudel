@@ -108,6 +108,16 @@ pub(crate) fn generate_skill_md(app: &clap::Command) -> String {
 
         This project is built with [strudel](https://github.com/octavore/strudel). The lists below are generated from the installed strudel's own command/topic definitions, so they can't go stale — but for anything not covered here, run `strudel help <topic>` or `strudel <command> --help` rather than assuming; the installed CLI's own docs are authoritative and stay in sync with the version actually in use here, which this file does not.
 
+        ## Common workflows
+
+        - **First build**: `strudel init` to scaffold strudel.toml, then `strudel build` (macOS) or `strudel build --sim` (iOS) to produce an app bundle without setting up signing yet.
+        - **Local iterate loop**: `strudel run` to build and launch on macOS; `strudel run --sim` or `strudel run --device` for iOS.
+        - **iOS without a paid developer account**: `strudel login` once, set `[ios] provisioning = "free"` in strudel.toml, then `strudel run --device`. Profiles expire after 7 days and are capped at 3 devices — rerun `strudel login` or `strudel profile fetch` if a build starts failing on provisioning.
+        - **Check signing/provisioning state before debugging a build failure**: `strudel status` (toolchain, session, credentials, per-target state) and `strudel profile` (per-target provisioning-profile status).
+        - **Cutting a release**: `strudel config increment-version`, then `strudel release` (macOS only) for a signed, notarized DMG. Requires notarization credentials configured per the `notarize` topic.
+        - **Stale build artifacts / weird build errors**: `strudel clean` before retrying.
+        - **CI setup**: read the `ci` topic before writing a GitHub Actions workflow by hand — it covers secrets and keychain setup specific to strudel.
+
         ## Commands
 
         {commands}
@@ -122,9 +132,9 @@ pub(crate) fn generate_skill_md(app: &clap::Command) -> String {
     "#}
 }
 
-/// `strudel skill install --preview`: print the chosen skill's SKILL.md to
-/// stdout without writing anything, so the user can inspect it before it
-/// gets installed. Bundled asset files (for skills that have them) are only
+/// `strudel skill preview`: print the chosen skill's SKILL.md to stdout
+/// without writing anything, so the user can inspect it before it gets
+/// installed. Bundled asset files (for skills that have them) are only
 /// named, not dumped, to keep this readable.
 pub(crate) fn print_preview(kind: SkillKind, app: &clap::Command) {
     let files = kind.files(app);

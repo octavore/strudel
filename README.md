@@ -7,9 +7,11 @@ Build and ship macOS/iOS apps entirely from the command-line, without touching t
 ```sh
 brew install octavore/tools/strudel
 
-strudel init      # scaffold a strudel.toml
-strudel build     # a signed .app bundle
-strudel release   # a signed, notarized DMG
+strudel init          # scaffold a strudel.toml
+strudel build         # a signed .app bundle
+strudel release       # a signed, notarized DMG
+strudel skill install # configure a strudel skill for Claude Code, etc.
+strudel skill preview # preview the skill doc
 ```
 
 > [!IMPORTANT]
