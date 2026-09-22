@@ -54,7 +54,7 @@ impl SkillCmd {
             } => {
                 let kinds = match kind {
                     Some(k) => vec![k],
-                    None => select_kinds()?,
+                    None => select_kinds("install")?,
                 };
                 if kinds.is_empty() {
                     println!("Nothing selected.");
@@ -72,7 +72,7 @@ impl SkillCmd {
             SkillAction::Preview { kind } => {
                 let kinds = match kind {
                     Some(k) => vec![k],
-                    None => select_kinds()?,
+                    None => select_kinds("preview")?,
                 };
                 if kinds.is_empty() {
                     println!("Nothing selected.");
@@ -94,9 +94,9 @@ impl SkillCmd {
 
 /// Prompts with a checkbox list of every installable skill, defaulting to
 /// just `strudel` checked (space to toggle, enter to confirm).
-fn select_kinds() -> Result<Vec<SkillKind>> {
+fn select_kinds(action: &str) -> Result<Vec<SkillKind>> {
     let selected = inquire::MultiSelect::new(
-        "Which skill(s) do you want to install?",
+        &format!("Which skill(s) do you want to {action}?"),
         SkillKind::ALL.to_vec(),
     )
     .with_default(&[0])
