@@ -309,8 +309,10 @@ impl MacosBuilder {
                     ));
                     return Ok(());
                 }
-                self.step("Converting app icon to .icns...");
-                icns::make_icns(path, dest)
+                self.icon_cached_file(icon, "AppIcon.icns", dest, || {
+                    self.step("Converting app icon to .icns...");
+                    icns::make_icns(path, dest)
+                })
             },
             ResolvedIcon::Generated {
                 src, icns: to_icns, ..
@@ -324,20 +326,27 @@ impl MacosBuilder {
                     return Ok(());
                 }
 
-                self.step("Generating app icon...");
+                let output = if *to_icns {
+                    "AppIcon.icns"
+                } else {
+                    "AppIcon.png"
+                };
+                self.icon_cached_file(icon, output, dest, || {
+                    self.step("Generating app icon...");
 
-                if !to_icns {
-                    return render_to_png(icon, dest);
-                }
+                    if !to_icns {
+                        return render_to_png(icon, dest);
+                    }
 
-                let tmp_png = dest
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .join("AppIcon-generated.png");
-                render_to_png(icon, &tmp_png)?;
-                let result = icns::make_icns(&tmp_png, dest);
-                let _ = fs::remove_file(&tmp_png);
-                result
+                    let tmp_png = dest
+                        .parent()
+                        .unwrap_or(Path::new("."))
+                        .join("AppIcon-generated.png");
+                    render_to_png(icon, &tmp_png)?;
+                    let result = icns::make_icns(&tmp_png, dest);
+                    let _ = fs::remove_file(&tmp_png);
+                    result
+                })
             },
         }
     }

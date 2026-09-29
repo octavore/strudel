@@ -224,7 +224,9 @@ impl IosBuilder {
     /// Resolve `icon` to an `actool`-ready input directory and the
     /// `--app-icon` name to compile from it. Icon Composer `.icon` bundles
     /// are used in place; anything else is rendered to a flat PNG and
-    /// wrapped in a synthesized `.xcassets`/`.appiconset` under `work_dir`.
+    /// wrapped in a synthesized `.xcassets`/`.appiconset` under `work_dir`,
+    /// reusing a cached one if the icon source and settings are unchanged
+    /// since the last build.
     fn prepare_ios_icon_input(
         &self,
         icon: &ResolvedIcon,
@@ -243,18 +245,21 @@ impl IosBuilder {
             return Ok((path.clone(), name));
         }
 
-        let source_image = render::render_ios_icon(icon, 1024)?;
-
         let icon_name = "AppIcon";
         let xcassets_dir = work_dir.join("Assets.xcassets");
-        let appiconset_dir = xcassets_dir.join(format!("{icon_name}.appiconset"));
-        fs::create_dir_all(&xcassets_dir)?;
-        fs::write(
-            xcassets_dir.join("Contents.json"),
-            serde_json::to_vec_pretty(&json!({ "info": { "author": "xcode", "version": 1 } }))?,
-        )?;
 
-        ios::write_appiconset(&source_image, &appiconset_dir)?;
+        self.icon_cached_dir(icon, "Assets.xcassets", &xcassets_dir, || {
+            let source_image = render::render_ios_icon(icon, 1024)?;
+
+            let appiconset_dir = xcassets_dir.join(format!("{icon_name}.appiconset"));
+            fs::create_dir_all(&xcassets_dir)?;
+            fs::write(
+                xcassets_dir.join("Contents.json"),
+                serde_json::to_vec_pretty(&json!({ "info": { "author": "xcode", "version": 1 } }))?,
+            )?;
+
+            ios::write_appiconset(&source_image, &appiconset_dir)
+        })?;
 
         Ok((xcassets_dir, icon_name.to_string()))
     }

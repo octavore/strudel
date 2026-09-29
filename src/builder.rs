@@ -12,6 +12,8 @@
 //!
 //! - [`bundle`] bundle-layout helpers shared by both platforms
 //! - [`fs`] dry-run-aware filesystem helpers (on [`BuilderCore`])
+//! - [`icon_cache`] persistent cache for generated app icons, keyed by
+//!   source-file signature, so repeated builds skip re-rendering
 //! - [`keychain`] signing-credential preflight and certificate import
 //! - [`profile`] provisioning-profile decoding and validity checks, shared by
 //!   both platforms
@@ -20,6 +22,7 @@
 
 mod bundle;
 mod fs;
+mod icon_cache;
 mod ios;
 pub(crate) mod keychain;
 mod macos;
@@ -240,9 +243,9 @@ impl BuilderCore {
         });
     }
 
-    /// User-facing clean: wipe the strudel output dir and run `swift package
-    /// clean`. Platform-agnostic - macOS and iOS targets both build into
-    /// `build_dir`, so the same cleanup applies to either.
+    /// User-facing clean: wipe the strudel output dir and the icon cache, and
+    /// run `swift package clean`. Platform-agnostic - macOS and iOS targets
+    /// both build into `build_dir`, so the same cleanup applies to either.
     pub fn clean_command(&self) -> Result<()> {
         let source = self.cfg.source_dir.to_str().unwrap();
         let build_dir = &self.paths.build_dir;
@@ -260,6 +263,9 @@ impl BuilderCore {
         if !self.dry_run && build_dir.exists() {
             std::fs::remove_dir_all(build_dir)?;
         }
+
+        self.step("Cleaning icon cache...");
+        self.clean_icon_cache()?;
 
         self.step("Cleaning Swift build cache...");
         self.sh
