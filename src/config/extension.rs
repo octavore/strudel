@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Result, bail};
 use serde::Deserialize;
 
 use crate::config::ResolvedExtension;
@@ -15,6 +15,7 @@ pub enum ExtensionKind {
     SafariWebExtension,
     AppExtension,
     SystemExtension,
+    XpcService,
 }
 
 /// The kind of system extension (`[[extensions]] kind = "system_extension"`),
@@ -65,8 +66,9 @@ pub struct ExtensionSection {
     /// defaults to an empty object.
     pub info_json_path: Option<PathBuf>,
 
-    /// JSON entitlements for the extension. Required, since extensions are
-    /// sandboxed independently of the host app.
+    /// JSON entitlements for the extension. Required for every kind except
+    /// `xpc_service`, since extensions are sandboxed independently of the
+    /// host app.
     pub entitlements_json_path: Option<PathBuf>,
 
     /// Provisioning profile to embed as this extension's own
@@ -100,12 +102,14 @@ impl ExtensionSection {
         let resolved_name = name.unwrap_or_else(|| target_name.clone());
 
         let resolve = |p: PathBuf| resolve_to(config_dir, p);
-        let entitlements_json_path = entitlements_json_path.map(resolve).with_context(|| {
-            format!(
+        let entitlements_json_path = entitlements_json_path.map(resolve);
+        let entitlements_optional = matches!(kind, ExtensionKindConfig::XpcService {});
+        if entitlements_json_path.is_none() && !entitlements_optional {
+            bail!(
                 "extension `{target_name}` is missing required field `entitlements_json_path` \
-             (extensions are sandboxed independently of the host app)"
-            )
-        })?;
+                 (extensions are sandboxed independently of the host app)"
+            );
+        }
 
         let info_json_path = info_json_path.map(resolve);
 
@@ -153,6 +157,7 @@ impl ExtensionSection {
                         .to_string(),
                 ),
             ),
+            ExtensionKindConfig::XpcService {} => (ExtensionKind::XpcService, None, None, None),
         };
 
         Ok(ResolvedExtension {
@@ -205,6 +210,10 @@ pub enum ExtensionKindConfig {
         /// class.
         principal_class: Option<String>,
     },
+    /// An XPC service bundled under `Contents/XPCServices/<name>.xpc`. Its
+    /// `Info.plist` gets an `XPCService` dict instead of `NSExtension`.
+    /// Entitlements are optional.
+    XpcService {},
 }
 
 #[cfg(test)]
@@ -244,7 +253,7 @@ mod tests {
         assert_eq!(ext.resources_dir, Some(PathBuf::from("/cfg/ext/dist")));
         assert_eq!(
             ext.entitlements_json_path,
-            PathBuf::from("/cfg/ext/entitlements.json")
+            Some(PathBuf::from("/cfg/ext/entitlements.json"))
         );
         // principal_class defaults to "<target_name>.SafariWebExtensionHandler"
         assert_eq!(
@@ -364,7 +373,7 @@ mod tests {
         assert!(ext.resources_dir.is_none());
         assert_eq!(
             ext.entitlements_json_path,
-            PathBuf::from("/cfg/share/entitlements.json")
+            Some(PathBuf::from("/cfg/share/entitlements.json"))
         );
     }
 
@@ -426,7 +435,7 @@ mod tests {
         assert!(ext.resources_dir.is_none());
         assert_eq!(
             ext.entitlements_json_path,
-            PathBuf::from("/cfg/netext/entitlements.json")
+            Some(PathBuf::from("/cfg/netext/entitlements.json"))
         );
     }
 
@@ -472,6 +481,71 @@ mod tests {
         .unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("system_extension_type"), "got: {msg}");
+    }
+
+    #[test]
+    fn parses_and_resolves_xpc_service_without_entitlements() {
+        let cfg = parse_build_config(indoc! {r#"
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+
+            [[extensions]]
+            kind = "xpc_service"
+            target_name = "MyHelper"
+            bundle_id = "com.example.myapp.Helper"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        let ext = &r.extensions[0];
+        assert_eq!(ext.kind, ExtensionKind::XpcService);
+        assert_eq!(ext.name, "MyHelper");
+        assert_eq!(ext.entitlements_json_path, None);
+        assert!(ext.principal_class.is_none());
+        assert!(ext.extension_point_identifier.is_none());
+    }
+
+    #[test]
+    fn xpc_service_accepts_entitlements() {
+        let cfg = parse_build_config(indoc! {r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [[extensions]]
+            kind = "xpc_service"
+            target_name = "Helper"
+            bundle_id = "y.Helper"
+            entitlements_json_path = "helper.json"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(
+            r.extensions[0].entitlements_json_path,
+            Some(PathBuf::from("/cfg/helper.json"))
+        );
+    }
+
+    #[test]
+    fn xpc_service_rejects_principal_class() {
+        let err = parse_build_config(indoc! {r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+            build_number = "1"
+
+            [[extensions]]
+            kind = "xpc_service"
+            target_name = "Helper"
+            bundle_id = "y.Helper"
+            principal_class = "Helper.Service"
+        "#});
+        assert!(err.is_err(), "xpc_service has no principal_class");
     }
 
     #[test]

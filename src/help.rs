@@ -16,7 +16,7 @@ pub(crate) const TOPICS: &[(&str, &str)] = &[
     ("entitlements", "Entitlements and provisioning profiles"),
     (
         "extensions",
-        "App and system extensions: safari_web_extension, app_extension, system_extension",
+        "App extensions, system extensions, and XPC services: safari_web_extension, app_extension, system_extension, xpc_service",
     ),
     (
         "dylibs",
@@ -614,8 +614,8 @@ fn print_entitlements() {
 
         ## Extensions
 
-        Each extension gets its own entitlements file (required, extensions are sandboxed
-        independently of the host app):
+        Each extension gets its own entitlements file (required except for xpc_service,
+        since extensions are sandboxed independently of the host app):
 
           [[extensions]]
           entitlements_json_path = "extension/entitlements.json"
@@ -626,22 +626,23 @@ fn print_entitlements() {
 
 fn print_extensions() {
     print_help(&cformatdoc! {r#"
-        # App and system extensions
+        # App extensions, system extensions, and XPC services
 
         App extensions (safari_web_extension, app_extension) are embedded as .appex bundles
         under Contents/PlugIns/ in the host app. System extensions (system_extension) are
-        embedded as .systemextension bundles under Contents/Library/SystemExtensions/. Each
+        embedded as .systemextension bundles under Contents/Library/SystemExtensions/. XPC
+        services (xpc_service) are embedded as .xpc bundles under Contents/XPCServices/. Each
         extension is assembled and codesigned separately; notarizing the host .app covers
         all nested bundles.
 
         ## Common fields (all kinds)
         <magenta>
         [[extensions]]
-        kind                   = "safari_web_extension"  # or "app_extension", "system_extension"
+        kind                   = "safari_web_extension"  # or "app_extension", "system_extension", "xpc_service"
         target_name            = "MyExtension"                 # SPM executableTarget
         bundle_id              = "com.example.myapp.Extension"
         # name                 = "MyExtension"                 # defaults to target_name
-        entitlements_json_path = "ext/entitlements.json"       # required
+        entitlements_json_path = "ext/entitlements.json"       # required, except for xpc_service
         # info_json_path       = "ext/info.json"               # optional extra Info.plist keys
         </>
         The SPM target must be an executableTarget in Package.swift.
@@ -712,19 +713,38 @@ fn print_extensions() {
         `com.apple.developer.networking.networkextension` for a Network Extension,
         `com.apple.developer.endpoint-security.client` for Endpoint Security).
 
+        ## kind = "xpc_service"
+
+        An XPC service embedded under Contents/XPCServices/<<name>>.xpc. The host app connects
+        to it with `NSXPCConnection(serviceName: "<<bundle_id>>")`. The service's main.swift
+        creates an `NSXPCListener.service()`, sets its delegate, and calls `resume()`.
+        <magenta>
+        [[extensions]]
+        kind        = "xpc_service"
+        target_name = "MyHelper"
+        bundle_id   = "com.example.myapp.Helper"
+        # entitlements_json_path = "helper/entitlements.json"  # optional
+        </>
+        strudel injects an XPCService dict with ServiceType = "Application". Set other
+        XPCService keys (RunLoopType, JoinExistingSession, or a different ServiceType)
+        under "XPCService" in info_json_path; they are merged in.
+
+        Entitlements are optional. If the host app is sandboxed, the XPC service should
+        set `com.apple.security.app-sandbox` too.
+
         ## Auto-injected Info.plist keys
 
         All extensions get: CFBundleExecutable, CFBundleIdentifier, CFBundleName,
         CFBundleDisplayName, CFBundleVersion, CFBundleShortVersionString.
-        CFBundlePackageType = "XPC!" for safari_web_extension/app_extension, "SYSX" for
-        system_extension.
+        CFBundlePackageType = "XPC!" for safari_web_extension/app_extension/xpc_service,
+        "SYSX" for system_extension.
 
         User-supplied info_json_path provides additional keys; auto-injected ones win
         on conflict.
 
         ## Sign order
 
-        Inside-out: embedded dylibs -> each extension bundle (.appex or .systemextension) ->
+        Inside-out: embedded dylibs -> each extension bundle (.appex, .systemextension, .xpc) ->
         host .app. `--deep` is not used on the host as it would apply host entitlements to
         nested bundles incorrectly.
     "#});

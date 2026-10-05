@@ -352,10 +352,10 @@ impl MacosBuilder {
     }
 
     /// Assemble one extension bundle under the host's `Contents/PlugIns/`
-    /// (app extensions) or `Contents/Library/SystemExtensions/` (system
-    /// extensions):
+    /// (app extensions), `Contents/Library/SystemExtensions/` (system
+    /// extensions), or `Contents/XPCServices/` (XPC services):
     /// 1. Builds the extension `Info.plist` (injecting kind-specific
-    ///    `NSExtension` keys)
+    ///    `NSExtension` or `XPCService` keys)
     /// 2. Copies the binary
     /// 3. Copies the kind-specific resource payload (e.g. for Safari Web
     ///    Extensions, this might be the entire webpack output directory).
@@ -378,10 +378,13 @@ impl MacosBuilder {
         self.copy_file(&binary_path, &paths.binary)?;
 
         // System extensions use the `SYSX` package type; app extensions
-        // (Safari web extensions, generic app extensions) use `XPC!`.
+        // (Safari web extensions, generic app extensions) and XPC services
+        // use `XPC!`.
         let package_type = match ext.kind {
             ExtensionKind::SystemExtension => "SYSX",
-            ExtensionKind::SafariWebExtension | ExtensionKind::AppExtension => "XPC!",
+            ExtensionKind::SafariWebExtension
+            | ExtensionKind::AppExtension
+            | ExtensionKind::XpcService => "XPC!",
         };
 
         let mut info_json = self.build_info_json(
@@ -396,18 +399,26 @@ impl MacosBuilder {
             ]),
         )?;
 
-        // Any `NSExtension` object supplied via `info_json_path` is merged with
-        // the kind-specific dict strudel generates. See `build_ns_extension`.
-        let user_ns_ext = match info_json.remove("NSExtension") {
+        // XPC services carry an `XPCService` dict; every other kind carries
+        // `NSExtension`. A dict of the same name supplied via `info_json_path`
+        // is merged with the one strudel generates.
+        let key = match ext.kind {
+            ExtensionKind::XpcService => "XPCService",
+            _ => "NSExtension",
+        };
+        let user_dict = match info_json.remove(key) {
             Some(Value::Object(m)) => m,
             Some(_) => bail!(
-                "`NSExtension` in the info json for extension `{}` must be an object",
+                "`{key}` in the info json for extension `{}` must be an object",
                 ext.name
             ),
             None => serde_json::Map::new(),
         };
-        let ns_ext = build_ns_extension(ext, user_ns_ext);
-        info_json.insert("NSExtension".into(), Value::Object(ns_ext));
+        let dict = match ext.kind {
+            ExtensionKind::XpcService => build_xpc_service(user_dict),
+            _ => build_ns_extension(ext, user_dict),
+        };
+        info_json.insert(key.into(), Value::Object(dict));
 
         let json_bytes = serde_json::to_vec_pretty(&info_json)?;
         let plist_path = paths
@@ -529,8 +540,20 @@ fn build_ns_extension(
                 ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
             }
         },
+        // XPC services have no `NSExtension` dict. See `build_xpc_service`.
+        ExtensionKind::XpcService => {},
     }
     ns_ext
+}
+
+/// Build an XPC service's `XPCService` dict from `xpc` (an `XPCService`
+/// object taken from `info_json_path`, empty if none). `ServiceType` defaults
+/// to `Application`; every user-supplied key (`ServiceType`, `RunLoopType`,
+/// `JoinExistingSession`, etc) passes through untouched.
+fn build_xpc_service(mut xpc: serde_json::Map<String, Value>) -> serde_json::Map<String, Value> {
+    xpc.entry("ServiceType".to_string())
+        .or_insert_with(|| json!("Application"));
+    xpc
 }
 
 /// Pull the macOS deployment target out of `swift package dump-package`'s
@@ -552,7 +575,7 @@ fn parse_macos_deployment_target(dump_package_json: &str) -> Result<String> {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{build_ns_extension, parse_macos_deployment_target};
+    use super::{build_ns_extension, build_xpc_service, parse_macos_deployment_target};
     use crate::config::{ExtensionKind, ResolvedExtension};
 
     fn ext(kind: ExtensionKind) -> ResolvedExtension {
@@ -562,7 +585,7 @@ mod tests {
             bundle_id: "com.example.app.Ext".into(),
             name: "Ext".into(),
             info_json_path: None,
-            entitlements_json_path: "e.json".into(),
+            entitlements_json_path: Some("e.json".into()),
             provisioning_profile: None,
             manage_provisioning_profile: false,
             resources_dir: None,
@@ -571,7 +594,7 @@ mod tests {
         }
     }
 
-    fn user_ns_ext(v: Value) -> serde_json::Map<String, Value> {
+    fn json_map(v: Value) -> serde_json::Map<String, Value> {
         match v {
             Value::Object(m) => m,
             _ => unreachable!(),
@@ -585,7 +608,7 @@ mod tests {
         e.principal_class = Some("Ext.ShareViewController".into());
         let ns = build_ns_extension(
             &e,
-            user_ns_ext(json!({
+            json_map(json!({
                 "NSExtensionAttributes": { "NSExtensionActivationRule": "TRUEPREDICATE" },
                 "NSExtensionMainStoryboard": "MainInterface",
             })),
@@ -612,7 +635,7 @@ mod tests {
         e.principal_class = Some("Ext.FinderSync".into());
         let ns = build_ns_extension(
             &e,
-            user_ns_ext(json!({
+            json_map(json!({
                 "NSExtensionPointIdentifier": "com.example.wrong",
                 "NSExtensionPrincipalClass": "Wrong",
             })),
@@ -630,7 +653,7 @@ mod tests {
         e.extension_point_identifier = Some("com.apple.FinderSync".into());
         let ns = build_ns_extension(
             &e,
-            user_ns_ext(json!({ "NSExtensionPrincipalClass": "Ext.FromInfoJson" })),
+            json_map(json!({ "NSExtensionPrincipalClass": "Ext.FromInfoJson" })),
         );
         assert_eq!(ns["NSExtensionPrincipalClass"], json!("Ext.FromInfoJson"));
     }
@@ -645,14 +668,28 @@ mod tests {
         );
         let overridden = build_ns_extension(
             &e,
-            user_ns_ext(
-                json!({ "SFSafariWebExtensionManifestPath": "Resources/sub/manifest.json" }),
-            ),
+            json_map(json!({ "SFSafariWebExtensionManifestPath": "Resources/sub/manifest.json" })),
         );
         assert_eq!(
             overridden["SFSafariWebExtensionManifestPath"],
             json!("Resources/sub/manifest.json")
         );
+    }
+
+    #[test]
+    fn xpc_service_defaults_service_type_to_application() {
+        let xpc = build_xpc_service(serde_json::Map::new());
+        assert_eq!(xpc["ServiceType"], json!("Application"));
+    }
+
+    #[test]
+    fn xpc_service_passes_through_user_keys() {
+        let xpc = build_xpc_service(json_map(json!({
+            "ServiceType": "User",
+            "RunLoopType": "NSRunLoop",
+        })));
+        assert_eq!(xpc["ServiceType"], json!("User"));
+        assert_eq!(xpc["RunLoopType"], json!("NSRunLoop"));
     }
 
     #[test]

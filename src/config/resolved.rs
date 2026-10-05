@@ -266,7 +266,7 @@ pub struct ResolvedConfig {
     /// profile at `provisioning_profile` rather than expecting one to exist.
     /// See [`crate::builder::MacosBuilder::ensure_profiles`].
     pub manage_provisioning_profile: bool,
-    /// App extensions to assemble and sign inside `Contents/PlugIns/`.
+    /// Extensions and XPC services to assemble and sign inside the bundle.
     pub extensions: Vec<ResolvedExtension>,
     /// Directory whose contents are merged into `Contents/Resources/`.
     pub resources_dir: Option<PathBuf>,
@@ -343,7 +343,9 @@ pub struct ResolvedExtension {
     /// Resolved display name (defaults to `target_name`).
     pub name: String,
     pub info_json_path: Option<PathBuf>,
-    pub entitlements_json_path: PathBuf,
+    /// Always set except for [`ExtensionKind::XpcService`], where it is
+    /// optional.
+    pub entitlements_json_path: Option<PathBuf>,
     /// Provisioning profile to embed as this extension's own
     /// `Contents/embedded.provisionprofile`, if configured.
     pub provisioning_profile: Option<PathBuf>,

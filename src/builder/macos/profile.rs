@@ -283,7 +283,7 @@ mod tests {
             bundle_id: bundle_id.into(),
             name: bundle_id.into(),
             info_json_path: None,
-            entitlements_json_path: PathBuf::from("/x/ent.json"),
+            entitlements_json_path: Some(PathBuf::from("/x/ent.json")),
             provisioning_profile,
             manage_provisioning_profile: managed,
             resources_dir: None,

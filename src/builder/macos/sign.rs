@@ -157,8 +157,8 @@ impl MacosBuilder {
             }
         }
 
-        // Sign extensions inside-out: each extension bundle (.appex or
-        // .systemextension) must be signed with its own entitlements before
+        // Sign extensions inside-out: each extension bundle (.appex,
+        // .systemextension, or .xpc) must be signed with its own entitlements before
         // the host bundle is sealed. A single `codesign --deep` pass over the
         // host would re-use the host's entitlements for the nested bundle,
         // which is wrong: the extension is sandboxed independently and
@@ -214,10 +214,10 @@ impl MacosBuilder {
             .map(Some)
     }
 
-    /// Sign one nested extension bundle (`.appex` or `.systemextension`) with
-    /// its own entitlements. Called by [`sign`] for each configured
-    /// extension, after embedded dylibs are signed and before the host
-    /// bundle is sealed.
+    /// Sign one nested extension bundle (`.appex`, `.systemextension`, or
+    /// `.xpc`) with its own entitlements. Called by [`sign`] for each
+    /// configured extension, after embedded dylibs are signed and before
+    /// the host bundle is sealed.
     fn sign_extension(
         &self,
         ext: &ResolvedExtension,
@@ -230,24 +230,12 @@ impl MacosBuilder {
             .bundle
             .to_str()
             .context("Invalid extension bundle path.")?;
-        let ent_json_path = &ext.entitlements_json_path;
-        let ent_json_str = ent_json_path
-            .to_str()
-            .context("Invalid extension entitlements path.")?;
         let ent_plist_str = paths
             .entitlements_plist
             .to_str()
             .context("Invalid extension entitlements plist path.")?;
 
-        let ent_raw = fs::read_to_string(ent_json_path).with_context(|| {
-            format!(
-                "Failed to read entitlements JSON for extension `{}` at {ent_json_str}",
-                ext.name
-            )
-        })?;
-        let mut ent_value: Value = serde_json::from_str(&ent_raw).with_context(|| {
-            format!("Extension entitlements file is not valid JSON: {ent_json_str}")
-        })?;
+        let mut ent_value = read_extension_entitlements(ext)?;
         let profile = self.embedded_profile(
             &paths.bundle,
             ext.provisioning_profile.as_deref(),
@@ -258,23 +246,45 @@ impl MacosBuilder {
         {
             inject_identifier_entitlements(&mut ent_value, profile);
         }
-        let ent_bytes = serde_json::to_vec_pretty(&ent_value)?;
-        self.sh.run_stdin(
-            &["plutil", "-convert", "xml1", "-o", ent_plist_str, "-"],
-            &ent_bytes,
-        )?;
 
         self.step(&format!("Signing extension `{}`...{msg}", ext.name));
-        if adhoc {
-            self.validate_entitlements_for_adhoc(&ent_value);
+        let mut appex_cmd = base_cmd.clone();
+        // An XPC service with no entitlements file and no injected
+        // identifiers is signed without `--entitlements`.
+        let has_entitlements =
+            ext.entitlements_json_path.is_some() || ent_value != Value::Object(Default::default());
+        if has_entitlements {
+            let ent_bytes = serde_json::to_vec_pretty(&ent_value)?;
+            self.sh.run_stdin(
+                &["plutil", "-convert", "xml1", "-o", ent_plist_str, "-"],
+                &ent_bytes,
+            )?;
+            if adhoc {
+                self.validate_entitlements_for_adhoc(&ent_value);
+            }
+            appex_cmd = appex_cmd.arg_group(["--entitlements", ent_plist_str]);
         }
-        let appex_cmd = base_cmd
-            .clone()
-            .arg_group(["--entitlements", ent_plist_str])
-            .arg(appex_str);
-        appex_cmd.run(&self.sh)?;
+        appex_cmd.arg(appex_str).run(&self.sh)?;
         Ok(())
     }
+}
+
+/// Read `ext`'s entitlements JSON. Returns an empty object when
+/// `entitlements_json_path` is unset, which config validation only allows for
+/// XPC services.
+fn read_extension_entitlements(ext: &ResolvedExtension) -> Result<Value> {
+    let Some(path) = &ext.entitlements_json_path else {
+        return Ok(Value::Object(Default::default()));
+    };
+    let path_str = path.display();
+    let raw = fs::read_to_string(path).with_context(|| {
+        format!(
+            "Failed to read entitlements JSON for extension `{}` at {path_str}",
+            ext.name
+        )
+    })?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("Extension entitlements file is not valid JSON: {path_str}"))
 }
 
 /// Copy the application identifier and team identifier granted by `profile`

@@ -34,6 +34,7 @@ strudel skill preview # preview the skill doc
   - [Signing \& notarization](#signing--notarization)
   - [Safari Web Extensions](#safari-web-extensions)
   - [App Extensions](#app-extensions)
+  - [XPC Services](#xpc-services)
   - [Tips](#tips)
 - [Examples](#examples)
 - [Development](#development)
@@ -356,20 +357,21 @@ For iOS apps, this contains settings for `strudel run --sim` and `strudel run --
 
 ### `[[extensions]]` (optional)
 
-An array of zero or more app extensions embedded under `<app>.app/Contents/PlugIns/`. Each entry produces a separate `.appex` bundle, signed with its own entitlements, and sealed inside the notarized host app. Two kinds are supported:
+An array of zero or more app extensions embedded under `<app>.app/Contents/PlugIns/`. Each entry produces a separate nested bundle, signed with its own entitlements, and sealed inside the notarized host app. Supported kinds:
 
 - `"safari_web_extension"` for a Safari Web Extension; see [Safari Web Extensions](#safari-web-extensions)
 - `"app_extension"` for generic macOS app extensions (Share, Finder Sync, Notification Service, Quick Look, etc.); see [App Extensions](#app-extensions).
+- `"xpc_service"` for an XPC service embedded under `<app>.app/Contents/XPCServices/` as a `.xpc` bundle; see [XPC Services](#xpc-services).
 
 **Common fields** (all kinds):
 
 | Key                      | Type   | Default                | Description                                                                       |
 | ------------------------ | ------ | ---------------------- | --------------------------------------------------------------------------------- |
-| `kind`                   | string | *(required)*           | `"safari_web_extension"` or `"app_extension"`                                     |
+| `kind`                   | string | *(required)*           | `"safari_web_extension"`, `"app_extension"`, or `"xpc_service"`                   |
 | `target_name`            | string | *(required)*           | Swift `executableTarget` in `Package.swift`                                       |
 | `bundle_id`              | string | *(required)*           | `CFBundleIdentifier`; typically `<host-id>.Extension`                             |
 | `name`                   | string | value of `target_name` | Display name (`CFBundleName` / `CFBundleDisplayName`) and `.appex` directory name |
-| `entitlements_json_path` | string | *(required)*           | JSON entitlements; each extension is signed with its own, separate from the host  |
+| `entitlements_json_path` | string | *(required)*           | JSON entitlements; each extension is signed with its own, separate from the host. Optional for `xpc_service` |
 | `info_json_path`         | string | *(none)*               | Extra `Info.plist` keys merged with strudel's auto-injected ones                  |
 | `provisioning_profile`   | string | *(none)*               | Profile for this extension's bundle ID; a path or `"auto"` (macOS), like `[build]` |
 
@@ -876,6 +878,56 @@ strudel auto-injects into the extension's `Info.plist`:
 - `NSExtension` dict with `NSExtensionPointIdentifier` (from config) and, when set, `NSExtensionPrincipalClass`
 
 Use `info_json_path` to supply any additional `Info.plist` keys required by the extension point (e.g. `NSExtensionAttributes` for certain extension types).
+
+### XPC Services
+
+strudel can embed XPC services (`kind = "xpc_service"`) in the host app. Each service is bundled at `<app>.app/Contents/XPCServices/<name>.xpc` and signed before the host app.
+
+#### 1. XPC service setup in Swift
+
+Each service is a separate `executableTarget` in `Package.swift`. Its `main.swift` starts the service listener:
+
+```swift
+// Sources/MyHelper/main.swift
+import Foundation
+
+class ServiceDelegate: NSObject, NSXPCListenerDelegate {
+    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection conn: NSXPCConnection) -> Bool {
+        conn.exportedInterface = NSXPCInterface(with: MyHelperProtocol.self)
+        conn.exportedObject = MyHelper()
+        conn.resume()
+        return true
+    }
+}
+
+let delegate = ServiceDelegate()
+let listener = NSXPCListener.service()
+listener.delegate = delegate
+listener.resume()
+```
+
+The host app connects with `NSXPCConnection(serviceName: "com.example.myapp.Helper")`, using the service's `bundle_id`.
+
+#### 2. Config
+
+```toml
+[[extensions]]
+kind        = "xpc_service"
+target_name = "MyHelper"
+bundle_id   = "com.example.myapp.Helper"
+# entitlements_json_path = "helper/entitlements.json"
+```
+
+strudel auto-injects into the service's `Info.plist`:
+
+- `CFBundleName`, `CFBundleDisplayName`, `CFBundleExecutable`, `CFBundleIdentifier`
+- `CFBundleShortVersionString`, `CFBundleVersion` (inherited from `[app]`)
+- `CFBundleInfoDictionaryVersion = "6.0"`, `CFBundlePackageType = "XPC!"`
+- `XPCService` dict with `ServiceType = "Application"`
+
+To set other `XPCService` keys (`RunLoopType`, `JoinExistingSession`, or a different `ServiceType`), add an `XPCService` object to `info_json_path`. strudel merges it with the defaults.
+
+`entitlements_json_path` is optional for XPC services. If the host app is sandboxed, give the service `com.apple.security.app-sandbox` as well.
 
 ### Tips
 

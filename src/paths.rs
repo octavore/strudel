@@ -31,7 +31,8 @@ pub struct Paths {
 /// All bundle-internal paths for a single extension. App extensions
 /// (`safari_web_extension`, `app_extension`) live at
 /// `<host>.app/Contents/PlugIns/<name>.appex/`; system extensions live at
-/// `<host>.app/Contents/Library/SystemExtensions/<name>.systemextension/`.
+/// `<host>.app/Contents/Library/SystemExtensions/<bundle_id>.systemextension/`;
+/// XPC services live at `<host>.app/Contents/XPCServices/<name>.xpc/`.
 pub struct ExtensionPaths {
     pub bundle: PathBuf,
     pub binary: PathBuf,
@@ -59,6 +60,9 @@ impl ExtensionPaths {
             ExtensionKind::SafariWebExtension | ExtensionKind::AppExtension => app_bundle
                 .join("Contents/PlugIns")
                 .join(format!("{}.appex", ext.name)),
+            ExtensionKind::XpcService => app_bundle
+                .join("Contents/XPCServices")
+                .join(format!("{}.xpc", ext.name)),
         };
         ExtensionPaths {
             binary: bundle.join("Contents/MacOS").join(&ext.target_name),
@@ -236,7 +240,7 @@ mod tests {
             bundle_id: "com.example.myapp.Extension".into(),
             name: "MyAppExtension".into(),
             info_json_path: None,
-            entitlements_json_path: PathBuf::from("/ext/e.json"),
+            entitlements_json_path: Some(PathBuf::from("/ext/e.json")),
             provisioning_profile: None,
             manage_provisioning_profile: false,
             resources_dir: Some(PathBuf::from("/ext/dist")),
@@ -283,7 +287,7 @@ mod tests {
             bundle_id: "com.example.myapp.NetworkExtension".into(),
             name: "MyNetworkExtension".into(),
             info_json_path: None,
-            entitlements_json_path: PathBuf::from("/ext/e.json"),
+            entitlements_json_path: Some(PathBuf::from("/ext/e.json")),
             provisioning_profile: None,
             manage_provisioning_profile: false,
             resources_dir: None,
@@ -302,6 +306,36 @@ mod tests {
             e.binary,
             PathBuf::from(
                 "/out/MyApp.app/Contents/Library/SystemExtensions/com.example.myapp.NetworkExtension.systemextension/Contents/MacOS/MyNetworkExtension"
+            )
+        );
+    }
+
+    #[test]
+    fn xpc_service_paths_nest_under_xpc_services() {
+        let mut c = cfg("/out", "MyApp", "1.0");
+        c.extensions.push(ResolvedExtension {
+            kind: ExtensionKind::XpcService,
+            target_name: "MyHelper".into(),
+            bundle_id: "com.example.myapp.Helper".into(),
+            name: "MyHelper".into(),
+            info_json_path: None,
+            entitlements_json_path: None,
+            provisioning_profile: None,
+            manage_provisioning_profile: false,
+            resources_dir: None,
+            principal_class: None,
+            extension_point_identifier: None,
+        });
+        let p = Paths::new(&c);
+        let e = &p.extensions[0];
+        assert_eq!(
+            e.bundle,
+            PathBuf::from("/out/MyApp.app/Contents/XPCServices/MyHelper.xpc")
+        );
+        assert_eq!(
+            e.binary,
+            PathBuf::from(
+                "/out/MyApp.app/Contents/XPCServices/MyHelper.xpc/Contents/MacOS/MyHelper"
             )
         );
     }
