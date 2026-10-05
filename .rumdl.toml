@@ -21,17 +21,17 @@
 
 # List of file/directory patterns to exclude from linting
 exclude = [
-    # Common directories to exclude
-    ".git",
-    ".github",
-    "node_modules",
-    "vendor",
-    "dist",
-    "build",
+  # Common directories to exclude
+  ".git",
+  ".github",
+  "node_modules",
+  "vendor",
+  "dist",
+  "build",
 
-    # Specific files or patterns
-    "CHANGELOG.md",
-    "LICENSE.md",
+  # Specific files or patterns
+  "CHANGELOG.md",
+  "LICENSE.md",
 ]
 
 # Respect .gitignore files when scanning directories (default: true)
@@ -60,8 +60,10 @@ headings = true  # Include headings in line length check
 reflow = true  #
 reflow-mode = "normalize"
 
+[MD060]
+enabled = true
+style = "aligned"
 
 # [MD044]
 # names = ["rumdl", "Markdown", "GitHub"]  # Proper names that should be capitalized correctly
 # code-blocks = false  # Check code blocks for proper names (default: false, skips code blocks)
-

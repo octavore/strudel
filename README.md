@@ -256,16 +256,16 @@ A config file comes in one of two kinds:
 
 The sections below describe a single target. In a multi-target config they nest inside each `[[target]]` block, except `[apple]`, which is shared and stays top-level.
 
-| Section                             | Required | Purpose                                                     |
-| ----------------------------------- | -------- | ----------------------------------------------------------- |
-| [`[app]`](#app-required)            | yes      | Name, bundle ID, version                                    |
-| [`[build]`](#build-optional)        | no       | Sources, output dir, icon, resources, architectures         |
-| [`[build.build_env]`](#buildbuild_env-optional)| no| Extra env vars for `swift build`                            |
-| [`[ios]`](#ios-optional-experimental)| no      | Simulator, device, and provisioning settings for iOS        |
-| [`[[extensions]]`](#extensions-optional)| no   | Embedded `.appex` bundles                                   |
-| [`assets_dir`](#assets_dir-optional-macos)| no | `.xcassets` catalog compiled into `Contents/Resources/Assets.car` |
-| [`[dmg]`](#dmg-optional)            | no       | Finder window layout of the release DMG                     |
-| [`[apple]`](#apple-optional)| no| Signing, notarization, and provisioning identifiers        |
+| Section                                         | Required | Purpose                                                           |
+| ----------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| [`[app]`](#app-required)                        | yes      | Name, bundle ID, version                                          |
+| [`[build]`](#build-optional)                    | no       | Sources, output dir, icon, resources, architectures               |
+| [`[build.build_env]`](#buildbuild_env-optional) | no       | Extra env vars for `swift build`                                  |
+| [`[ios]`](#ios-optional-experimental)           | no       | Simulator, device, and provisioning settings for iOS              |
+| [`[[extensions]]`](#extensions-optional)        | no       | Embedded `.appex` bundles                                         |
+| [`assets_dir`](#assets_dir-optional-macos)      | no       | `.xcassets` catalog compiled into `Contents/Resources/Assets.car` |
+| [`[dmg]`](#dmg-optional)                        | no       | Finder window layout of the release DMG                           |
+| [`[apple]`](#apple-optional)                    | no       | Signing, notarization, and provisioning identifiers               |
 
 ### `[app]` (required)
 
@@ -284,18 +284,18 @@ The relationship between version and build_number is that a version ([`CFBundleS
 
 ### `[build]` (optional)
 
-| Key                      | Type     | Default             | Description                                                                                                                                                |
-| ------------------------ | -------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `source_dir`             | string   | `.`                 | Swift package directory (relative to config file)                                                                                                          |
-| `build_dir`              | string   | `.build/dist`       | Output directory for artifacts (relative to `source_dir`)                                                                                                  |
-| `info_json_path`         | string   | *(none)*            | JSON describing `Info.plist` keys; converted to `Info.plist` via `plutil`. If omitted, strudel starts from an empty object and injects only the keys below |
-| `entitlements_json_path` | string   | *(none)*            | JSON entitlements; converted to a plist and passed to `codesign`                                                                                           |
-| `icon`                   | table    | *(none)*            | Bundle icon; see below. If unset, the bundle has no icon                                                                                                   |
-| `archs`                  | string[] | host architecture   | Architectures passed to `swift build --arch`. Set multiple for a universal binary, e.g. `["arm64", "x86_64"]`                                              |
-| `target_name`            | string   | value of `app.name` | Swift executable target name, if it differs from the app name                                                                                              |
-| `embed_libs`             | string[] | *(none)*            | Dynamic C FFI libraries to embed in `Contents/Frameworks` and sign. Paths relative to config file                                                          |
-| `resources_dir`          | string   | *(none)*            | Directory whose contents are copied wholesale into `Contents/Resources/`                                                                                   |
-| `resources`              | string[] | *(none)*            | Individual files or folders to copy into `Contents/Resources/` by filename                                                                                 |
+| Key                      | Type     | Default             | Description                                                                                                                                                                                                      |
+| ------------------------ | -------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source_dir`             | string   | `.`                 | Swift package directory (relative to config file)                                                                                                                                                                |
+| `build_dir`              | string   | `.build/dist`       | Output directory for artifacts (relative to `source_dir`)                                                                                                                                                        |
+| `info_json_path`         | string   | *(none)*            | JSON describing `Info.plist` keys; converted to `Info.plist` via `plutil`. If omitted, strudel starts from an empty object and injects only the keys below                                                       |
+| `entitlements_json_path` | string   | *(none)*            | JSON entitlements; converted to a plist and passed to `codesign`                                                                                                                                                 |
+| `icon`                   | table    | *(none)*            | Bundle icon; see below. If unset, the bundle has no icon                                                                                                                                                         |
+| `archs`                  | string[] | host architecture   | Architectures passed to `swift build --arch`. Set multiple for a universal binary, e.g. `["arm64", "x86_64"]`                                                                                                    |
+| `target_name`            | string   | value of `app.name` | Swift executable target name, if it differs from the app name                                                                                                                                                    |
+| `embed_libs`             | string[] | *(none)*            | Dynamic C FFI libraries to embed in `Contents/Frameworks` and sign. Paths relative to config file                                                                                                                |
+| `resources_dir`          | string   | *(none)*            | Directory whose contents are copied wholesale into `Contents/Resources/`                                                                                                                                         |
+| `resources`              | string[] | *(none)*            | Individual files or folders to copy into `Contents/Resources/` by filename                                                                                                                                       |
 | `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements. `"auto"` lets strudel manage it on macOS, see [macOS provisioning profiles](#macos-provisioning-profiles) |
 
 #### `[build.icon]` (optional)
@@ -365,15 +365,15 @@ An array of zero or more app extensions embedded under `<app>.app/Contents/PlugI
 
 **Common fields** (all kinds):
 
-| Key                      | Type   | Default                | Description                                                                       |
-| ------------------------ | ------ | ---------------------- | --------------------------------------------------------------------------------- |
-| `kind`                   | string | *(required)*           | `"safari_web_extension"`, `"app_extension"`, or `"xpc_service"`                   |
-| `target_name`            | string | *(required)*           | Swift `executableTarget` in `Package.swift`                                       |
-| `bundle_id`              | string | *(required)*           | `CFBundleIdentifier`; typically `<host-id>.Extension`                             |
-| `name`                   | string | value of `target_name` | Display name (`CFBundleName` / `CFBundleDisplayName`) and `.appex` directory name |
+| Key                      | Type   | Default                | Description                                                                                                  |
+| ------------------------ | ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `kind`                   | string | *(required)*           | `"safari_web_extension"`, `"app_extension"`, or `"xpc_service"`                                              |
+| `target_name`            | string | *(required)*           | Swift `executableTarget` in `Package.swift`                                                                  |
+| `bundle_id`              | string | *(required)*           | `CFBundleIdentifier`; typically `<host-id>.Extension`                                                        |
+| `name`                   | string | value of `target_name` | Display name (`CFBundleName` / `CFBundleDisplayName`) and `.appex` directory name                            |
 | `entitlements_json_path` | string | *(required)*           | JSON entitlements; each extension is signed with its own, separate from the host. Optional for `xpc_service` |
-| `info_json_path`         | string | *(none)*               | Extra `Info.plist` keys merged with strudel's auto-injected ones                  |
-| `provisioning_profile`   | string | *(none)*               | Profile for this extension's bundle ID; a path or `"auto"` (macOS), like `[build]` |
+| `info_json_path`         | string | *(none)*               | Extra `Info.plist` keys merged with strudel's auto-injected ones                                             |
+| `provisioning_profile`   | string | *(none)*               | Profile for this extension's bundle ID; a path or `"auto"` (macOS), like `[build]`                           |
 
 `[[extensions]]` are not built for iOS targets yet.
 
@@ -405,18 +405,18 @@ assets_dir = "Sources/App/Assets.xcassets"
 
 Controls the Finder window layout of the DMG produced by `strudel release`. By default (no `[dmg]` section), strudel generates a styled drag-to-install window with the app icon on the left and an Applications symlink on the right. Add the section to override individual fields or opt out entirely with `plain = true`.
 
-| Key              | Type    | Default   | Description                                                                                                                       |
-| ---------------- | ------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `plain`          | bool    | `false`   | Skip the styled window; produce a plain compressed DMG instead                                                                    |
-| `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, defaults to white           |
-| `window_width`   | integer | `660`     | Finder window width in pixels                                                                                                     |
-| `window_height`  | integer | `400`     | Finder window height in pixels                                                                                                    |
-| `icon_size`      | integer | `128`     | Icon size in pixels                                                                                                               |
-| `app_x`          | integer | `192`     | Horizontal position of the `.app` icon                                                                                            |
-| `app_y`          | integer | `192`     | Vertical position of the `.app` icon                                                                                             |
-| `applications_x` | integer | `468`     | Horizontal position of the Applications symlink                                                                                   |
-| `applications_y` | integer | `192`     | Vertical position of the Applications symlink                                                                                     |
-| `icon_text_size` | float   | `12.0`    | Icon label point size                                                                                                             |
+| Key              | Type    | Default   | Description                                                                                                             |
+| ---------------- | ------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `plain`          | bool    | `false`   | Skip the styled window; produce a plain compressed DMG instead                                                          |
+| `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, defaults to white |
+| `window_width`   | integer | `660`     | Finder window width in pixels                                                                                           |
+| `window_height`  | integer | `400`     | Finder window height in pixels                                                                                          |
+| `icon_size`      | integer | `128`     | Icon size in pixels                                                                                                     |
+| `app_x`          | integer | `192`     | Horizontal position of the `.app` icon                                                                                  |
+| `app_y`          | integer | `192`     | Vertical position of the `.app` icon                                                                                    |
+| `applications_x` | integer | `468`     | Horizontal position of the Applications symlink                                                                         |
+| `applications_y` | integer | `192`     | Vertical position of the Applications symlink                                                                           |
+| `icon_text_size` | float   | `12.0`    | Icon label point size                                                                                                   |
 
 Example (custom background and larger icons):
 
