@@ -153,11 +153,14 @@ fn extensions_block(cfg: &ResolvedConfig) {
 }
 
 /// `strudel devices` (no subcommand): list devices tracked in
-/// `.strudel/devices.toml` for each selected iOS target.
-pub fn devices_list(config_path: &Path, target: Option<&str>) -> Result<()> {
+/// `.strudel/devices.toml` for each selected iOS target. Sections are
+/// indented under the target id only when more than one target is listed.
+/// The underlying `devicectl` command is echoed only when `verbose` is set.
+pub fn devices_list(config_path: &Path, target: Option<&str>, verbose: bool) -> Result<()> {
     let project = load_config(config_path)?;
     let targets = project.select(target, Platform::Ios, true)?;
     let multi = targets.len() > 1;
+    let pad = if multi { "  " } else { "" };
 
     for cfg in targets {
         if multi {
@@ -165,12 +168,33 @@ pub fn devices_list(config_path: &Path, target: Option<&str>) -> Result<()> {
         }
         let paths = Paths::new(cfg);
         let set = DeviceSet::load(&paths.devices_toml)?;
-        if set.device.is_empty() {
-            cprintln!("  <dim>No tracked devices. Run `strudel devices add`.</dim>");
-            continue;
+
+        let output = builder::OutputFlags {
+            no_echo: !verbose,
+            ..Default::default()
+        };
+        let builder = builder::IosBuilder::new(cfg.clone(), output, false)?;
+        let devices = match builder.list_devices() {
+            Ok(devices) => devices,
+            Err(e) => {
+                cprintln!("{pad}<yellow>could not list devices: {}</yellow>", e);
+                Vec::new()
+            },
+        };
+        for d in &devices {
+            d.print(set.contains_udid(&d.udid), pad);
         }
-        for d in &set.device {
-            cprintln!("  {}  <dim>{}</dim>", d.name, d.udid);
+        for d in set
+            .device
+            .iter()
+            .filter(|t| !devices.iter().any(|d| d.udid == t.udid))
+        {
+            cprintln!("{pad}<dim>○</dim> <bold>{}</bold>", d.name);
+            cprintln!("{pad}  <dim>{}</dim>", d.udid);
+            cprintln!("{pad}  <dim>not connected, tracked</dim>");
+        }
+        if devices.is_empty() && set.device.is_empty() {
+            cprintln!("{pad}<dim>none. Run `strudel devices add`.</dim>");
         }
     }
     Ok(())

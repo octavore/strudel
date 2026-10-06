@@ -16,6 +16,10 @@ pub(crate) struct DevicesCmd {
     /// Select a target by id
     #[arg(long)]
     target: Option<String>,
+
+    /// Echo the underlying commands
+    #[arg(long)]
+    verbose: bool,
 }
 
 #[derive(Subcommand)]
@@ -23,6 +27,11 @@ enum DevicesAction {
     /// Register connected iOS devices on the portal (if not already) and
     /// track them in .strudel/devices.toml. This is the common workflow for
     /// adding a device you have plugged in.
+    ///
+    /// The device must be connected, unlocked, and trusted, with Developer
+    /// Mode enabled (Settings > Privacy & Security > Developer Mode). The
+    /// Developer Mode option appears only after the device is paired with
+    /// this Mac.
     Add {
         /// Device name or UDID to add (may be repeated; default: all
         /// connected devices)
@@ -62,7 +71,7 @@ enum DevicesAction {
 impl DevicesCmd {
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
         match self.command {
-            None => status::devices_list(config, self.target.as_deref()),
+            None => status::devices_list(config, self.target.as_deref(), self.verbose),
             Some(DevicesAction::Add {
                 devices,
                 dry_run,

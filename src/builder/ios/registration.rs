@@ -31,15 +31,91 @@ struct DevicectlDevice {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevicectlHardwareProperties {
     platform: Option<String>,
+    marketing_name: Option<String>,
     udid: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DevicectlConnectionProperties {
+    pairing_state: Option<String>,
+    transport_type: Option<String>,
     tunnel_state: Option<String>,
+}
+
+/// A device reported by `xcrun devicectl list devices`.
+pub struct DeviceInfo {
+    pub udid: String,
+    pub name: String,
+    pub model: Option<String>,
+    pub pairing_state: Option<String>,
+    pub transport: Option<String>,
+    pub tunnel_state: Option<String>,
+    pub developer_mode: Option<String>,
+}
+
+impl DeviceInfo {
+    /// Whether the device can be used for registration right now.
+    fn is_connected(&self) -> bool {
+        self.tunnel_state.as_deref() == Some("connected")
+            || self.developer_mode.as_deref() == Some("enabled")
+    }
+
+    fn is_paired(&self) -> bool {
+        self.pairing_state.as_deref() == Some("paired")
+    }
+
+    fn developer_mode_enabled(&self) -> bool {
+        self.developer_mode.as_deref() == Some("enabled")
+    }
+
+    /// Print the device's name, state, and the next step to make it usable.
+    pub fn print(&self, tracked: bool, pad: &str) {
+        let marker = if self.is_paired() && self.developer_mode_enabled() {
+            cformat!("<green>●</green>")
+        } else {
+            cformat!("<yellow>●</yellow>")
+        };
+        let model = self
+            .model
+            .as_deref()
+            .map(|m| cformat!(" <cyan>[{m}]</cyan>"))
+            .unwrap_or_default();
+        cprintln!("{pad}{marker} <bold>{}</bold>{model}", self.name);
+        cprintln!("{pad}  <dim>{}</dim>", self.udid);
+
+        let pairing = if self.is_paired() {
+            cformat!("<green>paired</green>")
+        } else {
+            cformat!(
+                "<yellow>{}</yellow>",
+                self.pairing_state.as_deref().unwrap_or("pairing unknown")
+            )
+        };
+        let transport = self.transport.as_deref().unwrap_or("unknown transport");
+        let dev_mode = if self.developer_mode_enabled() {
+            cformat!("<green>developer mode on</green>")
+        } else {
+            cformat!("<yellow>developer mode off</yellow>")
+        };
+        let tracked = if tracked { ", tracked" } else { "" };
+        cprintln!("{pad}  {pairing}, {transport}, {dev_mode}<dim>{tracked}</dim>");
+
+        if !self.is_paired() {
+            cprintln!(
+                "{pad}  <yellow>Not paired. Unlock the device and tap Trust. Developer Mode \
+                 appears in Settings > Privacy & Security after pairing.</yellow>"
+            );
+        } else if !self.developer_mode_enabled() {
+            cprintln!(
+                "{pad}  <yellow>Enable Developer Mode in Settings > Privacy & Security, then \
+                 restart the device.</yellow>"
+            );
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -56,10 +132,24 @@ impl IosBuilder {
         let connected = self.list_connected_devices()?;
 
         if connected.is_empty() {
+            let known = self.list_devices().unwrap_or_default();
+            if !known.is_empty() {
+                cprintln!("<bold>Devices found, none ready:</bold>");
+                for d in &known {
+                    d.print(false, "");
+                }
+                bail!("Fix the items above, then run `strudel devices add` again.");
+            }
             bail!(
-                "No connected iOS devices found.\n\
-                 Plug in your iPhone, trust this Mac, and enable Developer Mode \
-                 (Settings -> Privacy & Security -> Developer Mode)."
+                "No connected iOS devices found.\n\n\
+                 To add a device:\n\
+                 1. Connect the device to this Mac with a cable and unlock it.\n\
+                 2. Tap Trust when prompted on the device.\n\
+                 3. On the device, open Settings > Privacy & Security > Developer Mode, \
+                 turn it on, and restart when prompted. The option is hidden until the \
+                 device is paired with this Mac. Check that `xcrun devicectl device info \
+                 details --device <id>` reports `pairingState: paired`.\n\
+                 4. Run `strudel devices add` again."
             );
         }
 
@@ -292,14 +382,8 @@ impl IosBuilder {
         }
     }
 
-    /// Return all connected iOS devices as `(udid, name)` pairs.
-    fn list_connected_devices(&self) -> Result<Vec<(String, String)>> {
-        if self.dry_run {
-            return Ok(vec![(
-                "<device-udid>".to_string(),
-                "<device-name>".to_string(),
-            )]);
-        }
+    /// Return all iOS devices known to devicectl, connected or not.
+    pub fn list_devices(&self) -> Result<Vec<DeviceInfo>> {
         let output = self.sh.run(&[
             "xcrun",
             "devicectl",
@@ -315,28 +399,32 @@ impl IosBuilder {
             .result
             .devices
             .into_iter()
-            .filter(|d| {
-                let platform = d.hardware_properties.platform.as_deref().unwrap_or("");
-                let tunnel = d
-                    .connection_properties
-                    .tunnel_state
-                    .as_deref()
-                    .unwrap_or("");
-                let dev_mode = d
-                    .device_properties
-                    .developer_mode_status
-                    .as_deref()
-                    .unwrap_or("");
-                platform == "iOS" && (tunnel == "connected" || dev_mode == "enabled")
+            .filter(|d| d.hardware_properties.platform.as_deref() == Some("iOS"))
+            .map(|d| DeviceInfo {
+                udid: d.hardware_properties.udid,
+                name: d.device_properties.name.unwrap_or(d.identifier),
+                model: d.hardware_properties.marketing_name,
+                pairing_state: d.connection_properties.pairing_state,
+                transport: d.connection_properties.transport_type,
+                tunnel_state: d.connection_properties.tunnel_state,
+                developer_mode: d.device_properties.developer_mode_status,
             })
-            .map(|d| {
-                let udid = d.hardware_properties.udid;
-                let name = d
-                    .device_properties
-                    .name
-                    .unwrap_or_else(|| d.identifier.clone());
-                (udid, name)
-            })
+            .collect())
+    }
+
+    /// Return all connected iOS devices as `(udid, name)` pairs.
+    fn list_connected_devices(&self) -> Result<Vec<(String, String)>> {
+        if self.dry_run {
+            return Ok(vec![(
+                "<device-udid>".to_string(),
+                "<device-name>".to_string(),
+            )]);
+        }
+        Ok(self
+            .list_devices()?
+            .into_iter()
+            .filter(DeviceInfo::is_connected)
+            .map(|d| (d.udid, d.name))
             .collect())
     }
 }
