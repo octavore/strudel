@@ -116,6 +116,18 @@ pub fn register_device(_cfg: &ResolvedConfig, name: &str, udid: &str) -> Result<
     Ok(())
 }
 
+/// List the UDIDs registered on the signed-in Apple ID's team.
+pub fn registered_udids(_cfg: &ResolvedConfig) -> Result<Vec<String>> {
+    let data = StrudelData::locate()?;
+    let apple_id = get_apple_id(&data)?;
+    let session = load_session_or_err(&data)?;
+    let team = pick_team(&apple_id, &session)?;
+    let devices = apple_id
+        .list_devices(&session, &team.id)
+        .with_context(|| format!("listing devices for team {}", team.name))?;
+    Ok(devices.into_iter().map(|d| d.udid).collect())
+}
+
 /// Fetch a 7-day development profile via Apple ID, cache it at
 /// `paths.cached_profile`, and import the returned cert+key into the persistent
 /// dev keychain so codesign can use the identity.

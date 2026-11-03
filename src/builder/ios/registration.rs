@@ -46,6 +46,31 @@ struct DevicectlConnectionProperties {
     tunnel_state: Option<String>,
 }
 
+/// Output of `xcrun devicectl device info details`. A partial result is
+/// returned for devices that are unpaired or have Developer Mode off.
+#[derive(Deserialize)]
+struct DevicectlDetailsOutput {
+    result: DevicectlDetailsResult,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevicectlDetailsResult {
+    connection_properties: DevicectlConnectionProperties,
+    device_properties: DevicectlDeviceProperties,
+}
+
+/// Reduce a failed command's message to the line that carries the reason.
+fn summarize_failure(message: &str) -> String {
+    message
+        .lines()
+        .map(str::trim)
+        .find(|l| l.contains("Error") || l.contains("error"))
+        .or_else(|| message.lines().map(str::trim).find(|l| !l.is_empty()))
+        .unwrap_or("unknown error")
+        .to_string()
+}
+
 /// A device reported by `xcrun devicectl list devices`.
 pub struct DeviceInfo {
     pub udid: String,
@@ -55,6 +80,8 @@ pub struct DeviceInfo {
     pub transport: Option<String>,
     pub tunnel_state: Option<String>,
     pub developer_mode: Option<String>,
+    /// Why `devicectl device info details` failed, if it was run and failed.
+    pub detail_error: Option<String>,
 }
 
 impl DeviceInfo {
@@ -73,20 +100,19 @@ impl DeviceInfo {
     }
 
     /// Print the device's name, state, and the next step to make it usable.
-    pub fn print(&self, tracked: bool, pad: &str) {
-        let marker = if self.is_paired() && self.developer_mode_enabled() {
-            cformat!("<green>●</green>")
-        } else {
-            cformat!("<yellow>●</yellow>")
-        };
-        let model = self
-            .model
-            .as_deref()
-            .map(|m| cformat!(" <cyan>[{m}]</cyan>"))
-            .unwrap_or_default();
-        cprintln!("{pad}{marker} <bold>{}</bold>{model}", self.name);
-        cprintln!("{pad}  <dim>{}</dim>", self.udid);
+    /// `registered` is whether the device is on the current account's portal,
+    /// or `None` when that could not be checked.
+    pub fn print(&self, tracked: bool, registered: Option<bool>) {
+        cprintln!("<bold>{}</bold> <cyan>[{}]</cyan>", self.name, self.udid);
+        if let Some(model) = &self.model {
+            cprintln!("<dim>{model}</dim>");
+        }
 
+        let connection = if self.is_connected() {
+            cformat!("<green>connected</green>")
+        } else {
+            cformat!("<dim>not connected</dim>")
+        };
         let pairing = if self.is_paired() {
             cformat!("<green>paired</green>")
         } else {
@@ -95,26 +121,46 @@ impl DeviceInfo {
                 self.pairing_state.as_deref().unwrap_or("pairing unknown")
             )
         };
-        let transport = self.transport.as_deref().unwrap_or("unknown transport");
         let dev_mode = if self.developer_mode_enabled() {
             cformat!("<green>developer mode on</green>")
         } else {
             cformat!("<yellow>developer mode off</yellow>")
         };
         let tracked = if tracked { ", tracked" } else { "" };
-        cprintln!("{pad}  {pairing}, {transport}, {dev_mode}<dim>{tracked}</dim>");
+        cprintln!("{connection}, {pairing}, {dev_mode}<dim>{tracked}</dim>");
+        print_registration(registered);
 
+        if let Some(error) = &self.detail_error {
+            cprintln!("<dim>{error}</dim>");
+        }
+
+        if !self.is_connected() {
+            return;
+        }
         if !self.is_paired() {
             cprintln!(
-                "{pad}  <yellow>Not paired. Unlock the device and tap Trust. Developer Mode \
-                 appears in Settings > Privacy & Security after pairing.</yellow>"
+                "<yellow>Not paired. Unlock the device and tap Trust, then run \
+                 `strudel devices` again. If it still shows unpaired, disconnect and \
+                 reconnect the device. Developer Mode does not appear in Settings > \
+                 Privacy & Security until the device is trusted.</yellow>"
             );
         } else if !self.developer_mode_enabled() {
             cprintln!(
-                "{pad}  <yellow>Enable Developer Mode in Settings > Privacy & Security, then \
+                "<yellow>Enable Developer Mode in Settings > Privacy & Security, then \
                  restart the device.</yellow>"
             );
         }
+    }
+}
+
+/// Print whether a device is registered on the current account's portal.
+fn print_registration(registered: Option<bool>) {
+    match registered {
+        Some(true) => cprintln!("<green>registered</green> <dim>on this account</dim>"),
+        Some(false) => cprintln!(
+            "<yellow>not registered</yellow> <dim>on this account, run `strudel devices add`</dim>"
+        ),
+        None => cprintln!("<dim>registration unknown</dim>"),
     }
 }
 
@@ -132,11 +178,11 @@ impl IosBuilder {
         let connected = self.list_connected_devices()?;
 
         if connected.is_empty() {
-            let known = self.list_devices().unwrap_or_default();
+            let known = self.list_devices_detailed().unwrap_or_default();
             if !known.is_empty() {
                 cprintln!("<bold>Devices found, none ready:</bold>");
                 for d in &known {
-                    d.print(false, "");
+                    d.print(false, None);
                 }
                 bail!("Fix the items above, then run `strudel devices add` again.");
             }
@@ -144,11 +190,12 @@ impl IosBuilder {
                 "No connected iOS devices found.\n\n\
                  To add a device:\n\
                  1. Connect the device to this Mac with a cable and unlock it.\n\
-                 2. Tap Trust when prompted on the device.\n\
+                 2. Tap Trust when prompted on the device, then run `strudel devices` \
+                 again to confirm it is paired. If it still shows unpaired, disconnect and \
+                 reconnect the device.\n\
                  3. On the device, open Settings > Privacy & Security > Developer Mode, \
-                 turn it on, and restart when prompted. The option is hidden until the \
-                 device is paired with this Mac. Check that `xcrun devicectl device info \
-                 details --device <id>` reports `pairingState: paired`.\n\
+                 turn it on, and restart when prompted. The option does not appear until \
+                 the device is trusted.\n\
                  4. Run `strudel devices add` again."
             );
         }
@@ -231,6 +278,23 @@ impl IosBuilder {
 
         cprintln!("\n<green>Done!</green> Registered {name} ({udid}) on the portal.");
         Ok(())
+    }
+
+    /// Print a tracked device that `devicectl` does not list.
+    pub fn print_tracked_offline(name: &str, udid: &str, registered: Option<bool>) {
+        cprintln!("<bold>{name}</bold> <cyan>[{udid}]</cyan>");
+        cprintln!("<dim>not connected, tracked</dim>");
+        print_registration(registered);
+    }
+
+    /// UDIDs registered on the portal for the current account, per
+    /// `[ios] provisioning`.
+    pub fn portal_udids(&self) -> Result<Vec<String>> {
+        if matches!(self.ios.provisioning, IosProvisioningBackend::Free) {
+            return provisioning::registered_udids(&self.cfg);
+        }
+        let client = AppStoreClient::from_config(&self.cfg)?.show_progress(!self.echo_suppressed());
+        Ok(client.list_devices()?.into_iter().map(|d| d.udid).collect())
     }
 
     /// Register `(udid, name)` pairs on the portal (App Store Connect API or
@@ -408,8 +472,56 @@ impl IosBuilder {
                 transport: d.connection_properties.transport_type,
                 tunnel_state: d.connection_properties.tunnel_state,
                 developer_mode: d.device_properties.developer_mode_status,
+                detail_error: None,
             })
             .collect())
+    }
+
+    /// Like [`list_devices`](Self::list_devices), then query each device with
+    /// `xcrun devicectl device info details`. The details call contacts the
+    /// device, so its pairing and developer mode state is current, and it
+    /// reports why a device is not usable. This is slower than the plain list.
+    pub fn list_devices_detailed(&self) -> Result<Vec<DeviceInfo>> {
+        let mut devices = self.list_devices()?;
+        for d in &mut devices {
+            self.refresh_device_details(d);
+        }
+        Ok(devices)
+    }
+
+    fn refresh_device_details(&self, device: &mut DeviceInfo) {
+        let output = self.sh.run(&[
+            "xcrun",
+            "devicectl",
+            "device",
+            "info",
+            "details",
+            "--device",
+            device.udid.as_str(),
+            "--json-output",
+            "-",
+        ]);
+        let output = match output {
+            Ok(output) => output,
+            Err(e) => {
+                device.detail_error = Some(summarize_failure(&e.to_string()));
+                return;
+            },
+        };
+        match serde_json::from_str::<DevicectlDetailsOutput>(&output) {
+            Ok(parsed) => {
+                let conn = parsed.result.connection_properties;
+                device.pairing_state = conn.pairing_state.or(device.pairing_state.take());
+                device.transport = conn.transport_type.or(device.transport.take());
+                device.tunnel_state = conn.tunnel_state.or(device.tunnel_state.take());
+                device.developer_mode = parsed
+                    .result
+                    .device_properties
+                    .developer_mode_status
+                    .or(device.developer_mode.take());
+            },
+            Err(e) => device.detail_error = Some(format!("could not parse device details: {e}")),
+        }
     }
 
     /// Return all connected iOS devices as `(udid, name)` pairs.

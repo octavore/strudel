@@ -254,8 +254,10 @@ impl IosBuilder {
         if all_stdout.contains(identity) {
             bail!(
                 "Signing identity {identity:?} is expired or revoked.\n\
-                 Renew in Xcode (Settings > Accounts > Manage Certificates) \
-                 or at developer.apple.com."
+                 Renew it at developer.apple.com under Certificates, \
+                 Identifiers & Profiles > Certificates.\n\
+                 Expired certificates are listed in Keychain Access under \
+                 login > My Certificates."
             );
         }
 

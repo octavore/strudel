@@ -160,7 +160,6 @@ pub fn devices_list(config_path: &Path, target: Option<&str>, verbose: bool) -> 
     let project = load_config(config_path)?;
     let targets = project.select(target, Platform::Ios, true)?;
     let multi = targets.len() > 1;
-    let pad = if multi { "  " } else { "" };
 
     for cfg in targets {
         if multi {
@@ -174,27 +173,46 @@ pub fn devices_list(config_path: &Path, target: Option<&str>, verbose: bool) -> 
             ..Default::default()
         };
         let builder = builder::IosBuilder::new(cfg.clone(), output, false)?;
-        let devices = match builder.list_devices() {
+        let devices = match builder.list_devices_detailed() {
             Ok(devices) => devices,
             Err(e) => {
-                cprintln!("{pad}<yellow>could not list devices: {}</yellow>", e);
+                cprintln!("<yellow>could not list devices: {}</yellow>", e);
                 Vec::new()
             },
         };
+        let portal = match builder.portal_udids() {
+            Ok(udids) => Some(udids),
+            Err(e) => {
+                cprintln!(
+                    "<yellow>could not check portal registration: {}</yellow>",
+                    e
+                );
+                None
+            },
+        };
+        let registered = |udid: &str| portal.as_ref().map(|p| p.iter().any(|u| u == udid));
+
+        let mut first = true;
+        let mut separate = || {
+            if !first {
+                println!();
+            }
+            first = false;
+        };
         for d in &devices {
-            d.print(set.contains_udid(&d.udid), pad);
+            separate();
+            d.print(set.contains_udid(&d.udid), registered(&d.udid));
         }
         for d in set
             .device
             .iter()
             .filter(|t| !devices.iter().any(|d| d.udid == t.udid))
         {
-            cprintln!("{pad}<dim>○</dim> <bold>{}</bold>", d.name);
-            cprintln!("{pad}  <dim>{}</dim>", d.udid);
-            cprintln!("{pad}  <dim>not connected, tracked</dim>");
+            separate();
+            builder::IosBuilder::print_tracked_offline(&d.name, &d.udid, registered(&d.udid));
         }
         if devices.is_empty() && set.device.is_empty() {
-            cprintln!("{pad}<dim>none. Run `strudel devices add`.</dim>");
+            cprintln!("<dim>none. Run `strudel devices add`.</dim>");
         }
     }
     Ok(())
