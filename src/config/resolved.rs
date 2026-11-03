@@ -6,7 +6,7 @@ use dmg::DmgBackground;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::build_config::NotaryAuth;
-use crate::config::build_target::{IosProvisioningBackend, Platform};
+use crate::config::build_target::{IosDeviceFamily, IosProvisioningBackend, Platform};
 use crate::config::extension::ExtensionKind;
 
 /// Resolved `[dmg]` customization. `None` in `ResolvedConfig` only when the
@@ -391,6 +391,8 @@ pub struct ResolvedIosSection {
     pub simulator: String,
     pub device: Option<String>,
     pub deployment_target: String,
+    /// Sorted, deduplicated, and never empty.
+    pub device_family: Vec<IosDeviceFamily>,
     pub assets_dir: Option<PathBuf>,
     pub app_icon_name: String,
     pub provisioning: IosProvisioningBackend,

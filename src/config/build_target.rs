@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-pub use crate::config::build_target::target_ios::{IosProvisioningBackend, IosSection};
+pub use crate::config::build_target::target_ios::{
+    IosDeviceFamily, IosProvisioningBackend, IosSection,
+};
 pub use crate::config::build_target::target_macos::DmgSection;
 use crate::config::extension::ExtensionSection;
 use crate::config::icon_section::IconSection;

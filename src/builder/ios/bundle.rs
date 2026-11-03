@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 
 use crate::builder::ios::IosTarget;
 use crate::builder::{IosBuilder, read_partial_info_plist, resolve_build_artifact};
-use crate::config::ResolvedIcon;
+use crate::config::{IosDeviceFamily, ResolvedIcon};
 use crate::icon::{ios, render};
 use crate::shell::ShellCommand;
 
@@ -87,7 +87,28 @@ impl IosBuilder {
         );
         obj.insert("CFBundleVersion".into(), json!(&self.cfg.build_number));
         obj.insert("CFBundlePackageType".into(), json!("APPL"));
-        obj.entry("UIDeviceFamily").or_insert_with(|| json!([1]));
+        obj.entry("UIDeviceFamily").or_insert_with(|| {
+            json!(
+                ios_settings
+                    .device_family
+                    .iter()
+                    .map(|f| f.ui_device_family())
+                    .collect::<Vec<_>>()
+            )
+        });
+        if ios_settings.device_family.contains(&IosDeviceFamily::Ipad) {
+            // App Store validation requires all four orientations on iPad
+            // unless the app opts out of multitasking with UIRequiresFullScreen.
+            obj.entry("UISupportedInterfaceOrientations~ipad")
+                .or_insert_with(|| {
+                    json!([
+                        "UIInterfaceOrientationPortrait",
+                        "UIInterfaceOrientationPortraitUpsideDown",
+                        "UIInterfaceOrientationLandscapeLeft",
+                        "UIInterfaceOrientationLandscapeRight",
+                    ])
+                });
+        }
         obj.insert(
             "MinimumOSVersion".into(),
             json!(&ios_settings.deployment_target),
@@ -248,7 +269,18 @@ impl IosBuilder {
         let icon_name = "AppIcon";
         let xcassets_dir = work_dir.join("Assets.xcassets");
 
-        self.icon_cached_dir(icon, "Assets.xcassets", &xcassets_dir, || {
+        // The cache key includes the output name, so name it after the
+        // families to keep catalogs for different families apart.
+        let families = &self.ios.device_family;
+        let cache_name = match families.as_slice() {
+            [IosDeviceFamily::Iphone] => "Assets.xcassets".to_string(),
+            _ => {
+                let names: Vec<_> = families.iter().map(|f| f.actool_name()).collect();
+                format!("Assets-{}.xcassets", names.join("-"))
+            },
+        };
+
+        self.icon_cached_dir(icon, &cache_name, &xcassets_dir, || {
             let source_image = render::render_ios_icon(icon, 1024)?;
 
             let appiconset_dir = xcassets_dir.join(format!("{icon_name}.appiconset"));
@@ -258,7 +290,7 @@ impl IosBuilder {
                 serde_json::to_vec_pretty(&json!({ "info": { "author": "xcode", "version": 1 } }))?,
             )?;
 
-            ios::write_appiconset(&source_image, &appiconset_dir)
+            ios::write_appiconset(&source_image, &appiconset_dir, families)
         })?;
 
         Ok((xcassets_dir, icon_name.to_string()))
@@ -292,26 +324,20 @@ impl IosBuilder {
 
         self.sh.run(
             ShellCommand::new("xcrun")
-                .args([
-                    "actool",
-                    assets_str,
-                    "--compile",
-                    bundle_str,
-                    "--platform",
-                    platform,
-                    "--minimum-deployment-target",
-                    deployment,
-                    "--target-device",
-                    "iphone",
-                    "--app-icon",
-                    icon_name,
-                    "--bundle-identifier",
-                    &self.cfg.bundle_id,
-                    "--product-type",
-                    "com.apple.product-type.application",
-                    "--output-partial-info-plist",
-                    partial_plist_str,
-                ])
+                .args(["actool", assets_str])
+                .args(["--compile", bundle_str])
+                .args(["--platform", platform])
+                .args(["--minimum-deployment-target", deployment])
+                .args(
+                    ios_settings
+                        .device_family
+                        .iter()
+                        .flat_map(|f| ["--target-device", f.actool_name()]),
+                )
+                .args(["--app-icon", icon_name])
+                .args(["--bundle-identifier", &self.cfg.bundle_id])
+                .args(["--product-type", "com.apple.product-type.application"])
+                .args(["--output-partial-info-plist", partial_plist_str])
                 .args(extra_args.iter().copied()),
         )?;
 

@@ -344,6 +344,7 @@ fn print_config() {
         simulator         = "iPhone 16"  # default; override with --simulator
         device            = "My iPhone"  # name or UDID; auto-detected if unset
         deployment_target = "18.0"       # iOS deployment target
+        device_family     = ["iphone"]   # default; add "ipad" for a universal app
         assets_dir        = "Sources/App/Assets.xcassets"  # xcassets for actool; takes precedence over [build.icon]
         app_icon_name     = "AppIcon"    # icon set name inside assets_dir
 
@@ -1266,15 +1267,16 @@ fn print_ios_app() {
 
         ## Orientation / size classes
 
-        strudel builds iPhone-only by default: UIDeviceFamily defaults to [1] and
-        icons are compiled with --target-device iphone, so the generated appiconset
-        carries no iPad renditions. For a universal app, set UIDeviceFamily
-        yourself in info_json_path:
+        strudel builds iPhone-only by default. For a universal app, set:
         <magenta>
-        {{ "UIDeviceFamily": [1, 2] }}
+        [ios]
+        device_family = ["iphone", "ipad"]
         </>
-        and supply a hand-authored <magenta>ios.assets_dir</> with ipad idiom icons, since
-        [build.icon] won't generate them. Then check layout at iPad multitasking
+        This sets UIDeviceFamily to [1, 2], compiles assets for both devices, and
+        generates iPad icon renditions from [build.icon]. It also adds
+        UISupportedInterfaceOrientations~ipad with all four orientations, which
+        App Store validation requires. A UIDeviceFamily or orientation key in
+        info_json_path takes precedence. Then check layout at iPad multitasking
         widths, e.g:
         <blue>
         strudel run --sim "iPad Pro 13-inch (M4)"

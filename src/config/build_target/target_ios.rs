@@ -9,6 +9,32 @@ pub enum IosProvisioningBackend {
     AppStoreConnect,
 }
 
+/// A device family an iOS app supports.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum IosDeviceFamily {
+    Iphone,
+    Ipad,
+}
+
+impl IosDeviceFamily {
+    /// The `UIDeviceFamily` Info.plist value.
+    pub fn ui_device_family(self) -> u8 {
+        match self {
+            IosDeviceFamily::Iphone => 1,
+            IosDeviceFamily::Ipad => 2,
+        }
+    }
+
+    /// The `actool --target-device` value.
+    pub fn actool_name(self) -> &'static str {
+        match self {
+            IosDeviceFamily::Iphone => "iphone",
+            IosDeviceFamily::Ipad => "ipad",
+        }
+    }
+}
+
 /// IosSection `[ios]` optional settings for iOS simulator and device workflows.
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -22,6 +48,10 @@ pub struct IosSection {
 
     /// iOS deployment target (e.g. `"18.0"`). Default: `"18.0"`.
     pub deployment_target: Option<String>,
+
+    /// Device families the app supports: `"iphone"`, `"ipad"`, or both.
+    /// Default: `["iphone"]`.
+    pub device_family: Option<Vec<IosDeviceFamily>>,
 
     /// Path to a `.xcassets` directory to compile into the bundle with
     /// `xcrun actool`. Optional; skipped when unset.

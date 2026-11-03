@@ -17,7 +17,7 @@ use crate::config::resolved::{
     ValueSource,
 };
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
-use crate::config::{IosProvisioningBackend, ResolvedConfig};
+use crate::config::{IosDeviceFamily, IosProvisioningBackend, ResolvedConfig};
 
 /// The on-disk `strudel.toml`. Single-target configs use the flat form
 /// (`[app]`, `[build]`, `[dmg]`) and are always macOS; multiple or non-macOS
@@ -144,6 +144,20 @@ impl BuildConfig {
     }
 }
 
+/// Default to iPhone only. Reject an empty list, and sort and deduplicate the
+/// rest so the result doesn't depend on the order written in the config.
+fn resolve_device_family(family: Option<Vec<IosDeviceFamily>>) -> Result<Vec<IosDeviceFamily>> {
+    let Some(mut family) = family else {
+        return Ok(vec![IosDeviceFamily::Iphone]);
+    };
+    if family.is_empty() {
+        bail!("[ios] `device_family` must list at least one of \"iphone\" or \"ipad\"");
+    }
+    family.sort();
+    family.dedup();
+    Ok(family)
+}
+
 /// Target ids are derived as `{platform}/{app.name}`, so two `[[target]]`
 /// blocks sharing a platform must not share an app name. Such targets would be
 /// indistinguishable to `--target` and would resolve to the same default build
@@ -234,6 +248,10 @@ fn resolve_target(
                 .deployment_target
                 .or_else(|| shared_ios.and_then(|s| s.deployment_target.clone()))
                 .unwrap_or_else(|| "18.0".to_string()),
+            device_family: resolve_device_family(
+                ios.device_family
+                    .or_else(|| shared_ios.and_then(|s| s.device_family.clone())),
+            )?,
             assets_dir: ios
                 .assets_dir
                 .or_else(|| shared_ios.and_then(|s| s.assets_dir.clone()))
@@ -974,8 +992,40 @@ mod tests {
         assert_eq!(ios.simulator, "iPhone 16");
         assert_eq!(ios.deployment_target, "18.0");
         assert_eq!(ios.app_icon_name, "AppIcon");
+        assert_eq!(ios.device_family, vec![IosDeviceFamily::Iphone]);
         assert!(ios.device.is_none());
         assert!(ios.assets_dir.is_none());
+    }
+
+    #[test]
+    fn device_family_is_sorted_and_deduplicated() {
+        let family = resolve_device_family(Some(vec![
+            IosDeviceFamily::Ipad,
+            IosDeviceFamily::Iphone,
+            IosDeviceFamily::Ipad,
+        ]))
+        .unwrap();
+        assert_eq!(family, vec![IosDeviceFamily::Iphone, IosDeviceFamily::Ipad]);
+    }
+
+    #[test]
+    fn device_family_rejects_empty_list() {
+        assert!(resolve_device_family(Some(vec![])).is_err());
+    }
+
+    #[test]
+    fn device_family_rejects_unknown_name() {
+        let result = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "MyApp"
+            app.bundle_id = "com.example.myapp"
+            app.version = "1.0.0"
+            app.build_number = "1"
+            ios.device_family = ["iphone", "watch"]
+            ios.provisioning = "app_store_connect"
+        "#});
+        assert!(result.is_err());
     }
 
     #[test]

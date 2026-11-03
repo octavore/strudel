@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::config::build_config::BuildConfig;
-use crate::config::build_target::IosProvisioningBackend;
+use crate::config::build_target::{IosDeviceFamily, IosProvisioningBackend};
 use crate::config::{
     GlobalConfig, ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform,
     Sourced,
@@ -103,6 +103,7 @@ pub fn resolved_ios() -> ResolvedConfig {
             simulator: "iPhone 16".into(),
             device: None,
             deployment_target: "18.0".into(),
+            device_family: vec![IosDeviceFamily::Iphone],
             assets_dir: None,
             app_icon_name: "AppIcon".into(),
             provisioning: IosProvisioningBackend::AppStoreConnect,

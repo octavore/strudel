@@ -11,20 +11,50 @@ use image::imageops::FilterType;
 use image::{Rgba, RgbaImage};
 use serde_json::json;
 
-/// `(idiom, point size, scale)` for every iPhone app-icon rendition `actool`
-/// expects when compiling a synthesized `.appiconset` (matches
-/// `--target-device iphone`). The `ios-marketing` 1024x1024@1x rendition is
-/// handled separately.
-const IOS_ICON_SIZES: &[(&str, u32, u32)] = &[
-    ("iphone", 20, 2),
-    ("iphone", 20, 3),
-    ("iphone", 29, 2),
-    ("iphone", 29, 3),
-    ("iphone", 40, 2),
-    ("iphone", 40, 3),
-    ("iphone", 60, 2),
-    ("iphone", 60, 3),
+use crate::config::IosDeviceFamily;
+
+/// `(point size, scale)` for every app-icon rendition `actool` expects when
+/// compiling a synthesized `.appiconset` for the matching `--target-device`.
+/// Sizes are in tenths of a point, since iPad has an 83.5pt icon. The
+/// `ios-marketing` 1024x1024@1x rendition is handled separately.
+const IPHONE_ICON_SIZES: &[(u32, u32)] = &[
+    (200, 2),
+    (200, 3),
+    (290, 2),
+    (290, 3),
+    (400, 2),
+    (400, 3),
+    (600, 2),
+    (600, 3),
 ];
+
+const IPAD_ICON_SIZES: &[(u32, u32)] = &[
+    (200, 1),
+    (200, 2),
+    (290, 1),
+    (290, 2),
+    (400, 1),
+    (400, 2),
+    (760, 1),
+    (760, 2),
+    (835, 2),
+];
+
+fn icon_sizes(family: IosDeviceFamily) -> &'static [(u32, u32)] {
+    match family {
+        IosDeviceFamily::Iphone => IPHONE_ICON_SIZES,
+        IosDeviceFamily::Ipad => IPAD_ICON_SIZES,
+    }
+}
+
+/// Format a size in tenths of a point as `"60"` or `"83.5"`.
+fn point_size_label(tenths: u32) -> String {
+    if tenths.is_multiple_of(10) {
+        (tenths / 10).to_string()
+    } else {
+        format!("{}.{}", tenths / 10, tenths % 10)
+    }
+}
 
 /// Center `source` on a `canvas_size` square filled with `background`,
 /// scaled (preserving aspect ratio, "contain"-fit) to occupy `scale` of the
@@ -52,31 +82,42 @@ pub fn pad_to_square(
     canvas
 }
 
-/// Write a full classic `.appiconset` (every iPhone size/scale rendition
-/// plus the `ios-marketing` 1024x1024, each as its own PNG, plus
-/// `Contents.json`) derived from a single `source` image.
+/// Write a full classic `.appiconset` (every size/scale rendition for each
+/// of `families` plus the `ios-marketing` 1024x1024, each as its own PNG, plus
+/// `Contents.json`) derived from a single `source` image. Renditions shared
+/// by iPhone and iPad (same point size and scale) reuse one PNG.
 ///
 /// `actool` doesn't derive per-size renditions from a single "universal"
 /// idiom image the way Xcode's own icon-generation build phase does - it
 /// needs every idiom/scale spelled out with a correctly-sized image already
 /// on disk. This renders each one from `source` so `actool` can compile the
 /// result directly.
-pub fn write_appiconset(source: &RgbaImage, appiconset_dir: &Path) -> Result<()> {
+pub fn write_appiconset(
+    source: &RgbaImage,
+    appiconset_dir: &Path,
+    families: &[IosDeviceFamily],
+) -> Result<()> {
     fs::create_dir_all(appiconset_dir)?;
 
     let mut images = Vec::new();
-    for &(idiom, size, scale) in IOS_ICON_SIZES {
-        let px = size * scale;
-        let filename = format!("icon-{size}x{size}@{scale}x.png");
-        image::imageops::resize(source, px, px, FilterType::Lanczos3)
-            .save(appiconset_dir.join(&filename))
-            .with_context(|| format!("Failed to write icon rendition: {filename}"))?;
-        images.push(json!({
-            "filename": filename,
-            "idiom": idiom,
-            "scale": format!("{scale}x"),
-            "size": format!("{size}x{size}"),
-        }));
+    for &family in families {
+        for &(tenths, scale) in icon_sizes(family) {
+            let label = point_size_label(tenths);
+            let px = tenths * scale / 10;
+            let filename = format!("icon-{label}x{label}@{scale}x.png");
+            let path = appiconset_dir.join(&filename);
+            if !path.exists() {
+                image::imageops::resize(source, px, px, FilterType::Lanczos3)
+                    .save(&path)
+                    .with_context(|| format!("Failed to write icon rendition: {filename}"))?;
+            }
+            images.push(json!({
+                "filename": filename,
+                "idiom": family.actool_name(),
+                "scale": format!("{scale}x"),
+                "size": format!("{label}x{label}"),
+            }));
+        }
     }
 
     let marketing_filename = "icon-1024x1024@1x.png";

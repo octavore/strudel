@@ -13,7 +13,7 @@ pub(crate) mod fixtures;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-pub use build_target::{IosProvisioningBackend, Platform};
+pub use build_target::{IosDeviceFamily, IosProvisioningBackend, Platform};
 
 use crate::config::build_config::BuildConfig;
 pub use crate::config::build_config::{generate_initial_toml, generate_initial_toml_with_ios};
