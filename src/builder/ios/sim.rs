@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 use crate::builder::ios::IosTarget;
 use crate::builder::{IosBuilder, is_framework};
+use crate::config::IosDeviceFamily;
 use crate::shell::ShellCommand;
 
 #[derive(Deserialize)]
@@ -116,6 +117,13 @@ impl IosBuilder {
         let parsed: SimctlDevicesOutput = serde_json::from_str(&output)
             .context("Failed to parse `xcrun simctl list devices` output")?;
 
+        let supported = |sim_name: &str| {
+            self.ios.device_family.iter().any(|f| match f {
+                IosDeviceFamily::Iphone => sim_name.starts_with("iPhone"),
+                IosDeviceFamily::Ipad => sim_name.starts_with("iPad"),
+            })
+        };
+
         let mut exact: Option<String> = None;
         let mut fallback: Option<(String, String)> = None;
 
@@ -124,13 +132,13 @@ impl IosBuilder {
                 continue;
             }
             for d in devices {
-                if !d.is_available {
+                if !d.is_available || !supported(&d.name) {
                     continue;
                 }
                 if d.name == name {
                     exact = Some(d.udid.clone());
                 }
-                if fallback.is_none() && d.name.starts_with("iPhone") {
+                if fallback.is_none() {
                     fallback = Some((d.udid.clone(), d.name.clone()));
                 }
             }
@@ -141,12 +149,13 @@ impl IosBuilder {
         }
         if let Some((udid, found_name)) = fallback {
             cprintln!(
-                "<yellow>warning:</yellow> Simulator \"{name}\" not found; using \"{found_name}\" instead."
+                "<yellow>warning:</yellow> No available simulator \"{name}\" for this app's \
+                 device families; using \"{found_name}\" instead."
             );
             return Ok(udid);
         }
         bail!(
-            "No iOS simulators are available.\n\
+            "No available iOS simulators match the app's device families.\n\
              Install an iOS runtime with: xcodebuild -downloadPlatform iOS\n\
              List available simulators with: xcrun simctl list devices available"
         );
