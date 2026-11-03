@@ -69,3 +69,21 @@ pub struct IosSection {
     /// Apple ID email for `provisioning = "free"`. Pre-fills the login prompt.
     pub apple_id: Option<String>,
 }
+
+impl IosSection {
+    /// Fills in fields left unset here from the shared `[ios]` defaults.
+    /// Per-target fields take precedence.
+    pub fn merge(self, shared: Option<&IosSection>) -> IosSection {
+        let shared = shared.cloned().unwrap_or_default();
+        IosSection {
+            simulator: self.simulator.or(shared.simulator),
+            device: self.device.or(shared.device),
+            deployment_target: self.deployment_target.or(shared.deployment_target),
+            device_family: self.device_family.or(shared.device_family),
+            assets_dir: self.assets_dir.or(shared.assets_dir),
+            app_icon_name: self.app_icon_name.or(shared.app_icon_name),
+            provisioning: self.provisioning.or(shared.provisioning),
+            apple_id: self.apple_id.or(shared.apple_id),
+        }
+    }
+}

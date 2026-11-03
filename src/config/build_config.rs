@@ -236,39 +236,20 @@ fn resolve_target(
             assets_dir: assets_dir.map(|p| resolve_to(config_dir, p)),
         }
         .into(),
-        TargetPlatform::Ios { ios } => ResolvedIosSection {
-            simulator: ios
-                .simulator
-                .or_else(|| shared_ios.and_then(|s| s.simulator.clone()))
-                .unwrap_or_else(|| "iPhone 16".to_string()),
-            device: ios
-                .device
-                .or_else(|| shared_ios.and_then(|s| s.device.clone())),
-            deployment_target: ios
-                .deployment_target
-                .or_else(|| shared_ios.and_then(|s| s.deployment_target.clone()))
-                .unwrap_or_else(|| "18.0".to_string()),
-            device_family: resolve_device_family(
-                ios.device_family
-                    .or_else(|| shared_ios.and_then(|s| s.device_family.clone())),
-            )?,
-            assets_dir: ios
-                .assets_dir
-                .or_else(|| shared_ios.and_then(|s| s.assets_dir.clone()))
-                .map(|p| resolve_to(config_dir, p)),
-            app_icon_name: ios
-                .app_icon_name
-                .or_else(|| shared_ios.and_then(|s| s.app_icon_name.clone()))
-                .unwrap_or_else(|| "AppIcon".to_string()),
-            provisioning: ios
-                .provisioning
-                .or_else(|| shared_ios.and_then(|s| s.provisioning.clone()))
-                .ok_or_else(|| {
+        TargetPlatform::Ios { ios } => {
+            let ios = ios.merge(shared_ios);
+            ResolvedIosSection {
+                simulator: ios.simulator.unwrap_or_else(|| "iPhone 16".to_string()),
+                device: ios.device,
+                deployment_target: ios.deployment_target.unwrap_or_else(|| "18.0".to_string()),
+                device_family: resolve_device_family(ios.device_family)?,
+                assets_dir: ios.assets_dir.map(|p| resolve_to(config_dir, p)),
+                app_icon_name: ios.app_icon_name.unwrap_or_else(|| "AppIcon".to_string()),
+                provisioning: ios.provisioning.ok_or_else(|| {
                     anyhow!("[ios] `provisioning` must be \"free\" or \"app_store_connect\"")
                 })?,
-            apple_id: ios
-                .apple_id
-                .or_else(|| shared_ios.and_then(|s| s.apple_id.clone())),
+                apple_id: ios.apple_id,
+            }
         }
         .into(),
     };
