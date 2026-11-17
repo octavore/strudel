@@ -35,14 +35,18 @@ pub struct DmgSpec {
     pub applications_x: u32,
     pub applications_y: u32,
     pub icon_text_size: f64,
+    /// Print each `hdiutil` command, dimmed, before it runs.
+    pub echo: bool,
 }
 
 /// Create a compressed, styled DMG at `output`.
 ///
 /// We pre-generate the `.DS_Store` that carries the Finder window layout, to
-/// avoid having to mount a read-write image and drive Finder/AppleScript.
-/// Instead the volume is built from a staging folder in a single
-/// `hdiutil create -srcfolder` call.
+/// avoid driving Finder/AppleScript. The image is built from a staging folder
+/// with `hdiutil makehybrid` and then compressed with `hdiutil convert`.
+///
+/// `makehybrid` does not mount the volume. `hdiutil create -srcfolder` mounts
+/// at `/Volumes/<vol_name>`, where macOS can deny access to the app bundle.
 pub fn create(spec: &DmgSpec, output: &Path) -> Result<()> {
     let tmp = tempfile::tempdir().context("creating temp dir for DMG build")?;
     let staging = tmp.path().join("staging");
@@ -50,41 +54,60 @@ pub fn create(spec: &DmgSpec, output: &Path) -> Result<()> {
 
     populate(spec, &staging).context("staging DMG contents")?;
 
-    // `-srcfolder` builds (and auto-sizes) the HFS+ volume directly from the
-    // staging directory, then `-format UDZO` compresses it. `-ov` overwrites any
-    // stale image at `output`.
     if output.exists() {
         fs::remove_file(output).context("removing stale output DMG")?;
     }
-    run(&[
-        "hdiutil",
-        "create",
-        "-volname",
-        &spec.vol_name,
-        "-srcfolder",
-        staging.to_str().unwrap(),
-        "-ov",
-        "-format",
-        "UDZO",
-        output.to_str().unwrap(),
-    ])
-    .context("hdiutil create")?;
+
+    let hybrid_dmg = tmp.path().join("hybrid.dmg");
+    run(
+        spec.echo,
+        &[
+            "hdiutil",
+            "makehybrid",
+            "-hfs",
+            "-hfs-volume-name",
+            &spec.vol_name,
+            "-ov",
+            "-o",
+            hybrid_dmg.to_str().unwrap(),
+            staging.to_str().unwrap(),
+        ],
+    )
+    .context("building image")?;
+
+    run(
+        spec.echo,
+        &[
+            "hdiutil",
+            "convert",
+            hybrid_dmg.to_str().unwrap(),
+            "-format",
+            "UDZO",
+            "-ov",
+            "-o",
+            output.to_str().unwrap(),
+        ],
+    )
+    .context("converting image to UDZO")?;
 
     Ok(())
 }
 
 /// Lay out the DMG contents in `staging`: the `.app`, the `Applications`
 /// symlink, an optional background image, and the `.DS_Store` that styles the
-/// window. `hdiutil create -srcfolder` later turns this into the volume.
+/// window. `hdiutil makehybrid` later turns this into the volume.
 fn populate(spec: &DmgSpec, staging: &Path) -> Result<()> {
     // Copy .app bundle
     let dest_app = staging.join(format!("{}.app", spec.app_name));
-    run(&[
-        "cp",
-        "-rp",
-        spec.source_app.to_str().unwrap(),
-        dest_app.to_str().unwrap(),
-    ])
+    run(
+        false,
+        &[
+            "cp",
+            "-rp",
+            spec.source_app.to_str().unwrap(),
+            dest_app.to_str().unwrap(),
+        ],
+    )
     .context("copying .app into staging")?;
 
     // Applications symlink
@@ -133,15 +156,35 @@ fn populate(spec: &DmgSpec, staging: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run(args: &[&str]) -> Result<()> {
+fn run(echo: bool, args: &[&str]) -> Result<()> {
     let (prog, rest) = args.split_first().context("empty command")?;
-    let status = Command::new(prog)
+    if echo {
+        let line: Vec<String> = args
+            .iter()
+            .map(|a| {
+                if a.contains(' ') {
+                    format!("\"{a}\"")
+                } else {
+                    a.to_string()
+                }
+            })
+            .collect();
+        println!("\x1b[2m{}\x1b[0m", line.join(" "));
+    }
+    let output = Command::new(prog)
         .args(rest)
         .stdin(Stdio::null())
-        .status()
+        .output()
         .with_context(|| format!("spawning {prog}"))?;
-    if !status.success() {
-        bail!("{prog} failed with exit code {:?}", status.code());
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        bail!(
+            "{prog} failed with exit code {:?}\n{}{}",
+            output.status.code(),
+            stdout,
+            stderr,
+        );
     }
     Ok(())
 }

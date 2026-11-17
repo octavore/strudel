@@ -133,6 +133,7 @@ impl MacosBuilder {
                     applications_x: dmg_cfg.applications_x,
                     applications_y: dmg_cfg.applications_y,
                     icon_text_size: dmg_cfg.icon_text_size,
+                    echo: !self.echo_suppressed(),
                 },
                 temp_dmg,
             )?;
