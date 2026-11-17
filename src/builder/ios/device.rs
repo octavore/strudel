@@ -283,9 +283,22 @@ fn retry_while_locked<T>(udid: &str, mut op: impl FnMut() -> Result<T>) -> Resul
                 );
                 io::stdin().read_line(&mut String::new())?;
             },
+            Err(err) if is_developer_mode_error(&err) => {
+                return Err(err.context(format!(
+                    "Developer Mode is disabled on device {udid}.\n\
+                     Enable it in Settings > Privacy & Security > Developer Mode, \
+                     then restart the device and confirm the prompt after unlocking."
+                )));
+            },
             Err(err) => return Err(err),
         }
     }
+}
+
+/// Whether a `devicectl` failure was caused by Developer Mode being disabled
+/// on the device (CoreDeviceError 10005).
+fn is_developer_mode_error(err: &anyhow::Error) -> bool {
+    err.to_string().contains("Developer Mode is disabled")
 }
 
 /// Whether a `devicectl` install failure was caused by the device being
