@@ -10,7 +10,7 @@ brew install octavore/tools/strudel
 strudel init          # scaffold a strudel.toml
 strudel build         # a signed .app bundle
 strudel release       # a signed, notarized DMG
-strudel skill install # configure a strudel skill for Claude Code, etc.
+strudel skill install # point your AI coding agent (Claude Code, etc.) at strudel's docs
 strudel skill preview # preview the skill doc
 ```
 
@@ -21,10 +21,15 @@ strudel skill preview # preview the skill doc
 
 ## Contents
 
-- [Getting started](#getting-started)
-  - [Installation](#installation)
+- [Quickstart](#quickstart)
   - [Requirements](#requirements)
-  - [Your first build](#your-first-build)
+  - [Install strudel](#install-strudel)
+  - [Install the agent skill](#install-the-agent-skill)
+  - [Start a new macOS app](#start-a-new-macos-app)
+  - [Add strudel to an existing Swift package](#add-strudel-to-an-existing-swift-package)
+  - [Configure signing credentials once](#configure-signing-credentials-once)
+  - [Ship a release](#ship-a-release)
+  - [Run on iOS](#run-on-ios)
 - [Commands](#commands)
 - [Configuration](#configuration)
 - [Guides](#guides)
@@ -35,59 +40,130 @@ strudel skill preview # preview the skill doc
   - [Safari Web Extensions](#safari-web-extensions)
   - [App Extensions](#app-extensions)
   - [XPC Services](#xpc-services)
+  - [System Extensions](#system-extensions)
   - [Tips](#tips)
 - [Examples](#examples)
 - [Development](#development)
+  - [TODO](#todo)
 - [Acknowledgements](#acknowledgements)
 - [License](#license)
 
-## Getting started
-
-### Installation
-
-Install strudel with homebrew:
-
-```sh
-brew install octavore/tools/strudel
-```
-
-Or install with cargo:
-
-```sh
-cargo install strudel-cli
-```
+## Quickstart
 
 ### Requirements
 
 - macOS with the Xcode command line tools installed
 - Swift `Package.swift` based project
-- For signing/notarization: an Apple Developer account with a "Developer ID Application" certificate
+- For distributable builds (`strudel release`): a paid Apple Developer membership with a "Developer ID Application" certificate and an App Store Connect API key. Local builds sign ad-hoc and need neither.
 
-### Your first build
+### Install strudel
+
+Install with homebrew:
 
 ```sh
-# create strudel.toml and a basic Package.swift file
-strudel init
-
-# ...edit strudel.toml, info.json, entitlements.json...
-
-# create an ad-hoc codesigned app bundle
-strudel build # --dry-run
-
-# or create a real codesigned app bundle
-export APPLE_SIGNING_IDENTITY=...
-strudel build
-
-# or skip codesigning entirely
-strudel build --unsigned
-
-# produce a signed, notarized DMG
-export APPLE_API_KEY_PATH=...
-export APPLE_API_KEY=...
-strudel release # --dry-run
+brew install octavore/tools/strudel
 ```
 
-Note that the env vars above can also be stored in the `strudel.toml` config file.
+Or install from crates.io:
+
+```sh
+cargo install strudel-cli
+```
+
+The workflows below are independent of each other. Run `strudel status` at any point to check your toolchain, config, and credentials.
+
+### Install the agent skill
+
+If you use Claude Code or another coding agent, install the `strudel` skill so the agent knows to consult `strudel help`:
+
+```sh
+strudel skill install strudel             # ~/.claude/skills/strudel/
+strudel skill install strudel --agents    # ~/.agents/skills/strudel/ instead
+strudel skill install strudel --project   # .claude/skills/strudel/ in this repo only
+```
+
+The skill's command and topic lists come from the installed binary, so re-run with `--force` after upgrading strudel. See [`skill`](#skill-experimental) for the `release-action` skill and other options.
+
+### Start a new macOS app
+
+```sh
+mkdir MyApp && cd MyApp
+strudel init    # prompts for name, bundle ID, version, and platforms
+```
+
+`init` writes `strudel.toml`, a `Package.swift` with one executable target at `Sources/<AppName>`, and a `.gitignore`. It does not create the Swift sources, so add an entry point before building:
+
+```swift
+// Sources/MyApp/MyApp.swift
+import SwiftUI
+
+@main
+struct MyApp: App {
+    var body: some Scene {
+        WindowGroup { Text("Hello, world") }
+    }
+}
+```
+
+Then build and launch it:
+
+```sh
+strudel run      # build, sign ad-hoc, and open the app
+```
+
+### Add strudel to an existing Swift package
+
+Run `strudel init` in the package root. It leaves an existing `Package.swift` and `.gitignore` untouched. If your executable target's name differs from the app name, set it in `strudel.toml`:
+
+```toml
+[build]
+target_name = "MyAppTarget"
+```
+
+Add `info_json_path`, `entitlements_json_path`, `[build.icon]`, or resources as needed; see [Configuration](#configuration). `strudel icon` previews the icon without a full build.
+
+### Configure signing credentials once
+
+Store your Apple identifiers in the global config so every project can use them and no `strudel.toml` has to contain machine-specific paths:
+
+```sh
+security find-identity -p codesigning    # find your "Developer ID Application" identity
+strudel config global edit               # opens ~/.config/strudel/config.toml
+```
+
+```toml
+[apple]
+identity     = "Developer ID Application: Your Name (XXXXXXXXXX)"
+team_id      = "XXXXXXXXXX"
+api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"   # team accounts only
+api_key      = "2X9R4HXF34"
+api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
+```
+
+Values resolve in the order env var > `strudel.toml` > global config. See [Signing & notarization](#signing--notarization) for how to create the certificate and API key.
+
+### Ship a release
+
+```sh
+strudel config increment-version patch   # 1.2.3 -> 1.2.4
+strudel release --dry-run                # print the pipeline without running it
+strudel release                          # build, sign, notarize, and package a DMG
+strudel release --resume                 # if notarization was interrupted
+```
+
+The DMG is written to `.build/dist/<AppName>-<version>.dmg`. To run this in GitHub Actions on every tag push, run `strudel skill install release-action` and ask your agent to set up the workflow, or see [Signing in CI](#signing-in-ci).
+
+### Run on iOS
+
+```sh
+strudel init                  # choose "iOS" or "both", then a provisioning backend
+strudel run --sim             # build and launch in the Simulator
+strudel login                 # free Apple ID provisioning only
+strudel devices add           # register a connected device
+strudel run --device          # build, install, and launch on the device
+```
+
+iOS support is experimental. See [iOS device builds](#ios-device-builds).
 
 ## Commands
 
@@ -118,7 +194,7 @@ Options:
 **Selecting a target.** `build`, `run`, and `release` take an optional target name as a positional argument (`strudel build MyApp`) to select one target in a multi-target config; other commands (`devices`, `profile`, `status`, `clean`) take `--target <name>` instead. See
 [Multiple targets](#multiple-targets).
 
-**Extended help.** `strudel help <topic>` has documentation for many subjects beyond the subcommands below, including `config`, `targets`, `signing`, `notarize`, `entitlements`, `extensions`, `ios-device`, `ios-free-provisioning`, and more. Run `strudel help` with no argument to list every topic.
+**Extended help.** `strudel help <topic>` documents configuration and workflows in more depth than this README, for example `strudel help config` or `strudel help signing`. Run `strudel help` with no argument to list every topic.
 
 ### `init`
 
@@ -225,7 +301,7 @@ strudel icon --out ./tmp       # write elsewhere
 
 Files are named `<target-id>-icon.<ext>`, e.g. `macos-MyApp-icon.png`.
 
-### `skill install` (experimental)
+### `skill` (experimental)
 
 Writes a supporting skill for coding agents. There are currently two skills:
 
@@ -235,8 +311,8 @@ Writes a supporting skill for coding agents. There are currently two skills:
 ```sh
 strudel skill install                    # prompt for which skill(s) to install
 strudel skill install release-action     # install one directly, no prompt
-strudel skill install --preview          # print the SKILL.md instead of writing it
 strudel skill install --force            # overwrite files that already exist
+strudel skill preview                    # print the SKILL.md instead of writing it
 ```
 
 By default, files are installed user-globally under `~/.claude/skills/<name>/`, since these are tools/docs for whatever you're working on, not just this one project.
@@ -259,16 +335,17 @@ A config file comes in one of two kinds:
 
 The sections below describe a single target. In a multi-target config they nest inside each `[[target]]` block, except `[apple]`, which is shared and stays top-level.
 
-| Section                                         | Required | Purpose                                                           |
-| ----------------------------------------------- | -------- | ----------------------------------------------------------------- |
-| [`[app]`](#app-required)                        | yes      | Name, bundle ID, version                                          |
-| [`[build]`](#build-optional)                    | no       | Sources, output dir, icon, resources, architectures               |
-| [`[build.build_env]`](#buildbuild_env-optional) | no       | Extra env vars for `swift build`                                  |
-| [`[ios]`](#ios-optional-experimental)           | no       | Simulator, device, and provisioning settings for iOS              |
-| [`[[extensions]]`](#extensions-optional)        | no       | Embedded `.appex` bundles                                         |
-| [`assets_dir`](#assets_dir-optional-macos)      | no       | `.xcassets` catalog compiled into `Contents/Resources/Assets.car` |
-| [`[dmg]`](#dmg-optional)                        | no       | Finder window layout of the release DMG                           |
-| [`[apple]`](#apple-optional)                    | no       | Signing, notarization, and provisioning identifiers               |
+| Section                                         | Required | Purpose                                                              |
+| ----------------------------------------------- | -------- | -------------------------------------------------------------------- |
+| [`[app]`](#app-required)                        | yes      | Name, bundle ID, version                                             |
+| [`[build]`](#build-optional)                    | no       | Sources, output dir, icon, resources, architectures                  |
+| [`[build.build_env]`](#buildbuild_env-optional) | no       | Extra env vars for `swift build`                                     |
+| [`[[build.copy]]`](#buildcopy-optional)         | no       | Files copied to arbitrary locations in the bundle, optionally signed |
+| [`[ios]`](#ios-optional-experimental)           | no       | Simulator, device, and provisioning settings for iOS                 |
+| [`[[extensions]]`](#extensions-optional)        | no       | Embedded `.appex`, `.systemextension`, and `.xpc` bundles            |
+| [`assets_dir`](#assets_dir-optional-macos)      | no       | `.xcassets` catalog compiled into `Contents/Resources/Assets.car`    |
+| [`[dmg]`](#dmg-optional)                        | no       | Finder window layout of the release DMG                              |
+| [`[apple]`](#apple-optional)                    | no       | Signing, notarization, and provisioning identifiers                  |
 
 ### `[app]` (required)
 
@@ -277,7 +354,7 @@ The sections below describe a single target. In a multi-target config they nest 
 | `name`         | string | Display name; also the `.app` bundle and binary name |
 | `bundle_id`    | string | Bundle identifier, e.g. `com.example.myapp`          |
 | `version`      | string | Marketing version (`CFBundleShortVersionString`)     |
-| `build_number` | string | Build number (`CFBundleVersion`)                     |
+| `build_number` | string | Build number (`CFBundleVersion`); optional, defaults to `"1"` |
 
 The relationship between version and build_number is that a version ([`CFBundleShortVersionString`](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleshortversionstring)) is user-facing, and it may have multiple unique internal tracking build numbers ([`CFBundleVersion`](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion)).
 
@@ -338,6 +415,26 @@ Extra environment variables forwarded to `swift build` (e.g. for `pkg-config`). 
 PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
 ```
 
+### `[[build.copy]]` (optional)
+
+Copies a file or directory, under its own file name, to a chosen directory inside the bundle. Use it for helper binaries, command-line tools, or nested bundles that belong outside `Contents/Frameworks` (`embed_libs`) and `Contents/Resources` (`resources`/`resources_dir`). Repeat the block for multiple entries.
+
+| Key                      | Type   | Default      | Description                                                                 |
+| ------------------------ | ------ | ------------ | --------------------------------------------------------------------------- |
+| `src`                    | string | *(required)* | Source file or directory, relative to the config file                       |
+| `dest_dir`               | string | *(required)* | Destination directory relative to the bundle root; created if missing       |
+| `sign`                   | bool   | `false`      | Codesign the copied item before the outer bundle is sealed                  |
+| `entitlements_json_path` | string | *(none)*     | Entitlements for the copied item; ignored unless `sign = true`              |
+
+```toml
+[[build.copy]]
+src      = "path/to/helper"   # copied to Contents/MacOS/helper
+dest_dir = "Contents/MacOS"
+sign     = true
+```
+
+Set `sign = true` for any Mach-O executable or nested bundle, since nested code needs its own signature for `codesign --verify --deep --strict` and notarization to pass. Directories are signed with `--deep`; plain files are signed directly. Run `strudel help copy` for more.
+
 ### `[ios]` (optional, experimental)
 
 For iOS apps, this contains settings for `strudel run --sim` and `strudel run --device`. iOS support is experimental. All fields are optional except `provisioning`, which is required for device builds.
@@ -360,20 +457,21 @@ For iOS apps, this contains settings for `strudel run --sim` and `strudel run --
 
 ### `[[extensions]]` (optional)
 
-An array of zero or more app extensions embedded under `<app>.app/Contents/PlugIns/`. Each entry produces a separate nested bundle, signed with its own entitlements, and sealed inside the notarized host app. Supported kinds:
+An array of zero or more extensions embedded in the host app. Each entry produces a separate nested bundle, signed with its own entitlements, and sealed inside the notarized host app. Supported kinds:
 
-- `"safari_web_extension"` for a Safari Web Extension; see [Safari Web Extensions](#safari-web-extensions)
-- `"app_extension"` for generic macOS app extensions (Share, Finder Sync, Notification Service, Quick Look, etc.); see [App Extensions](#app-extensions).
-- `"xpc_service"` for an XPC service embedded under `<app>.app/Contents/XPCServices/` as a `.xpc` bundle; see [XPC Services](#xpc-services).
+- `"safari_web_extension"` for a Safari Web Extension, embedded as an `.appex` under `Contents/PlugIns/`; see [Safari Web Extensions](#safari-web-extensions)
+- `"app_extension"` for generic macOS app extensions (Share, Finder Sync, Notification Service, Quick Look, etc.), embedded as an `.appex` under `Contents/PlugIns/`; see [App Extensions](#app-extensions)
+- `"xpc_service"` for an XPC service, embedded as a `.xpc` bundle under `Contents/XPCServices/`; see [XPC Services](#xpc-services)
+- `"system_extension"` for a Network Extension or Endpoint Security system extension, embedded as a `.systemextension` under `Contents/Library/SystemExtensions/`; see [System Extensions](#system-extensions)
 
 **Common fields** (all kinds):
 
 | Key                      | Type   | Default                | Description                                                                                                  |
 | ------------------------ | ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `kind`                   | string | *(required)*           | `"safari_web_extension"`, `"app_extension"`, or `"xpc_service"`                                              |
+| `kind`                   | string | *(required)*           | `"safari_web_extension"`, `"app_extension"`, `"xpc_service"`, or `"system_extension"`                        |
 | `target_name`            | string | *(required)*           | Swift `executableTarget` in `Package.swift`                                                                  |
 | `bundle_id`              | string | *(required)*           | `CFBundleIdentifier`; typically `<host-id>.Extension`                                                        |
-| `name`                   | string | value of `target_name` | Display name (`CFBundleName` / `CFBundleDisplayName`) and `.appex` directory name                            |
+| `name`                   | string | value of `target_name` | Display name (`CFBundleName` / `CFBundleDisplayName`) and bundle directory name                              |
 | `entitlements_json_path` | string | *(required)*           | JSON entitlements; each extension is signed with its own, separate from the host. Optional for `xpc_service` |
 | `info_json_path`         | string | *(none)*               | Extra `Info.plist` keys merged with strudel's auto-injected ones                                             |
 | `provisioning_profile`   | string | *(none)*               | Profile for this extension's bundle ID; a path or `"auto"` (macOS), like `[build]`                           |
@@ -393,6 +491,13 @@ An array of zero or more app extensions embedded under `<app>.app/Contents/PlugI
 | ---------------------------- | ------ | ------------ | ------------------------------------------------------------------------------------------------ |
 | `extension_point_identifier` | string | *(required)* | `NSExtensionPointIdentifier`, identifies the extension point (e.g. `"com.apple.share-services"`) |
 | `principal_class`            | string | *(none)*     | `NSExtensionPrincipalClass`, required by some extension points                                   |
+
+**`system_extension`-specific fields:**
+
+| Key                     | Type   | Default      | Description                                                        |
+| ----------------------- | ------ | ------------ | ------------------------------------------------------------------ |
+| `system_extension_type` | string | *(required)* | `"network_extension"` or `"endpoint_security"`                     |
+| `principal_class`       | string | *(none)*     | `NSExtensionPrincipalClass`; rarely needed                         |
 
 ### `assets_dir` (optional, macOS)
 
@@ -607,7 +712,7 @@ Every value below is configurable as a `[apple]` key in `strudel.toml`, as an en
 
 #### Signing
 
-In development, you typically codesign with a Developer ID certificate. This is free with Xcode but you can also create one on developer.apple.com if you have a paid Developer membership.
+Distributable macOS builds are signed with a "Developer ID Application" certificate. Creating one requires a paid Apple Developer membership; you can create it on developer.apple.com or in Xcode under Settings -> Accounts -> Manage Certificates. Local builds without an identity are signed ad-hoc and need no certificate.
 
 After downloading and installing the certificate into the keychain on your machine, you can verify its presence with `security find-identity -p codesigning`.
 
@@ -662,7 +767,7 @@ In CI the system keychain is not available, so set the `APPLE_CERTIFICATE` and `
 8. base64-encode, e.g. `base64 -i certificate.p12 | pbcopy` copies the base64 file to the clipboard.
 9. Set both as secrets in your CI environment.
 
-`strudel skill install release-action` scaffolds a GitHub Actions workflow that wires these up; see [`skill install`](#skill-install-experimental).
+`strudel skill install release-action` scaffolds a GitHub Actions workflow that wires these up; see [`skill`](#skill-experimental).
 
 #### Notarization auth
 
@@ -688,7 +793,7 @@ The host app and each extension are separate executable targets in the same `Pac
 ```swift
 let package = Package(
     name: "MyApp",
-    platforms: [.macOS(.v12)],
+    platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(name: "MyApp",          path: "Sources/App"),
         .executableTarget(name: "MyAppExtension", path: "Sources/Extension"),
@@ -822,7 +927,7 @@ Safari aggressively caches extension resources. Toggle the extension off/on, or 
 
 Any change to `permissions` in `manifest.json` re-prompts the user on next enable.
 
-**`Undefined symbols: "_main"` at link time**
+##### `Undefined symbols: "_main"` at link time
 
 You're missing the `NSExtensionMain` shim from step 1; the extension target needs a top-level `main.swift` calling it.
 
@@ -932,10 +1037,69 @@ To set other `XPCService` keys (`RunLoopType`, `JoinExistingSession`, or a diffe
 
 `entitlements_json_path` is optional for XPC services. If the host app is sandboxed, give the service `com.apple.security.app-sandbox` as well.
 
+### System Extensions
+
+strudel can build a macOS System Extension (`kind = "system_extension"`) for a Network Extension or an Endpoint Security client. The bundle is embedded under `<app>.app/Contents/Library/SystemExtensions/` with `CFBundlePackageType = "SYSX"`. A system extension runs as its own OS-managed process, and the host app must activate it at runtime with `OSSystemExtensionRequest` from `SystemExtensions.framework`. strudel assembles and signs the bundle but does not activate it. DriverKit drivers (`.dext`) are not supported.
+
+The Swift target setup is the same as for [App Extensions](#app-extensions): a separate `executableTarget` with the `NSExtensionMain` shim.
+
+#### Config
+
+```toml
+[build]
+entitlements_json_path = "entitlements.json"   # needs com.apple.developer.system-extension.install
+info_json_path         = "info.json"           # needs NSSystemExtensionUsageDescription
+provisioning_profile   = "auto"
+
+[[extensions]]
+kind                   = "system_extension"
+target_name            = "MyNetworkExtension"
+bundle_id              = "com.example.myapp.NetworkExtension"
+system_extension_type  = "network_extension"   # or "endpoint_security"
+entitlements_json_path = "netext/entitlements.json"
+info_json_path         = "netext/info.json"
+provisioning_profile   = "auto"
+```
+
+| `system_extension_type` | `NSExtensionPointIdentifier`                     |
+| ----------------------- | ------------------------------------------------ |
+| `network_extension`     | `com.apple.system_extension.network_extension`   |
+| `endpoint_security`     | `com.apple.system_extension.endpoint_security`   |
+
+#### Entitlements
+
+- The host app needs `com.apple.developer.system-extension.install`.
+- A Network Extension needs `com.apple.developer.networking.networkextension`; an Endpoint Security client needs `com.apple.developer.endpoint-security.client`.
+
+These are checked against an embedded provisioning profile, so set `provisioning_profile` on both the host and the extension; see [macOS provisioning profiles](#macos-provisioning-profiles). A Developer ID profile grants the `-systemextension` form of Network Extension provider values (e.g. `"app-proxy-provider-systemextension"`), not the plain form. If launch fails with `AppleMobileFileIntegrityError -413 "No matching profile found"`, decode the profile with `security cms -D -i .strudel/<bundle_id>.provisionprofile` and use exactly the values it lists.
+
+#### Network Extension `Info.plist` keys
+
+strudel does not inject the following keys, and activation fails at runtime without them, even though signing, notarization, and provisioning succeed. Supply them through `info_json_path`:
+
+- `NSSystemExtensionUsageDescription` (string) in both the host app's and the extension's `Info.plist`.
+- `NetworkExtension` (dict) in the extension's `Info.plist`, mapping provider-point identifiers to your provider class.
+
+```json
+{
+  "NSSystemExtensionUsageDescription": "MyApp needs to install a system extension to ...",
+  "NetworkExtension": {
+    "NEMachServiceName": "<TEAM_ID>.com.example.myapp.NetworkExtension",
+    "NEProviderClasses": {
+      "com.apple.networkextension.app-proxy": "MyNetworkExtension.MyProvider"
+    }
+  }
+}
+```
+
+Without `NEMachServiceName`, the extension installs and appears enabled, but the tunnel or proxy never starts. Other provider-point identifiers are `com.apple.networkextension.packet-tunnel`, `com.apple.networkextension.filter-data`, and `com.apple.networkextension.dns-proxy`.
+
+Run `strudel help extensions` for more.
+
 ### Tips
 
 - Use `swift-format` for formatting Swift code
-- `// swift-tools-version: 6.0` in `Package.swift` to use `.v15`
+- Set `// swift-tools-version: 6.0` in `Package.swift` to use `.macOS(.v15)` in `platforms`
 
 ## Examples
 
@@ -968,6 +1132,10 @@ cargo build --release
 # compile and install the release build into ~/.cargo/bin
 cargo install --path .
 ```
+
+### TODO
+
+- Create Apple Development certificates from `strudel` for paid accounts. Generate the key and CSR with `openssl`, submit the CSR through the App Store Connect API, and import the certificate into the login keychain.
 
 ## Acknowledgements
 

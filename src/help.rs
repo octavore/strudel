@@ -738,6 +738,58 @@ fn print_extensions() {
         Entitlements are optional. If the host app is sandboxed, the XPC service should
         set `com.apple.security.app-sandbox` too.
 
+        Network Extension provider values (packet-tunnel-provider, app-proxy-provider,
+        content-filter-provider, dns-proxy) come in two forms. The plain form is
+        `"app-proxy-provider"`. The suffixed form is `"app-proxy-provider-systemextension"`.
+        Per Apple's docs, a Developer ID provisioning profile grants the suffixed form.
+        strudel creates Developer ID profiles for macOS. See <blue>strudel help entitlements</>.
+        Use the plain form only if your provisioning path grants it.
+
+        To check, decode the cached profile at `.strudel/<<bundle_id>>.provisionprofile`
+        with `security cms -D -i`. Match the values it lists under
+        `com.apple.developer.networking.networkextension`. The OS rejects any other value
+        at launch with `AppleMobileFileIntegrityError -413 "No matching profile found"`.
+
+        ## Network Extension Info.plist keys
+
+        strudel does not inject two Info.plist keys that `sysextd` validates for
+        `network_extension` system extensions. Supply both through `info_json_path` on the
+        host and on the extension entry. Activation fails at runtime without them.
+        Signing, notarization, and provisioning succeed regardless.
+
+        1. `NSSystemExtensionUsageDescription` (string) is required on *both* the host
+           app's Info.plist and the extension's own. If it is missing, activation fails
+           with: "extension failed category property check: ... require the presence of
+           the 'NSSystemExtensionUsageDescription' property."
+
+        2. `NetworkExtension` (dict) is required on the extension's own Info.plist. It maps
+           the NE provider-point identifier to your provider class. It is separate from
+           the auto-injected `NSExtension` dict. If it is missing or empty, activation
+           fails with: "has an invalid NetworkExtension key in its Info.plist: The value
+           of the NetworkExtension key must be a non-empty dictionary."
+        <magenta>
+        {{
+            "NSSystemExtensionUsageDescription": "MyApp needs to install a system extension to ...",
+            "NetworkExtension": {{
+                "NEMachServiceName": "<<TEAM_ID>>.<<extension bundle_id>>",
+                "NEProviderClasses": {{
+                    "com.apple.networkextension.app-proxy": "MyNetworkExtension.MyProvider"
+                }}
+            }}
+        }}
+        </>
+        Activation does not reject a missing `NEMachServiceName`. Without it, the extension
+        installs and shows as enabled, but `nesessionmanager` has no Mach service to
+        connect to. Starting the tunnel or proxy then fails silently, or the System
+        Settings toggle does not stay on. If a strudel build installs but does not
+        activate, compare against the Info.plist of a working extension, for example
+        `plutil -p /Applications/<<some app with a working NE>>.app/Contents/Library/SystemExtensions/*/Contents/Info.plist`.
+
+        Common NE provider-point identifiers are `com.apple.networkextension.app-proxy`,
+        `com.apple.networkextension.packet-tunnel`, `com.apple.networkextension.filter-data`,
+        and `com.apple.networkextension.dns-proxy`. The class name must match the value of
+        `NSExtensionPrincipalClass` or `principal_class`.
+
         ## Auto-injected Info.plist keys
 
         All extensions get: CFBundleExecutable, CFBundleIdentifier, CFBundleName,
