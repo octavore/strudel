@@ -119,6 +119,13 @@ pub enum TargetPlatform {
         /// Path to a `.xcassets` directory to compile into
         /// `Contents/Resources/Assets.car` with `xcrun actool`.
         assets_dir: Option<PathBuf>,
+        /// Capability display names (e.g. `"Push Notifications"`,
+        /// `"HealthKit"`) to auto-enable on the bundle ID via the App Store
+        /// Connect API, in addition to any inferred from
+        /// `build.entitlements_json_path`. Only capabilities strudel knows
+        /// the ASC `CapabilityType` for can be listed here; see `strudel
+        /// help entitlements` for the supported set.
+        capabilities: Option<Vec<String>>,
     },
     Ios {
         #[serde(default)]

@@ -7,6 +7,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
+use crate::apple::capabilities;
 use crate::config::build_target::{
     AppSection, BuildSection, BuildTarget, DmgSection, IosSection, Platform, TargetPlatform,
 };
@@ -68,6 +69,10 @@ pub struct SingleBuildConfig {
     /// `Contents/Resources/Assets.car` with `xcrun actool`.
     pub assets_dir: Option<PathBuf>,
 
+    /// Capability display names to auto-enable on the bundle ID via the App
+    /// Store Connect API. See `strudel help entitlements`.
+    pub capabilities: Option<Vec<String>>,
+
     #[serde(default)]
     pub apple: AppleSection,
 }
@@ -109,13 +114,18 @@ impl BuildConfig {
                     extensions,
                     dmg,
                     assets_dir,
+                    capabilities,
                     apple,
                 } = single;
                 let target = BuildTarget {
                     app,
                     build,
                     extensions,
-                    platform: TargetPlatform::Macos { dmg, assets_dir },
+                    platform: TargetPlatform::Macos {
+                        dmg,
+                        assets_dir,
+                        capabilities,
+                    },
                 };
                 vec![resolve_target(
                     target, &apple, None, true, config_dir, global,
@@ -156,6 +166,14 @@ fn resolve_device_family(family: Option<Vec<IosDeviceFamily>>) -> Result<Vec<Ios
     family.sort();
     family.dedup();
     Ok(family)
+}
+
+/// Reject a capability name that is not in the capability table.
+fn validate_capability_names(names: Vec<String>) -> Result<Vec<String>> {
+    for name in &names {
+        capabilities::lookup_name(name)?;
+    }
+    Ok(names)
 }
 
 /// Target ids are derived as `{platform}/{app.name}`, so two `[[target]]`
@@ -228,12 +246,17 @@ fn resolve_target(
 
     let target_name = build.target_name.unwrap_or_else(|| app.name.clone());
     let target_platform = match target.platform {
-        TargetPlatform::Macos { dmg, assets_dir } => ResolvedMacOsSection {
+        TargetPlatform::Macos {
+            dmg,
+            assets_dir,
+            capabilities,
+        } => ResolvedMacOsSection {
             dmg: match dmg {
                 Some(d) => d.resolve(config_dir)?,
                 None => Some(ResolvedDmg::default()),
             },
             assets_dir: assets_dir.map(|p| resolve_to(config_dir, p)),
+            capabilities: validate_capability_names(capabilities.unwrap_or_default())?,
         }
         .into(),
         TargetPlatform::Ios { ios } => {
@@ -249,6 +272,7 @@ fn resolve_target(
                     anyhow!("[ios] `provisioning` must be \"free\" or \"app_store_connect\"")
                 })?,
                 apple_id: ios.apple_id,
+                capabilities: validate_capability_names(ios.capabilities.unwrap_or_default())?,
             }
         }
         .into(),
@@ -987,6 +1011,45 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(family, vec![IosDeviceFamily::Iphone, IosDeviceFamily::Ipad]);
+    }
+
+    fn capabilities_config(platform_lines: &str) -> String {
+        format!(
+            "[[target]]\nplatform = \"{platform_lines}\n\
+             app.name = \"MyApp\"\napp.bundle_id = \"com.example.myapp\"\n\
+             app.version = \"1.0.0\"\napp.build_number = \"1\"\n"
+        )
+    }
+
+    fn resolve_capabilities(config: &str) -> Result<()> {
+        parse_build_config(config)?.resolve(Path::new("/cfg"), None)?;
+        Ok(())
+    }
+
+    #[test]
+    fn capabilities_reject_unknown_name_on_macos() {
+        let cfg = capabilities_config("macos\"\ncapabilities = [\"Nope\"]");
+        let err = resolve_capabilities(&cfg).unwrap_err();
+        assert!(err.to_string().contains("Unknown capability"));
+    }
+
+    #[test]
+    fn capabilities_reject_unknown_name_on_ios() {
+        let cfg = capabilities_config(
+            "ios\"\nios.provisioning = \"app_store_connect\"\nios.capabilities = [\"Nope\"]",
+        );
+        let err = resolve_capabilities(&cfg).unwrap_err();
+        assert!(err.to_string().contains("Unknown capability"));
+    }
+
+    #[test]
+    fn capabilities_accept_known_name_in_any_case() {
+        let macos = capabilities_config("macos\"\ncapabilities = [\"network EXTENSIONS\"]");
+        resolve_capabilities(&macos).unwrap();
+        let ios = capabilities_config(
+            "ios\"\nios.provisioning = \"app_store_connect\"\nios.capabilities = [\"healthkit\"]",
+        );
+        resolve_capabilities(&ios).unwrap();
     }
 
     #[test]

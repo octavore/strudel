@@ -108,6 +108,7 @@ pub fn resolved_ios() -> ResolvedConfig {
             app_icon_name: "AppIcon".into(),
             provisioning: IosProvisioningBackend::AppStoreConnect,
             apple_id: None,
+            capabilities: Vec::new(),
         }
         .into(),
     )
@@ -119,6 +120,7 @@ pub fn resolved_macos() -> ResolvedConfig {
         ResolvedMacOsSection {
             dmg: None,
             assets_dir: None,
+            capabilities: Vec::new(),
         }
         .into(),
     )

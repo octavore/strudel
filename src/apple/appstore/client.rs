@@ -34,9 +34,9 @@ fn api_error(code: u16, body: &str) -> anyhow::Error {
 }
 
 impl AppStoreClient {
-    pub fn from_config(cfg: &ResolvedConfig) -> Result<Self> {
-        let key_path = cfg.apple_api_key_path.as_ref().context(indoc! {"
-            App Store Connect API credentials required for `app_store_connect` provisioning profile management.
+    pub fn from_config(cfg: &ResolvedConfig, is_ios: bool) -> Result<Self> {
+        let mut msg = indoc! {"
+            App Store Connect API credentials are required to manage provisioning profiles and capabilities.
             Please set your API key id, API key path, and API issuer, either as environment variables:
 
               APPLE_API_KEY        key ID (e.g. \"2X9R4HXF34\")
@@ -44,11 +44,16 @@ impl AppStoreClient {
               APPLE_API_ISSUER     issuer UUID from App Store Connect
 
             or under [apple] in strudel.toml. Run `strudel help notarize` for details.
+         "}
+        .to_string();
+        if is_ios {
+            msg.push_str(indoc! {"
 
-            Alternatively, set [ios] provisioning = \"free\" in strudel.toml and run `strudel login`
-            to use a plain Apple ID without a paid developer account.
-         ",
-        })?;
+                Alternatively, set [ios] provisioning = \"free\" in strudel.toml and run `strudel login`
+                to use a plain Apple ID without a paid developer account.
+             "});
+        }
+        let key_path = cfg.apple_api_key_path.as_ref().context(msg)?;
         if cfg.apple_api_key.is_empty() {
             bail!("APPLE_API_KEY (key ID) is required but not set.");
         }

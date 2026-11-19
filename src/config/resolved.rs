@@ -385,6 +385,10 @@ pub struct ResolvedMacOsSection {
     /// `Contents/Resources/Assets.car` with `xcrun actool`. Optional;
     /// skipped when unset.
     pub assets_dir: Option<PathBuf>,
+    /// Capability display names to auto-enable on the bundle ID via the App
+    /// Store Connect API, merged with any inferred from
+    /// `entitlements_json_path`. See [`crate::apple::capabilities`].
+    pub capabilities: Vec<String>,
 }
 
 impl From<ResolvedMacOsSection> for ResolvedTargetPlatform {
@@ -404,6 +408,10 @@ pub struct ResolvedIosSection {
     pub app_icon_name: String,
     pub provisioning: IosProvisioningBackend,
     pub apple_id: Option<String>,
+    /// Capability display names to auto-enable on the bundle ID via the App
+    /// Store Connect API, merged with any inferred from
+    /// `entitlements_json_path`. See [`crate::apple::capabilities`].
+    pub capabilities: Vec<String>,
 }
 
 impl From<ResolvedIosSection> for ResolvedTargetPlatform {

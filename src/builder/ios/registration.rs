@@ -293,7 +293,8 @@ impl IosBuilder {
         if matches!(self.ios.provisioning, IosProvisioningBackend::Free) {
             return provisioning::registered_udids(&self.cfg);
         }
-        let client = AppStoreClient::from_config(&self.cfg)?.show_progress(!self.echo_suppressed());
+        let client =
+            AppStoreClient::from_config(&self.cfg, true)?.show_progress(!self.echo_suppressed());
         Ok(client.list_devices()?.into_iter().map(|d| d.udid).collect())
     }
 
@@ -312,7 +313,7 @@ impl IosBuilder {
                 provisioning::register_device(&self.cfg, name, udid)?;
             }
         } else {
-            let client = AppStoreClient::from_config(&self.cfg)?;
+            let client = AppStoreClient::from_config(&self.cfg, true)?;
             let portal_devices = client.list_devices()?;
 
             for (udid, name) in devices {

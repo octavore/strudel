@@ -129,7 +129,8 @@ impl IosBuilder {
             );
         }
 
-        let client = AppStoreClient::from_config(&self.cfg)?.show_progress(!self.echo_suppressed());
+        let client =
+            AppStoreClient::from_config(&self.cfg, true)?.show_progress(!self.echo_suppressed());
 
         self.step("Finding development certificates...");
         let cert_ids = CertKind::Development.list(&client)?;

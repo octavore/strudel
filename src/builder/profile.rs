@@ -136,6 +136,13 @@ impl ProfileRequest {
         }
     }
 
+    /// Find or create the bundle ID on the portal and return its resource ID.
+    /// Callers that need the resource ID before creating the profile, such as
+    /// to enable capabilities, use this with [`Self::provision_for`].
+    pub fn ensure_bundle_id(&self, client: &AppStoreClient) -> Result<String> {
+        client.find_or_create_bundle_id(&self.bundle_id, &self.label, self.platform)
+    }
+
     /// Find or create the bundle ID, create the profile against `cert_ids`,
     /// and write it to the cache path. `cert_ids` must be of the [`CertKind`]
     /// this profile type is issued against; callers list them once per run
@@ -148,12 +155,23 @@ impl ProfileRequest {
         cert_ids: &[String],
         strudel_dir: &Path,
     ) -> Result<()> {
-        let bundle_id_ref =
-            client.find_or_create_bundle_id(&self.bundle_id, &self.label, self.platform)?;
+        let bundle_id_ref = self.ensure_bundle_id(client)?;
+        self.provision_for(client, &bundle_id_ref, cert_ids, strudel_dir)
+    }
+
+    /// Like [`Self::provision`], with a bundle ID resource already resolved
+    /// through [`Self::ensure_bundle_id`].
+    pub fn provision_for(
+        &self,
+        client: &AppStoreClient,
+        bundle_id_ref: &str,
+        cert_ids: &[String],
+        strudel_dir: &Path,
+    ) -> Result<()> {
         let bytes = client.create_profile(
             &self.name,
             self.profile_type,
-            &bundle_id_ref,
+            bundle_id_ref,
             cert_ids,
             &self.device_ids,
         )?;

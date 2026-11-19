@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Result, bail};
 use clml::cformat;
 use serde::Deserialize;
@@ -5,6 +7,7 @@ use serde_json::{Value, json};
 
 use super::client::AppStoreClient;
 use super::types::{Attrs, ListEnvelope};
+use crate::apple::capabilities::CapabilityType;
 
 impl AppStoreClient {
     /// Capability types already enabled on the bundle ID. Read-only: safe to
@@ -13,7 +16,7 @@ impl AppStoreClient {
     pub fn enabled_capability_types(
         &self,
         bundle_id_resource_id: &str,
-    ) -> Result<std::collections::HashSet<String>> {
+    ) -> Result<HashSet<CapabilityType>> {
         #[derive(Deserialize)]
         struct CapAttrs {
             #[serde(rename = "capabilityType")]
@@ -26,10 +29,11 @@ impl AppStoreClient {
         let list: ListEnvelope<Attrs<CapAttrs>> = self.get_json(&format!(
             "/v1/bundleIds/{bundle_id_resource_id}/bundleIdCapabilities"
         ))?;
+        // Values missing from `CapabilityType` are not managed by strudel.
         Ok(list
             .data
             .into_iter()
-            .map(|c| c.attributes.capability_type)
+            .filter_map(|c| CapabilityType::from_api(&c.attributes.capability_type))
             .collect())
     }
 
@@ -39,7 +43,7 @@ impl AppStoreClient {
     pub fn ensure_capabilities(
         &self,
         bundle_id_resource_id: &str,
-        capability_types: &[&str],
+        capability_types: &[CapabilityType],
     ) -> Result<()> {
         if capability_types.is_empty() {
             return Ok(());
@@ -48,9 +52,10 @@ impl AppStoreClient {
         let enabled = self.enabled_capability_types(bundle_id_resource_id)?;
 
         for cap_type in capability_types {
-            if enabled.contains(*cap_type) {
+            if enabled.contains(cap_type) {
                 continue;
             }
+            let cap_type = cap_type.as_str();
             self.progress(cformat!(
                 "<dim>Enabling capability {cap_type} on bundle ID...</dim>"
             ));

@@ -68,6 +68,13 @@ pub struct IosSection {
 
     /// Apple ID email for `provisioning = "free"`. Pre-fills the login prompt.
     pub apple_id: Option<String>,
+
+    /// Capability display names (e.g. `"Push Notifications"`, `"HealthKit"`)
+    /// to auto-enable on the bundle ID via the App Store Connect API, in
+    /// addition to any inferred from `build.entitlements_json_path`. Only
+    /// capabilities strudel knows the ASC `CapabilityType` for can be listed
+    /// here; see `strudel help entitlements` for the supported set.
+    pub capabilities: Option<Vec<String>>,
 }
 
 impl IosSection {
@@ -84,6 +91,7 @@ impl IosSection {
             app_icon_name: self.app_icon_name.or(shared.app_icon_name),
             provisioning: self.provisioning.or(shared.provisioning),
             apple_id: self.apple_id.or(shared.apple_id),
+            capabilities: self.capabilities.or(shared.capabilities),
         }
     }
 }
