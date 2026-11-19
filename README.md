@@ -349,11 +349,11 @@ The sections below describe a single target. In a multi-target config they nest 
 
 ### `[app]` (required)
 
-| Key            | Type   | Description                                          |
-| -------------- | ------ | ---------------------------------------------------- |
-| `name`         | string | Display name; also the `.app` bundle and binary name |
-| `bundle_id`    | string | Bundle identifier, e.g. `com.example.myapp`          |
-| `version`      | string | Marketing version (`CFBundleShortVersionString`)     |
+| Key            | Type   | Description                                                   |
+| -------------- | ------ | ------------------------------------------------------------- |
+| `name`         | string | Display name; also the `.app` bundle and binary name          |
+| `bundle_id`    | string | Bundle identifier, e.g. `com.example.myapp`                   |
+| `version`      | string | Marketing version (`CFBundleShortVersionString`)              |
 | `build_number` | string | Build number (`CFBundleVersion`); optional, defaults to `"1"` |
 
 The relationship between version and build_number is that a version ([`CFBundleShortVersionString`](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleshortversionstring)) is user-facing, and it may have multiple unique internal tracking build numbers ([`CFBundleVersion`](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion)).
