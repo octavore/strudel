@@ -6,13 +6,18 @@
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use anyhow::Result;
 use appleid::Session;
 use clml::{cformat, cprintln};
 
+use crate::apple::capabilities::{self, CapabilityDef, Severity};
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder;
+use crate::builder::profile::{
+    PinnedExpectations, check_pinned_dict, load_entitlements, missing_capabilities, stale_reason,
+};
 use crate::config::{
     GlobalConfig, IosProvisioningBackend, Platform, ResolvedConfig, ResolvedIosSection,
     ResolvedTargetPlatform, ValueSource, load_config,
@@ -145,8 +150,14 @@ fn extensions_block(cfg: &ResolvedConfig) {
             "profile",
             format!("{}  {}", shorten(path), dim(&format!("({mode})"))),
         );
+        let check = ProfileCheck::new(
+            cfg,
+            &ext.bundle_id,
+            Vec::new(),
+            !ext.manage_provisioning_profile,
+        );
         match builder::decode_profile(path) {
-            Ok(value) => print_profile_details(value.as_dictionary(), None),
+            Ok(value) => print_profile_details(value.as_dictionary(), None, &check),
             Err(e) => cprintln!("      <red>could not decode: {}</red>", e),
         }
     }
@@ -505,9 +516,142 @@ fn macos_profile_block(cfg: &ResolvedConfig) {
         "provisioning profile",
         format!("{}  {}", shorten(path), dim(&format!("({mode})"))),
     );
+    let check = ProfileCheck::new(
+        cfg,
+        &cfg.bundle_id,
+        target_capabilities(cfg),
+        !cfg.manage_provisioning_profile,
+    );
     match builder::decode_profile(path) {
-        Ok(value) => print_profile_details(value.as_dictionary(), None),
+        Ok(value) => print_profile_details(value.as_dictionary(), None, &check),
         Err(e) => cprintln!("      <red>could not decode: {}</red>", e),
+    }
+}
+
+/// Capabilities the target needs, from its entitlements file and
+/// `capabilities` key. On macOS, only those that may require a profile.
+fn target_capabilities(cfg: &ResolvedConfig) -> Vec<&'static CapabilityDef> {
+    let (names, is_macos) = match &cfg.target_platform {
+        ResolvedTargetPlatform::Mac(m) => (&m.capabilities, true),
+        ResolvedTargetPlatform::Ios(i) => (&i.capabilities, false),
+    };
+    let mut caps =
+        capabilities::required(cfg.entitlements_json_path.as_deref(), names).unwrap_or_default();
+    if is_macos {
+        caps.retain(|c| c.may_require_profile());
+    }
+    caps
+}
+
+/// What a profile is checked against in `strudel profile`.
+struct ProfileCheck {
+    platform: Platform,
+    bundle_id: String,
+    team_id: String,
+    udids: Vec<String>,
+    capabilities: Vec<&'static CapabilityDef>,
+    entitlements: Option<serde_json::Value>,
+    /// Profile is pinned in the config. Otherwise strudel manages it.
+    pinned: bool,
+}
+
+impl ProfileCheck {
+    fn new(
+        cfg: &ResolvedConfig,
+        bundle_id: &str,
+        capabilities: Vec<&'static CapabilityDef>,
+        pinned: bool,
+    ) -> Self {
+        let (platform, udids) = match &cfg.target_platform {
+            ResolvedTargetPlatform::Mac(_) => (Platform::Macos, Vec::new()),
+            ResolvedTargetPlatform::Ios(_) => {
+                let udids = DeviceSet::load(&Paths::new(cfg).devices_toml)
+                    .map(|set| set.udids().into_iter().map(str::to_string).collect())
+                    .unwrap_or_default();
+                (Platform::Ios, udids)
+            },
+        };
+        ProfileCheck {
+            platform,
+            bundle_id: bundle_id.to_string(),
+            team_id: cfg.team_id.to_string(),
+            udids,
+            capabilities,
+            entitlements: load_entitlements(cfg.entitlements_json_path.as_deref()),
+            pinned,
+        }
+    }
+}
+
+/// Print team, capability coverage, and whether the profile is usable. A
+/// managed profile reports why it will be replaced. A pinned profile reports
+/// the same findings a build checks.
+fn print_profile_check(dict: &plist::Dictionary, check: &ProfileCheck) {
+    if let Some(team) = dict
+        .get("TeamIdentifier")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_string())
+    {
+        subfield("team", team.to_string());
+    }
+    if !check.capabilities.is_empty() {
+        let missing = missing_capabilities(dict, &check.capabilities);
+        let items: Vec<String> = check
+            .capabilities
+            .iter()
+            .map(|c| {
+                if missing.iter().any(|m| m.name == c.name) {
+                    cformat!("<red>✘ {}</red>", c.name)
+                } else {
+                    cformat!("<green>✔ {}</green>", c.name)
+                }
+            })
+            .collect();
+        subfield("capabilities", items.join(", "));
+    }
+
+    let now = SystemTime::now();
+    let udids: Vec<&str> = check.udids.iter().map(String::as_str).collect();
+    if check.pinned {
+        let expect = PinnedExpectations {
+            platform: check.platform,
+            bundle_id: &check.bundle_id,
+            team_id: &check.team_id,
+            required_udids: &udids,
+            capabilities: &check.capabilities,
+            entitlements: check.entitlements.as_ref(),
+        };
+        let findings = check_pinned_dict(dict, &expect, now);
+        if findings.is_empty() {
+            subfield("status", cformat!("<green>ok</green>"));
+        }
+        for finding in findings {
+            match finding.severity {
+                Severity::Error => subfield("error", cformat!("<red>{}</red>", finding.message)),
+                Severity::Warning => {
+                    subfield("warning", cformat!("<yellow>{}</yellow>", finding.message))
+                },
+            }
+        }
+    } else {
+        match stale_reason(
+            dict,
+            now,
+            &udids,
+            &check.bundle_id,
+            &check.team_id,
+            &check.capabilities,
+        ) {
+            None => subfield("status", cformat!("<green>current</green>")),
+            Some(reason) => subfield(
+                "status",
+                cformat!(
+                    "<yellow>stale: {}</yellow> <dim>(replaced on next fetch)</dim>",
+                    reason
+                ),
+            ),
+        }
     }
 }
 
@@ -550,13 +694,23 @@ fn profile_lines(paths: &Paths, cfg: &ResolvedConfig, expected_owner: Option<&st
         return;
     }
     field2(label, shorten(&path));
+    let check = ProfileCheck::new(
+        cfg,
+        &cfg.bundle_id,
+        target_capabilities(cfg),
+        cfg.provisioning_profile.is_some(),
+    );
     match builder::decode_profile(&path) {
-        Ok(value) => print_profile_details(value.as_dictionary(), expected_owner),
+        Ok(value) => print_profile_details(value.as_dictionary(), expected_owner, &check),
         Err(e) => cprintln!("      <red>could not decode: {}</red>", e),
     }
 }
 
-fn print_profile_details(dict: Option<&plist::Dictionary>, expected_owner: Option<&str>) {
+fn print_profile_details(
+    dict: Option<&plist::Dictionary>,
+    expected_owner: Option<&str>,
+    check: &ProfileCheck,
+) {
     let Some(dict) = dict else {
         cprintln!("      <red>unexpected profile format</red>");
         return;
@@ -583,6 +737,7 @@ fn print_profile_details(dict: Option<&plist::Dictionary>, expected_owner: Optio
     if let Some(expected) = expected_owner {
         print_owner_check(dict, expected);
     }
+    print_profile_check(dict, check);
 }
 
 /// For free provisioning, verify the profile's embedded developer

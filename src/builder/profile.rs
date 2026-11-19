@@ -326,7 +326,7 @@ pub fn profile_is_current(
 /// entitlements lack a key of a capability in `capabilities`. An empty
 /// `required_udids` skips the device check. An empty `team_id` skips the
 /// application identifier check.
-fn stale_reason(
+pub fn stale_reason(
     dict: &plist::Dictionary,
     now: SystemTime,
     required_udids: &[&str],
@@ -392,7 +392,7 @@ fn missing_udids(dict: &plist::Dictionary, required_udids: &[&str]) -> Vec<Strin
 
 /// Capabilities in `capabilities` for which the profile's `Entitlements` has
 /// none of the capability's entitlement keys.
-fn missing_capabilities<'a>(
+pub fn missing_capabilities<'a>(
     dict: &plist::Dictionary,
     capabilities: &[&'a CapabilityDef],
 ) -> Vec<&'a CapabilityDef> {
@@ -417,6 +417,13 @@ fn missing_entitlement_keys(
         .into_iter()
         .map(|cap| cap.entitlement_keys[0])
         .collect()
+}
+
+/// Parsed entitlements JSON at `path`. `None` if there is no path or the
+/// file cannot be read or parsed.
+pub fn load_entitlements(path: Option<&Path>) -> Option<serde_json::Value> {
+    let raw = std::fs::read_to_string(path?).ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 /// One result of checking a pinned profile.
@@ -506,7 +513,7 @@ pub fn check_pinned_profile(
 /// entitlement keys, and string array values the profile does not cover.
 /// Entitlements that are not in the capability table are not checked, since
 /// Developer ID profiles do not list keys that the signature enforces.
-fn check_pinned_dict(
+pub fn check_pinned_dict(
     dict: &plist::Dictionary,
     expect: &PinnedExpectations,
     now: SystemTime,

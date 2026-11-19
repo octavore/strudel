@@ -8,7 +8,8 @@ use crate::apple::capabilities::{CapabilityDef, CapabilityType, Severity};
 use crate::apple::{capabilities, provisioning};
 use crate::builder::IosBuilder;
 use crate::builder::profile::{
-    CertKind, Finding, PinnedExpectations, ProfileRequest, check_pinned_profile, profile_is_current,
+    CertKind, Finding, PinnedExpectations, ProfileRequest, check_pinned_profile, load_entitlements,
+    profile_is_current,
 };
 use crate::config::{IosProvisioningBackend, Platform};
 use crate::devices::DeviceSet;
@@ -126,12 +127,7 @@ impl IosBuilder {
         udids: &[&str],
         caps: &[&'static CapabilityDef],
     ) -> Result<()> {
-        let entitlements: Option<serde_json::Value> = self
-            .cfg
-            .entitlements_json_path
-            .as_deref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|raw| serde_json::from_str(&raw).ok());
+        let entitlements = load_entitlements(self.cfg.entitlements_json_path.as_deref());
         let expect = PinnedExpectations {
             platform: Platform::Ios,
             bundle_id: &self.cfg.bundle_id,
@@ -152,7 +148,7 @@ impl IosBuilder {
             self.note(cformat!(
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
             ));
-            return provisioning::auto_fetch_profile(&self.cfg, &self.paths);
+            return provisioning::auto_fetch_profile(&self.cfg, &self.ios, &self.paths);
         }
 
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;
