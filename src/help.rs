@@ -44,6 +44,10 @@ pub(crate) const TOPICS: &[(&str, &str)] = &[
         "macos-app",
         "Quick checklist for macOS app niceties: settings window, menu bar icon, sandboxing, activation policy",
     ),
+    (
+        "logs",
+        "Streaming a running app's os_log output from the terminal",
+    ),
 ];
 
 pub fn run(topic: Option<&str>, mut app: Command) {
@@ -72,6 +76,7 @@ pub fn run(topic: Option<&str>, mut app: Command) {
                 "macos-app" | "macos_app" | "macos-guidelines" | "macos_guidelines" => {
                     print_macos_app()
                 },
+                "logs" | "log" => print_logs(),
                 _ => {
                     if let Some(sub) = app.find_subcommand_mut(&key) {
                         sub.print_long_help().unwrap();
@@ -1287,6 +1292,66 @@ fn print_ios_app() {
         <blue>strudel help config</>
         <blue>strudel help entitlements</>
         <blue>strudel help ios-device</>
+    "#});
+}
+
+fn print_logs() {
+    print_help(&cformatdoc! {r#"
+        # Streaming app logs
+
+        strudel does not capture the logs of a running app. macOS apps log through
+        os_log or Logger into the unified logging system. The `log` CLI reads it.
+
+        ## One-liner: launch and tail
+
+        Launch the app, then stream its os_log output as it runs:
+        <blue>
+        open MyApp.app; echo; log stream --level debug --style compact \
+            --predicate 'subsystem == "com.example.myapp"'
+        </>
+        Replace `com.example.myapp` with `app.bundle_id` from strudel.toml.
+
+        ## Replaying recent history instead of streaming
+
+        To dump logged entries (for example the last 60 seconds) instead of following
+        live, use `log show` in place of `log stream`:
+        <blue>
+        log show --last 60s --debug --style json \
+            --predicate 'subsystem == "com.example.myapp"' \
+        | jq -r '.[] | .eventMessage'
+        </>
+        Use `--style json` with `jq` to print only the message text. The default
+        output also has columns for timestamp, process, and subsystem.
+
+        ## Narrowing further
+
+        If the app tags its Logger or OSLog categories, add `category == "..."` to the
+        predicate with `&&`. This removes noise from other subsystems in the same
+        process:
+        <blue>
+        --predicate 'subsystem == "com.example.myapp" && category == "networking"'
+        </>
+        ## Debugging entitlement / code signing failures (AMFI)
+
+        The kernel refuses a launch with a code signing or entitlement mismatch before
+        the app logs anything. The log entries come from amfid and the kernel, not the
+        app. Filter by message content instead of subsystem:
+        <blue>
+        log show --last 5m --style compact \
+            --predicate 'eventMessage contains "AMFI"'
+        </>
+        If AMFI shows nothing, try `contains "code signature"` or
+        `contains "entitlement"`. Check this if a build succeeds and signs but the app
+        fails to launch. See <blue>strudel help entitlements</>.
+
+        ## Simulator vs device vs Mac
+
+        - macOS: the commands above work unchanged. `log` reads the whole system.
+        - iOS Simulator: the same `log stream` and `log show` commands work unchanged.
+          The simulator shares the host's unified logging system.
+        - Physical iOS device: the `log` CLI cannot read the device's log store.
+          Use Console.app (Devices sidebar) or `xcrun devicectl device process launch
+          --console` instead.
     "#});
 }
 
