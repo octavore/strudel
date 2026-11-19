@@ -42,6 +42,10 @@ pub(crate) struct BuildCmd {
     /// Build with the debug configuration instead of release
     #[arg(long)]
     debug: bool,
+
+    /// Override app.build_number for this build
+    #[arg(long)]
+    build_number: Option<String>,
 }
 
 impl BuildCmd {
@@ -54,7 +58,10 @@ impl BuildCmd {
     }
 
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
-        let project = config::load_config(config)?;
+        let mut project = config::load_config(config)?;
+        if let Some(n) = &self.build_number {
+            project.set_build_number(n);
+        }
         let targets = all_or_named(&project, self.target.as_deref())?;
         let macos_target_ids: Vec<&str> = targets
             .iter()

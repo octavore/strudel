@@ -49,6 +49,10 @@ pub(crate) struct ReleaseCmd {
     /// Trim interactive-only output in CI to reduce log noise.
     #[arg(long)]
     ci: bool,
+
+    /// Override app.build_number for this release
+    #[arg(long)]
+    build_number: Option<String>,
 }
 
 impl ReleaseCmd {
@@ -61,7 +65,10 @@ impl ReleaseCmd {
     }
 
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
-        let project = config::load_config(config)?;
+        let mut project = config::load_config(config)?;
+        if let Some(n) = &self.build_number {
+            project.set_build_number(n);
+        }
         let targets = all_or_named(&project, self.target.as_deref())?;
         if self.resume.is_some() && targets.len() > 1 {
             let available: Vec<&str> = targets.iter().map(|t| t.target_id.as_str()).collect();

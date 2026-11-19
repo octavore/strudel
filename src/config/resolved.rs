@@ -136,6 +136,13 @@ pub struct ResolvedProject {
 }
 
 impl ResolvedProject {
+    /// Replace the build number of every target.
+    pub fn set_build_number(&mut self, build_number: &str) {
+        for target in &mut self.targets {
+            target.build_number = build_number.to_string();
+        }
+    }
+
     /// Resolve a `--target` selector against every target in the project.
     pub fn resolve_target(&self, selector: &str) -> Result<&ResolvedConfig> {
         let all: Vec<&ResolvedConfig> = self.targets.iter().collect();

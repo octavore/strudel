@@ -46,6 +46,10 @@ pub(crate) struct RunCmd {
     /// Build with the debug configuration instead of release
     #[arg(long)]
     debug: bool,
+
+    /// Override app.build_number for this build
+    #[arg(long)]
+    build_number: Option<String>,
 }
 
 impl RunCmd {
@@ -58,7 +62,10 @@ impl RunCmd {
     }
 
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
-        let project = config::load_config(config)?;
+        let mut project = config::load_config(config)?;
+        if let Some(n) = &self.build_number {
+            project.set_build_number(n);
+        }
         // --sim / --device only apply to iOS targets, so if either is given
         // restrict selection to iOS instead of also running the macOS target.
         // With no flags at all, only run macOS targets.

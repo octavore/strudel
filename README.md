@@ -142,6 +142,7 @@ strudel build --open         # open the .app after a successful build
 strudel build --install      # copy the built .app into /Applications
 strudel build --debug        # build with the debug configuration instead of release
 strudel build --unsigned     # macOS: skip codesigning, leave the bundle as-is
+strudel build --build-number 42  # override app.build_number for this build
 strudel build --dry-run      # print commands without executing them
 strudel build --no-echo      # don't echo the underlying commands
 strudel build --quiet        # no progress output; subprocess output only on failure
@@ -163,11 +164,12 @@ strudel run --sim "iPhone 16 Pro"     # iOS: override the simulator name
 strudel run --device                  # iOS: launch on a connected device
 strudel run --device "iPhone 15"      # iOS: target a specific tracked device
 strudel run --debug                   # build with the debug configuration instead of release
+strudel run --build-number 42         # override app.build_number for this build
 strudel run --dry-run                 # print commands without executing them
 strudel run --quiet                   # no progress output; subprocess output only on failure
 ```
 
-`--no-echo` and `--quiet` behave as they do for `build`.
+`--no-echo`, `--quiet`, and `--build-number` behave as they do for `build`. `--build-number` applies to the invocation only and does not modify `strudel.toml`.
 
 ### `release`
 
@@ -175,6 +177,7 @@ strudel run --quiet                   # no progress output; subprocess output on
 
 ```sh
 strudel release
+strudel release --build-number 42    # override app.build_number for this release
 strudel release --dry-run            # print commands without executing them
 strudel release --open               # open the .app after a successful build
 strudel release --skip-notarization  # build and package the DMG, but don't notarize
