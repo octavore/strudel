@@ -12,7 +12,6 @@ use crate::apple::capabilities::CapabilityType;
 impl AppStoreClient {
     /// Capability types already enabled on the bundle ID. Read-only: safe to
     /// call before asking the user for confirmation to make any changes.
-    #[allow(dead_code)]
     pub fn enabled_capability_types(
         &self,
         bundle_id_resource_id: &str,
@@ -39,7 +38,6 @@ impl AppStoreClient {
 
     /// Ensure each of `capability_types` is enabled on the bundle ID.
     /// Capabilities already enabled are left alone.
-    #[allow(dead_code)]
     pub fn ensure_capabilities(
         &self,
         bundle_id_resource_id: &str,

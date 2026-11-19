@@ -284,20 +284,9 @@ impl std::fmt::Display for StaleReason {
 /// given `required_udids`, `bundle_id`, and `team_id`. Returns `false` when the
 /// file is absent or cannot be decoded, and for the reasons listed on
 /// [`stale_reason`]. Pass an empty `required_udids` for macOS profiles,
-/// which have no `ProvisionedDevices` at all.
-pub fn profile_is_current(
-    profile_path: &Path,
-    required_udids: &[&str],
-    bundle_id: &str,
-    team_id: &str,
-) -> Result<bool> {
-    profile_is_current_with(profile_path, required_udids, bundle_id, team_id, &[])
-}
-
-/// Like [`profile_is_current`], also requiring the profile to grant the
+/// which have no `ProvisionedDevices` at all. The profile must also grant the
 /// entitlement keys of `capabilities`.
-#[allow(dead_code)]
-pub fn profile_is_current_with(
+pub fn profile_is_current(
     profile_path: &Path,
     required_udids: &[&str],
     bundle_id: &str,
@@ -432,7 +421,6 @@ fn missing_entitlement_keys(
 
 /// One result of checking a pinned profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct Finding {
     pub severity: Severity,
     pub message: String,
@@ -455,7 +443,6 @@ impl Finding {
 }
 
 /// What a pinned profile must satisfy.
-#[allow(dead_code)]
 pub struct PinnedExpectations<'a> {
     pub platform: Platform,
     pub bundle_id: &'a str,
@@ -473,7 +460,6 @@ pub struct PinnedExpectations<'a> {
 /// Check a pinned profile file without network calls. A file that is missing
 /// or unreadable is an error finding. If `identity` is given, a certificate
 /// that the profile does not list is a warning.
-#[allow(dead_code)]
 pub fn check_pinned_profile(
     path: &Path,
     expect: &PinnedExpectations,
@@ -989,6 +975,7 @@ mod tests {
             &[],
             BUNDLE_ID,
             "",
+            &[],
         )
         .unwrap();
         assert!(!result);
