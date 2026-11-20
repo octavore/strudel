@@ -36,52 +36,40 @@ impl AppStoreClient {
             .collect())
     }
 
-    /// Ensure each of `capability_types` is enabled on the bundle ID.
-    /// Capabilities already enabled are left alone.
-    pub fn ensure_capabilities(
+    /// Enable `capability_type` on the bundle ID. Callers check
+    /// [`Self::enabled_capability_types`] first.
+    pub fn enable_capability(
         &self,
         bundle_id_resource_id: &str,
-        capability_types: &[CapabilityType],
+        capability_type: CapabilityType,
     ) -> Result<()> {
-        if capability_types.is_empty() {
-            return Ok(());
-        }
-
-        let enabled = self.enabled_capability_types(bundle_id_resource_id)?;
-
-        for cap_type in capability_types {
-            if enabled.contains(cap_type) {
-                continue;
-            }
-            let cap_type = cap_type.as_str();
-            self.progress(cformat!(
-                "<dim>Enabling capability {cap_type} on bundle ID...</dim>"
-            ));
-            let body = json!({
-                "data": {
-                    "type": "bundleIdCapabilities",
-                    "attributes": {"capabilityType": cap_type},
-                    "relationships": {
-                        "bundleId": {"data": {"type": "bundleIds", "id": bundle_id_resource_id}}
-                    }
+        let cap_type = capability_type.as_str();
+        self.progress(cformat!(
+            "<dim>Enabling capability {cap_type} on bundle ID...</dim>"
+        ));
+        let body = json!({
+            "data": {
+                "type": "bundleIdCapabilities",
+                "attributes": {"capabilityType": cap_type},
+                "relationships": {
+                    "bundleId": {"data": {"type": "bundleIds", "id": bundle_id_resource_id}}
                 }
-            });
-            self.post_json::<_, Value>("/v1/bundleIdCapabilities", &body)
-                .map(|_| ())
-                .or_else(|e| {
-                    if format!("{e}").contains("403") {
-                        bail!(
-                            "Insufficient permissions to enable capability {cap_type}. \
-                             An API key with the Admin role is required to manage capabilities \
-                             on the App Store Connect portal. You can also enable it manually at \
-                             https://developer.apple.com/account/resources/identifiers/list and \
-                             run strudel again."
-                        )
-                    } else {
-                        Err(e)
-                    }
-                })?;
-        }
-        Ok(())
+            }
+        });
+        self.post_json::<_, Value>("/v1/bundleIdCapabilities", &body)
+            .map(|_| ())
+            .or_else(|e| {
+                if format!("{e}").contains("403") {
+                    bail!(
+                        "Insufficient permissions to enable capability {cap_type}. \
+                         An API key with the Admin role is required to manage capabilities \
+                         on the App Store Connect portal. You can also enable it manually at \
+                         https://developer.apple.com/account/resources/identifiers/list and \
+                         run strudel again."
+                    )
+                } else {
+                    Err(e)
+                }
+            })
     }
 }

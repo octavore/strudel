@@ -7,23 +7,32 @@
 //! the Mac App Store, App Groups and Network Extensions being the two most
 //! commonly hit. Those projects set `provisioning_profile = "auto"` and let
 //! strudel create, cache, and refresh the profile. A capability that may need
-//! a profile also opts its bundle ID in (see [`super::capabilities`]).
+//! a profile also opts its bundle ID in (see [`capabilities`]).
+//!
+//! - [`capabilities`] required capabilities, pinned-profile checks, and profile
+//!   opt-in, without network calls
+//! - [`provision`] App Store Connect changes for profiles and capabilities
+//! - [`plan`] confirmation text for those changes
+
+mod capabilities;
+mod plan;
+mod provision;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use clml::cformat;
 
-use super::capabilities::Target;
-use super::provision::enable_only_targets;
+use self::capabilities::Target;
+use self::provision::enable_only_targets;
 use crate::builder::MacosBuilder;
 use crate::builder::profile::ProfileRequest;
 use crate::paths::managed_profile_path;
 
 /// Why strudel manages the profile of a bundle ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ManagedBy {
+enum ManagedBy {
     /// `provisioning_profile = "auto"`. Failures are errors.
     Config,
     /// `strudel profile fetch --out` for a bundle ID with no profile
@@ -35,7 +44,7 @@ pub(super) enum ManagedBy {
 }
 
 /// Profile strudel creates or refreshes for one bundle ID.
-pub(super) struct ManagedProfile {
+struct ManagedProfile {
     pub request: ProfileRequest,
     pub managed_by: ManagedBy,
 }
@@ -95,30 +104,13 @@ impl MacosBuilder {
         let skipped = self.provision(force, &targets, &profiles)?;
 
         if let Some(out) = out {
-            if self.dry_run {
-                self.echo(cformat!(
-                    "<dim>[dry-run]</dim> Would copy fetched profiles to {}",
-                    out.display()
-                ));
-                return Ok(());
-            }
-            std::fs::create_dir_all(out)
-                .with_context(|| format!("Failed to create {}", out.display()))?;
-            let fetched = profiles
+            let fetched: Vec<&Path> = profiles
                 .iter()
                 .map(|p| &p.request)
-                .filter(|r| !skipped.contains(&r.bundle_id) && r.cache_path.exists());
-            for r in fetched {
-                let dest = out.join(r.cache_path.file_name().unwrap());
-                std::fs::copy(&r.cache_path, &dest).with_context(|| {
-                    format!(
-                        "Failed to copy {} to {}",
-                        r.cache_path.display(),
-                        dest.display()
-                    )
-                })?;
-                self.note(cformat!("<green>✔</green> Copied to {}", dest.display()));
-            }
+                .filter(|r| !skipped.contains(&r.bundle_id) && r.cache_path.exists())
+                .map(|r| r.cache_path.as_path())
+                .collect();
+            self.copy_profiles(&fetched, out)?;
         }
         Ok(())
     }
@@ -206,7 +198,7 @@ impl MacosBuilder {
     /// an ad-hoc build has nothing to bind one to. Catch that here rather than
     /// let a profile authorizing no usable identity get embedded and fail at
     /// launch.
-    pub(super) fn require_signing_identity(&self) -> Result<()> {
+    fn require_signing_identity(&self) -> Result<()> {
         if !self.is_signed() {
             bail!(
                 "`provisioning_profile = \"auto\"` needs a Developer ID signing identity, but \
@@ -238,7 +230,7 @@ fn profile_request(
 mod tests {
     use std::path::PathBuf;
 
-    use super::super::capabilities::tests::{NETWORK_EXTENSIONS, builder, signed_config};
+    use super::capabilities::tests::{NETWORK_EXTENSIONS, builder, signed_config};
     use super::*;
     use crate::config::fixtures::resolved_macos;
     use crate::config::{ExtensionKind, ResolvedExtension};

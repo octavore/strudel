@@ -11,19 +11,22 @@ use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use clml::{cformat, cprintln};
 
-pub use self::checks::{
-    ProfileExpectations, StaleReason, missing_capabilities, profile_problems, stale_reason,
-};
+pub use self::checks::{ProfileExpectations, StaleReason, missing_capabilities, profile_problems};
 pub use self::pinned::{
     Finding, PinnedExpectations, check_pinned_dict, check_pinned_profile, report_pinned_findings,
 };
 use crate::apple::appstore::AppStoreClient;
-use crate::apple::capabilities::CapabilityDef;
+use crate::apple::capabilities::{CapabilityDef, Severity};
 use crate::apple::fingerprint::parse_fingerprint;
+use crate::builder::BuilderCore;
 use crate::builder::keychain::parse_identity_line;
 use crate::config::Platform;
 use crate::paths::ensure_strudel_dir;
+
+/// Developer Portal page for bundle IDs and their capabilities.
+pub const IDENTIFIERS_URL: &str = "https://developer.apple.com/account/resources/identifiers/list";
 
 /// The App Store Connect certificate type a profile is issued against. A
 /// profile only authorizes signatures made with a certificate it embeds, so
@@ -107,12 +110,13 @@ impl ProfileRequest {
         }
     }
 
-    /// A development profile for an iOS bundle ID, embedding `device_ids`.
+    /// A development profile for an iOS bundle ID that must cover
+    /// `required_udids`. Set `device_ids` before
+    /// [`ProfileRequest::provision_for`].
     pub fn ios(
         bundle_id: String,
         label: String,
         cache_path: PathBuf,
-        device_ids: Vec<String>,
         required_udids: Vec<String>,
     ) -> Self {
         let name = format!("[strudel] {label} Development");
@@ -123,14 +127,14 @@ impl ProfileRequest {
             name,
             platform: Platform::Ios,
             profile_type: "IOS_APP_DEVELOPMENT",
-            device_ids,
+            device_ids: Vec::new(),
             required_udids,
             required_capabilities: Vec::new(),
         }
     }
 
     /// Why the cached profile cannot be reused, or `None` if it is current.
-    /// See [`stale_reason`] for the checks and the use of `identity`.
+    /// See [`checks::stale_reason`] for the checks and the use of `identity`.
     pub fn stale_reason(&self, team_id: &str, identity: Option<&str>) -> Option<StaleReason> {
         let udids: Vec<&str> = self.required_udids.iter().map(String::as_str).collect();
         let expect = ProfileExpectations {
@@ -177,6 +181,71 @@ impl ProfileRequest {
             )
         })
     }
+}
+
+impl BuilderCore {
+    /// Copy each of `profiles` into `out` for `strudel profile fetch --out`.
+    /// `.strudel` is gitignored, so this is how a profile ends up somewhere
+    /// it can be committed and pinned. A dry run only reports the copy.
+    pub(crate) fn copy_profiles(&self, profiles: &[&Path], out: &Path) -> Result<()> {
+        if self.dry_run {
+            self.echo(cformat!(
+                "<dim>[dry-run]</dim> Would copy fetched profiles to {}",
+                out.display()
+            ));
+            return Ok(());
+        }
+        std::fs::create_dir_all(out)
+            .with_context(|| format!("Failed to create {}", out.display()))?;
+        for profile in profiles {
+            let file_name = profile
+                .file_name()
+                .with_context(|| format!("Invalid profile path {}", profile.display()))?;
+            let dest = out.join(file_name);
+            std::fs::copy(profile, &dest).with_context(|| {
+                format!("Failed to copy {} to {}", profile.display(), dest.display())
+            })?;
+            self.note(cformat!("<green>✔</green> Copied to {}", dest.display()));
+        }
+        Ok(())
+    }
+}
+
+/// Enable each of `caps` that is not yet enabled on the bundle ID.
+///
+/// A rejected capability is an error, except on macOS for a capability that
+/// the table does not verify for macOS. Then a warning is printed. Missing
+/// permissions are always an error.
+pub fn enable_capabilities(
+    client: &AppStoreClient,
+    bundle_ref: &str,
+    caps: &[&'static CapabilityDef],
+    platform: Platform,
+) -> Result<()> {
+    if caps.is_empty() {
+        return Ok(());
+    }
+    let enabled = client.enabled_capability_types(bundle_ref)?;
+    for cap in caps
+        .iter()
+        .filter(|c| !enabled.contains(&c.capability_type))
+    {
+        let Err(e) = client.enable_capability(bundle_ref, cap.capability_type) else {
+            continue;
+        };
+        let permissions = e.to_string().contains("Insufficient permissions");
+        let tolerated = platform == Platform::Macos && cap.macos.severity() == Severity::Warning;
+        if permissions || !tolerated {
+            return Err(e);
+        }
+        cprintln!(
+            "<yellow>warning:</yellow> App Store Connect did not enable {} for this bundle ID: \
+             {e:#}\n\
+             Enable it by hand at {IDENTIFIERS_URL} if the app needs it.",
+            cap.name
+        );
+    }
+    Ok(())
 }
 
 /// Decode a provisioning profile's (`.mobileprovision`/`.provisionprofile`)

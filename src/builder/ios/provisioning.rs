@@ -1,15 +1,15 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use clml::{cformat, cformatdoc};
 
 use crate::apple::appstore::AppStoreClient;
-use crate::apple::capabilities::{CapabilityDef, CapabilityType, RequiredCapabilities};
+use crate::apple::capabilities::{CapabilityDef, RequiredCapabilities};
 use crate::apple::{capabilities, provisioning};
 use crate::builder::IosBuilder;
 use crate::builder::profile::{
     CertKind, PinnedExpectations, ProfileExpectations, ProfileRequest, check_pinned_profile,
-    report_pinned_findings, stale_reason,
+    enable_capabilities, report_pinned_findings,
 };
 use crate::config::{IosProvisioningBackend, Platform};
 use crate::devices::DeviceSet;
@@ -25,10 +25,10 @@ impl IosBuilder {
     pub fn profile_fetch(&self, force: bool, out: Option<&Path>) -> Result<()> {
         let cached = &self.paths.cached_profile;
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;
-        let udids = device_set.udids();
         let caps = self.required_capabilities()?.caps;
+        let request = self.profile_request(&device_set.udids(), &caps);
 
-        if !force && self.cached_profile_is_current(&udids, &caps) {
+        if !force && request.stale_reason(&self.cfg.team_id, None).is_none() {
             self.note(cformat!(
                 "<green>✔</green> Cached profile is current: {}",
                 cached.display()
@@ -45,20 +45,7 @@ impl IosBuilder {
         }
 
         if let Some(out) = out {
-            if self.dry_run {
-                self.echo(cformat!(
-                    "<dim>[dry-run]</dim> Would copy fetched profile to {}",
-                    out.display()
-                ));
-                return Ok(());
-            }
-            std::fs::create_dir_all(out)
-                .with_context(|| format!("Failed to create {}", out.display()))?;
-            let dest = out.join(cached.file_name().unwrap());
-            std::fs::copy(cached, &dest).with_context(|| {
-                format!("Failed to copy {} to {}", cached.display(), dest.display())
-            })?;
-            self.note(cformat!("<green>✔</green> Copied to {}", dest.display()));
+            self.copy_profiles(&[cached.as_path()], out)?;
         }
         Ok(())
     }
@@ -81,7 +68,8 @@ impl IosBuilder {
 
         let cached = &self.paths.cached_profile;
 
-        if !self.dry_run && self.cached_profile_is_current(&udid_refs, &required.caps) {
+        let request = self.profile_request(&udid_refs, &required.caps);
+        if !self.dry_run && request.stale_reason(&self.cfg.team_id, None).is_none() {
             self.note(cformat!(
                 "<green>✔</green> Using cached profile: {}",
                 cached.display()
@@ -101,15 +89,16 @@ impl IosBuilder {
         Ok(cached.clone())
     }
 
-    /// Cached profile exists and passes the checks in [`stale_reason`].
-    fn cached_profile_is_current(&self, udids: &[&str], caps: &[&'static CapabilityDef]) -> bool {
-        let expect = ProfileExpectations {
-            bundle_id: &self.cfg.bundle_id,
-            team_id: &self.cfg.team_id,
-            required_udids: udids,
-            capabilities: caps,
-        };
-        stale_reason(&self.paths.cached_profile, &expect, None).is_none()
+    /// Request for the cached development profile. The profile must cover
+    /// `udids` and grant `caps` to count as current.
+    fn profile_request(&self, udids: &[&str], caps: &[&'static CapabilityDef]) -> ProfileRequest {
+        ProfileRequest::ios(
+            self.cfg.bundle_id.clone(),
+            self.cfg.app_name.clone(),
+            self.paths.cached_profile.clone(),
+            udids.iter().map(|u| u.to_string()).collect(),
+        )
+        .with_capabilities(caps.to_vec())
     }
 
     /// Check the configured profile without network calls. Warnings are
@@ -167,15 +156,8 @@ impl IosBuilder {
         ));
 
         self.step("Matching tracked devices to portal...");
-        let device_ids = self.match_devices(&client, &device_set)?;
-
-        let request = ProfileRequest::ios(
-            self.cfg.bundle_id.clone(),
-            self.cfg.app_name.clone(),
-            self.paths.cached_profile.clone(),
-            device_ids,
-            device_set.udids().into_iter().map(str::to_string).collect(),
-        );
+        let mut request = self.profile_request(&device_set.udids(), caps);
+        request.device_ids = self.match_devices(&client, &device_set)?;
 
         // Register the bundle ID before creating the profile. Capabilities
         // must be enabled on the bundle ID for the profile to include them.
@@ -187,11 +169,9 @@ impl IosBuilder {
             bundle_id_ref
         ));
 
-        let capability_types: Vec<CapabilityType> =
-            caps.iter().map(|c| c.capability_type).collect();
-        if !capability_types.is_empty() {
+        if !caps.is_empty() {
             self.step("Enabling required capabilities on the bundle ID...");
-            client.ensure_capabilities(&bundle_id_ref, &capability_types)?;
+            enable_capabilities(&client, &bundle_id_ref, caps, Platform::Ios)?;
         }
 
         self.step(&format!(

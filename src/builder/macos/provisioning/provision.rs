@@ -12,15 +12,15 @@ use clml::{cformat, cprintln};
 
 use super::capabilities::Target;
 use super::plan::ProvisioningPlan;
-use super::profile::{ManagedBy, ManagedProfile};
+use super::{ManagedBy, ManagedProfile};
 use crate::apple::appstore::AppStoreClient;
-use crate::apple::capabilities::{CapabilityDef, CapabilityType, Severity};
+use crate::apple::capabilities::CapabilityType;
 use crate::builder::MacosBuilder;
-use crate::builder::profile::{CertKind, ProfileRequest, StaleReason};
+use crate::builder::profile::{
+    CertKind, IDENTIFIERS_URL, ProfileRequest, StaleReason, enable_capabilities,
+};
 use crate::config::Platform;
 
-pub(super) const IDENTIFIERS_URL: &str =
-    "https://developer.apple.com/account/resources/identifiers/list";
 const PROFILES_URL: &str = "https://developer.apple.com/account/resources/profiles/list";
 
 /// State of a bundle ID on App Store Connect.
@@ -300,7 +300,12 @@ impl MacosBuilder {
                     "Enabling required capabilities on bundle ID {}...",
                     job.bundle_id
                 ));
-                self.enable_capabilities(client, &bundle_ref, &job.plan.capabilities_to_enable)?;
+                enable_capabilities(
+                    client,
+                    &bundle_ref,
+                    &job.plan.capabilities_to_enable,
+                    Platform::Macos,
+                )?;
             }
             if let Some(request) = job.profile {
                 self.step(&format!(
@@ -313,32 +318,6 @@ impl MacosBuilder {
                     request.cache_path.display()
                 ));
             }
-        }
-        Ok(())
-    }
-
-    /// Enable `caps` on the bundle ID. A capability that App Store Connect
-    /// rejects produces a warning unless the table verifies it for macOS.
-    fn enable_capabilities(
-        &self,
-        client: &AppStoreClient,
-        bundle_ref: &str,
-        caps: &[&'static CapabilityDef],
-    ) -> Result<()> {
-        for cap in caps {
-            let Err(e) = client.ensure_capabilities(bundle_ref, &[cap.capability_type]) else {
-                continue;
-            };
-            let permissions = e.to_string().contains("Insufficient permissions");
-            if cap.macos.severity() == Severity::Error || permissions {
-                return Err(e);
-            }
-            cprintln!(
-                "<yellow>warning:</yellow> App Store Connect did not enable {} for this bundle \
-                 ID: {e:#}\n\
-                 Enable it by hand at {IDENTIFIERS_URL} if the app needs it.",
-                cap.name
-            );
         }
         Ok(())
     }

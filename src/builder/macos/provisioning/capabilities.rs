@@ -4,7 +4,7 @@
 //! Required capabilities come from the entitlements files and the
 //! `capabilities` config key. A signed build with a capability that may need a
 //! provisioning profile also opts its bundle ID into strudel-managed
-//! provisioning (see [`super::profile`]). A bundle ID with a pinned profile is
+//! provisioning (see [`super`]). A bundle ID with a pinned profile is
 //! only checked locally.
 
 use std::collections::HashSet;

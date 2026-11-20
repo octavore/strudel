@@ -1,10 +1,11 @@
 //! Confirmation text for the App Store Connect changes on one macOS bundle
 //! ID.
 
+use super::ManagedBy;
 use super::capabilities::Target;
-use super::profile::ManagedBy;
-use super::provision::{IDENTIFIERS_URL, PortalState, StaleProfile};
+use super::provision::{PortalState, StaleProfile};
 use crate::apple::capabilities::{CapabilityDef, Severity};
+use crate::builder::profile::IDENTIFIERS_URL;
 
 /// Portal identifiers that must be assigned to a capability.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,9 +194,9 @@ mod tests {
     use std::collections::HashSet;
     use std::path::PathBuf;
 
+    use super::super::ManagedProfile;
     use super::*;
     use crate::apple::capabilities::{self, CapabilityType, RequiredCapabilities};
-    use crate::builder::macos::profile::ManagedProfile;
     use crate::builder::profile::checks::ProfileProblem;
     use crate::builder::profile::{ProfileRequest, StaleReason};
 

@@ -3,13 +3,13 @@
 //!
 //! - [`sim`] Simulator builds: compile, install, and launch in Simulator.app
 //! - [`device`] device builds, code-signing, and identity/profile checks
-//! - [`profile`] provisioning-profile fetch, caching, and validity checks
+//! - [`provisioning`] provisioning-profile fetch, caching, and validity checks
 //! - [`registration`] device discovery, registration, and target resolution
 //! - [`bundle`] `.app` bundle assembly, asset compilation, and bin paths
 
 mod bundle;
 mod device;
-mod profile;
+mod provisioning;
 mod registration;
 mod sim;
 
