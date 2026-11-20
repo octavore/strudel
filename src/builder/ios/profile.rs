@@ -148,7 +148,7 @@ impl IosBuilder {
             self.note(cformat!(
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
             ));
-            return provisioning::auto_fetch_profile(&self.cfg, &self.ios, &self.paths);
+            return provisioning::auto_fetch_profile(&self.cfg, &self.paths);
         }
 
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;

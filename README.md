@@ -36,6 +36,7 @@ strudel skill preview # preview the skill doc
   - [Multiple targets](#multiple-targets)
   - [Icons](#icons)
   - [iOS device builds](#ios-device-builds)
+  - [Capabilities](#capabilities)
   - [Signing \& notarization](#signing--notarization)
   - [Safari Web Extensions](#safari-web-extensions)
   - [App Extensions](#app-extensions)
@@ -439,15 +440,16 @@ Set `sign = true` for any Mach-O executable or nested bundle, since nested code 
 
 For iOS apps, this contains settings for `strudel run --sim` and `strudel run --device`. iOS support is experimental. All fields are optional except `provisioning`, which is required for device builds.
 
-| Key                 | Type   | Default                        | Description                                                                                                              |
-| ------------------- | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles)                         |
-| `apple_id`          | string | *(none)*                       | Apple ID email; pre-fills the login prompt for the `"free"` path                                                         |
-| `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                                                     |
-| `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                                                   |
-| `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                                                     |
-| `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`. Takes precedence over `[build.icon]` if both are set |
-| `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                                        |
+| Key                 | Type   | Default                        | Description                                                                                                                         |
+| ------------------- | ------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles)                                    |
+| `apple_id`          | string | *(none)*                       | Apple ID email; pre-fills the login prompt for the `"free"` path                                                                    |
+| `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                                                                |
+| `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                                                              |
+| `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                                                                |
+| `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`. Takes precedence over `[build.icon]` if both are set            |
+| `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                                                   |
+| `capabilities`      | array  | `[]`                           | Capability names to enable on the bundle ID, in addition to those found in the entitlements file. See [Capabilities](#capabilities) |
 
 > [!NOTE]
 > The flat, single-target form (a top-level `[app]`, as shown above) is always macOS, so `[ios]` only applies inside an iOS `[[target]]` block, or as a top-level fallback for iOS targets - see [Multiple targets](#multiple-targets).
@@ -508,6 +510,14 @@ assets_dir = "Sources/App/Assets.xcassets"
 ```
 
 `actool`'s `--minimum-deployment-target` is read from `Package.swift`'s `platforms: [.macOS(.vXX)]` entry (via `swift package dump-package`); if the manifest declares no macOS platform minimum, it falls back to `11.0`.
+
+### `capabilities` (optional, macOS)
+
+A top-level key (like `[dmg]`, not nested under `[build]`) listing capability names to enable on the bundle ID. A flat key must appear before any `[table]` header, or TOML reads it as part of that table. See [Capabilities](#capabilities).
+
+```toml
+capabilities = ["Push Notifications", "App Groups"]
+```
 
 ### `[dmg]` (optional)
 
@@ -702,7 +712,59 @@ strudel profile fetch --force          # recreate the profile even if current
 strudel profile fetch --out profiles   # also copy the profile into ./profiles
 ```
 
-To opt out of auto-management and supply your own profile, set `provisioning_profile` under `[build]`; strudel then uses that file as-is. See `strudel help ios-device` for the full workflow.
+To opt out of auto-management and supply your own profile, set `provisioning_profile` under `[build]`; strudel then uses that file as-is and checks it locally. See [Capabilities](#capabilities) for the checks and `strudel help ios-device` for the full workflow.
+
+### Capabilities
+
+Some entitlements need the matching capability enabled on the bundle ID in the Apple Developer portal. strudel enables capabilities through the App Store Connect API, which needs an **Admin**-role key.
+
+strudel enables a capability if its entitlement key is in the entitlements file: `build.entitlements_json_path`, or the file of an `[[extensions]]` entry, which is checked against its own bundle ID. To enable one that has no entitlement key, list its name. Names are case-insensitive, and an unknown name fails when the config loads.
+
+On macOS, use a top-level key. It must appear before any `[table]` header:
+
+```toml
+capabilities = ["Push Notifications", "App Groups"]
+```
+
+On iOS, use the `[ios]` table:
+
+```toml
+[ios]
+capabilities = ["Push Notifications", "HealthKit"]
+```
+
+`strudel help entitlements` lists every supported capability and its entitlement key. A capability that is not listed, such as DriverKit or Matter, must be enabled by hand in the [portal](https://developer.apple.com/account/resources/identifiers/list). App Groups, iCloud, Apple Pay, and Wallet also need identifiers assigned in the portal, and strudel lists those steps before it asks for confirmation.
+
+#### When strudel changes the portal
+
+- **iOS** (`app_store_connect` backend): capabilities are enabled during profile fetch, after the bundle ID is found or created. strudel prints each change and does not ask first.
+- **macOS**: strudel plans capabilities and profiles together. It lists every change for each bundle ID and asks once before it calls App Store Connect. A build whose managed profiles are all current and grant the required entitlements makes no calls. `strudel profile fetch` runs the same step as `strudel build`.
+
+On macOS, a signed build also manages the profile of a bundle ID if one of its capabilities may need an embedded profile. This works like `provisioning_profile = "auto"` for that bundle ID only. Network Extensions is verified to need a profile, so it opts in immediately. Capabilities that are not verified opt in only from an interactive terminal, since strudel creates the profile after a prompt. An explicit `provisioning_profile` is never replaced.
+
+#### Pinned profiles
+
+If `provisioning_profile` is a path, strudel makes no App Store Connect calls for that bundle ID. It checks the file locally on both platforms.
+
+These checks fail the build:
+
+- The profile is expired or expires within 5 minutes.
+- The profile is for another bundle ID or team.
+- The file is missing or unreadable.
+- On macOS, a capability that is verified to need a profile has no entitlement key in the profile.
+
+These checks print a warning:
+
+- The signing identity is not listed in the profile.
+- On iOS, a tracked device is missing from the profile.
+- An entitlement value is not covered by the profile.
+- A capability that is not verified to need a profile has no entitlement key in the profile.
+
+#### Warnings
+
+If strudel cannot rely on a check, it prints a warning and the build continues. This applies to an ad-hoc build, missing API credentials, CI, a declined prompt, and a capability that App Store Connect rejects for a macOS bundle ID. Signing may then fail, or the app may misbehave at runtime. An explicit `provisioning_profile = "auto"` keeps its errors.
+
+`strudel help entitlements` marks entries that are not verified. `?` means strudel has not verified whether macOS checks the capability against a profile. `†` means the capability is believed to need no profile on macOS. strudel has not verified which capabilities App Store Connect accepts for a macOS bundle ID.
 
 ### Signing & notarization
 

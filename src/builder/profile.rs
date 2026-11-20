@@ -44,7 +44,7 @@ impl CertKind {
 
 /// One provisioning profile strudel manages, for the host app or for a single
 /// extension. Both platforms describe their profiles this way and share
-/// [`ProfileRequest::is_current`] and [`ProfileRequest::provision`]; the
+/// [`ProfileRequest::is_current`] and [`ProfileRequest::provision_for`]; the
 /// platform differences live entirely in these fields.
 pub struct ProfileRequest {
     pub bundle_id: String,
@@ -73,7 +73,6 @@ pub struct ProfileRequest {
 
 impl ProfileRequest {
     /// Require the cached profile to grant the entitlement keys of `caps`.
-    #[allow(dead_code)]
     pub fn with_capabilities(mut self, caps: Vec<&'static CapabilityDef>) -> Self {
         self.required_capabilities = caps;
         self
@@ -176,24 +175,12 @@ impl ProfileRequest {
         client.find_or_create_bundle_id(&self.bundle_id, &self.label, self.platform)
     }
 
-    /// Find or create the bundle ID, create the profile against `cert_ids`,
-    /// and write it to the cache path. `cert_ids` must be of the [`CertKind`]
-    /// this profile type is issued against; callers list them once per run
-    /// rather than per profile. Prints nothing: the App Store Connect client
-    /// narrates its own lookups, and callers frame this with their own
-    /// progress lines.
-    pub fn provision(
-        &self,
-        client: &AppStoreClient,
-        cert_ids: &[String],
-        strudel_dir: &Path,
-    ) -> Result<()> {
-        let bundle_id_ref = self.ensure_bundle_id(client)?;
-        self.provision_for(client, &bundle_id_ref, cert_ids, strudel_dir)
-    }
-
-    /// Like [`Self::provision`], with a bundle ID resource already resolved
-    /// through [`Self::ensure_bundle_id`].
+    /// Create the profile against `cert_ids` for a bundle ID resource resolved
+    /// through [`Self::ensure_bundle_id`], and write it to the cache path.
+    /// `cert_ids` must be of the [`CertKind`] this profile type is issued
+    /// against; callers list them once per run rather than per profile. Prints
+    /// nothing: the App Store Connect client narrates its own lookups, and
+    /// callers frame this with their own progress lines.
     pub fn provision_for(
         &self,
         client: &AppStoreClient,
@@ -645,7 +632,6 @@ fn value_mismatch(
 
 /// Portal identifiers that must be assigned to a capability.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct IdentifierAssignment {
     pub capability: &'static str,
     pub values: Vec<String>,
@@ -653,7 +639,6 @@ pub struct IdentifierAssignment {
 
 /// Changes strudel makes for one bundle ID, shown before they are made.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ProvisioningPlan {
     pub bundle_id: String,
     /// `"IOS"` or `"MAC_OS"`.
@@ -667,6 +652,8 @@ pub struct ProvisioningPlan {
     /// Identifiers to assign, read from the entitlements JSON.
     pub identifiers: Vec<IdentifierAssignment>,
     pub profile_type: &'static str,
+    /// A profile is created. False if the plan only enables capabilities.
+    pub create_profile: bool,
     /// Entitlement keys the current profile lacks.
     pub missing_entitlements: Vec<&'static str>,
     /// Config key or file that lists the capabilities.
@@ -675,7 +662,6 @@ pub struct ProvisioningPlan {
     pub opt_in_reason: Option<String>,
 }
 
-#[allow(dead_code)]
 impl ProvisioningPlan {
     /// Plan for `request`. `registered` says whether the bundle ID exists on
     /// the portal, and `enabled` lists capabilities already enabled on it.
@@ -715,6 +701,7 @@ impl ProvisioningPlan {
             capabilities_to_enable,
             identifiers,
             profile_type: request.profile_type,
+            create_profile: true,
             missing_entitlements,
             config_location: "strudel.toml".to_string(),
             opt_in_reason: None,
@@ -755,9 +742,9 @@ impl ProvisioningPlan {
             let names: Vec<&str> = self.capabilities_to_enable.iter().map(|c| c.name).collect();
             lines.push(format!("  - Enable capabilities: {}.", names.join(", ")));
         }
-        if self.missing_entitlements.is_empty() {
+        if self.create_profile && self.missing_entitlements.is_empty() {
             lines.push(format!("  - Create a {} profile.", self.profile_type));
-        } else {
+        } else if self.create_profile {
             lines.push(format!(
                 "  - Create a {} profile. The current profile lacks {}.",
                 self.profile_type,
@@ -1388,6 +1375,17 @@ mod tests {
 
         let plan = plan_for("IOS", true, &[], &caps, None);
         assert!(plan.verification_notes().is_empty());
+    }
+
+    #[test]
+    fn plan_without_a_profile_renders_no_profile_line() {
+        let caps = [cap("HealthKit")];
+        let mut plan = plan_for("MAC_OS", true, &[], &caps, None);
+        assert!(plan.render().contains("Create a MAC_APP_DIRECT profile."));
+        plan.create_profile = false;
+        let text = plan.render();
+        assert!(!text.contains("profile."), "{text}");
+        assert!(text.contains("Enable capabilities: HealthKit."));
     }
 
     #[test]

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Known capabilities and their App Store Connect API `capabilityType`.
 //!
 //! Apple's Developer Portal exposes more capabilities than its
@@ -45,6 +43,7 @@ impl<T> Known<T> {
     }
 
     /// Value of the fact, verified or not. `None` if unknown.
+    #[allow(dead_code)]
     pub fn value(&self) -> Option<&T> {
         match self {
             Known::Verified(v) | Known::Unverified(v) => Some(v),
@@ -128,12 +127,13 @@ impl CapabilityType {
 
 /// Feature code and enabled value for the developer-services protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct FreeFeature {
     pub code: &'static str,
     pub value: &'static str,
 }
 
-/// Fields `macos`, `identifiers`, and `source` are not read by build logic yet.
+/// Fields `free_feature` and `source` are not read by build logic yet.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct CapabilityDef {
@@ -167,6 +167,14 @@ impl CapabilityDef {
     pub fn may_require_profile(&self) -> bool {
         !matches!(
             self.requires_profile,
+            Known::Verified(false) | Known::Unverified(false)
+        )
+    }
+
+    /// Capability is believed to exist only on iOS.
+    pub fn ios_only(&self) -> bool {
+        matches!(
+            self.macos,
             Known::Verified(false) | Known::Unverified(false)
         )
     }

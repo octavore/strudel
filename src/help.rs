@@ -1,5 +1,7 @@
 use clap::Command;
-use clml::{cformatdoc, cprintln};
+use clml::{cformat, cformatdoc, cprintln};
+
+use crate::apple::capabilities::{CAPABILITIES, Known};
 
 pub(crate) const TOPICS: &[(&str, &str)] = &[
     ("config", "Full strudel.toml reference"),
@@ -13,7 +15,10 @@ pub(crate) const TOPICS: &[(&str, &str)] = &[
     ),
     ("signing", "Code signing: Developer ID, keychain, ad-hoc"),
     ("notarize", "Notarization: App Store Connect API key auth"),
-    ("entitlements", "Entitlements and provisioning profiles"),
+    (
+        "entitlements",
+        "Entitlements, provisioning profiles, and auto-requested capabilities",
+    ),
     (
         "extensions",
         "App extensions, system extensions, and XPC services: safari_web_extension, app_extension, system_extension, xpc_service",
@@ -295,6 +300,13 @@ fn print_config() {
         <magenta>
         assets_dir = "Sources/App/Assets.xcassets"
         </>
+        ## capabilities optional; top-level key (like [dmg]), not under [build]
+        # Capability display names to enable on the bundle ID through the App Store
+        # Connect API. A flat key must appear before any [table] header.
+        # See <blue>strudel help entitlements</>.
+        <magenta>
+        capabilities = ["Push Notifications", "App Groups"]
+        </>
         ## [build.icon] optional; no icon if unset
         # Either a png or icns file copied in unmodified (set icon.path), or
         # generate an icon from a png or svg at build time (icon.src). For iOS
@@ -518,8 +530,34 @@ fn print_notarize() {
     "#});
 }
 
+/// Render the capability table shown in `strudel help entitlements`: name,
+/// entitlement key, and markers for entries that are not verified. Built
+/// from [`CAPABILITIES`] directly so the help text can't drift from the
+/// actual table.
+fn capabilities_table() -> String {
+    let name_width = CAPABILITIES.iter().map(|c| c.name.len()).max().unwrap_or(0) + 2;
+    CAPABILITIES
+        .iter()
+        .map(|c| {
+            let mut markers = String::new();
+            match c.requires_profile {
+                Known::Verified(_) => {},
+                Known::Unverified(false) => markers.push('†'),
+                Known::Unverified(true) | Known::Unknown => markers.push('?'),
+            }
+            cformat!(
+                "  {:<name_width$}  {}",
+                format!("{}{markers}", c.name),
+                c.entitlement_keys.join(", ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn print_entitlements() {
-    print_help(&cformatdoc! {r#"
+    print_help(&cformatdoc! {
+        r#"
         # Entitlements and provisioning profiles
 
         ## Entitlements file
@@ -590,6 +628,84 @@ fn print_entitlements() {
           [build]
           provisioning_profile = "profiles/com.example.app.provisionprofile"
         </>
+        ## Capabilities
+
+        Some entitlements need the matching capability enabled on the bundle ID in the
+        Apple Developer portal. strudel enables capabilities through the App Store Connect
+        API. This needs an Admin role API key.
+
+        strudel enables a capability if its entitlement key is in the entitlements file.
+        To enable one that has no entitlement key, list its name. On macOS, use a
+        top-level key. A flat key must appear before any [table] header, or TOML reads it
+        as part of that table:
+        <magenta>
+          capabilities = ["Push Notifications", "App Groups"]
+
+          [build]
+          provisioning_profile = "auto"
+        </>
+        On iOS, use the `[ios]` table:
+        <magenta>
+          [ios]
+          capabilities = ["Push Notifications", "HealthKit"]
+        </>
+        Names are case-insensitive. An unknown name fails when the config loads.
+
+        iOS: capabilities are enabled during profile fetch, after the bundle ID is found
+        or created. Each change is printed and strudel does not ask first.
+
+        macOS: strudel plans capabilities and profiles together. It lists every change for
+        each bundle ID and asks once before it calls App Store Connect. A build whose
+        managed profiles are all current and grant the required entitlements makes no
+        calls. <blue>strudel profile fetch</> runs the same step as <blue>strudel build</>.
+
+        On macOS, a signed build also manages the profile of a bundle ID if one of its
+        capabilities may need an embedded profile. This works like
+        `provisioning_profile = "auto"` for that bundle ID only. Network Extensions is
+        verified to need a profile, so it opts in immediately. A capability marked `?`
+        below opts in only from an interactive terminal, since strudel creates the profile
+        after a prompt. An explicit `provisioning_profile` is never replaced.
+
+        Each `[[extensions]]` entry is checked against its own bundle ID and entitlements
+        file. A capability such as Network Extensions is often listed only in the
+        extension's entitlements.
+
+        App Groups, iCloud, Apple Pay, and Wallet also need identifiers assigned in the
+        portal. strudel enables the capability and lists the steps in the confirmation.
+
+        Pinned profiles: if `provisioning_profile` is a path, strudel makes no App Store
+        Connect calls for that bundle ID and checks the file instead. These checks fail
+        the build:
+          - the profile is expired or expires within 5 minutes
+          - the profile is for another bundle ID or team
+          - the file is missing or unreadable
+          - a capability verified to need a profile has no entitlement key in the profile
+            (macOS only)
+        These checks print a warning:
+          - the signing identity is not listed in the profile
+          - a tracked device is missing from the profile (iOS)
+          - an entitlement value is not covered by the profile
+          - a capability not verified to need a profile has no entitlement key in the profile
+
+        Warn and continue: if strudel cannot rely on a check, it prints a warning and the
+        build continues. This applies to an ad-hoc build, missing API credentials, CI,
+        a declined prompt, and a capability that App Store Connect rejects for a macOS
+        bundle ID. Signing may then fail or the app may misbehave at runtime. An explicit
+        `provisioning_profile = "auto"` keeps its errors.
+
+        Supported capabilities (name, entitlement key):
+        {}
+
+        Markers after a name:
+          ?  strudel has not verified whether macOS checks this capability against a profile
+          †  believed to need no profile on macOS, so strudel does not create or check one
+        strudel has not verified which capabilities App Store Connect accepts for a macOS
+        bundle ID. It tries each one and prints a warning if one is rejected.
+
+        Only capabilities listed above have a known App Store Connect API `CapabilityType`.
+        Anything else, such as DriverKit or Matter, must be enabled by hand at
+        <green>https://developer.apple.com/account/resources/identifiers/list</>.
+
         ## iOS device builds
 
         strudel can auto-manage development provisioning profiles via the App Store Connect
@@ -610,8 +726,10 @@ fn print_entitlements() {
           [build]
           provisioning_profile = "path/to/MyApp.mobileprovision"
         </>
-        When provisioning_profile is set strudel uses that file as-is and warns if it looks
-        stale, but does not overwrite it. See <blue>strudel help ios-device</> for the full workflow.
+        When provisioning_profile is set strudel uses that file as-is and does not overwrite
+        it. It checks the file locally, without network calls. An expired profile, or one for
+        another bundle ID or team, fails the build. The Capabilities section above lists the
+        other checks. See <blue>strudel help ios-device</> for the full workflow.
 
         ## Ad-hoc + entitlements
 
@@ -627,7 +745,9 @@ fn print_entitlements() {
           entitlements_json_path = "extension/entitlements.json"
 
         See: <blue>strudel help extensions</>
-    "#});
+    "#,
+        capabilities_table()
+    });
 }
 
 fn print_extensions() {
