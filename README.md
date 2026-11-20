@@ -1,8 +1,8 @@
 # strudel
 
-Build and ship macOS/iOS apps entirely from the command-line, without touching the Xcode IDE.
+Build and ship macOS/iOS apps from the command-line, without touching the Xcode IDE.
 
-`strudel` uses the standard Apple toolchain (e.g. `swift`, `codesign`, `notarytool`) to build Swift Package Manager-based macOS and iOS apps with a config-driven, easy-to-introspect pipeline. It can produce signed `.app` bundles and notarized DMGs which can be distributed.
+`strudel` uses the standard Apple toolchain (e.g. `swift`, `codesign`, `notarytool`) to build Swift Package Manager-based macOS and iOS apps with a config-driven, easy-to-introspect pipeline. It produces signed `.app` bundles and notarized DMGs.
 
 ```sh
 brew install octavore/tools/strudel
@@ -227,7 +227,7 @@ strudel build --quiet        # no progress output; subprocess output only on fai
 ```
 
 > [!NOTE]
-> Signed app bundles will still fail Gatekeeper checks and cannot be distributed easily. For that, run [`strudel release`](#release) to have your app notarized.
+> Signed app bundles still fail Gatekeeper checks and are hard to distribute. To distribute, run [`strudel release`](#release) to have your app notarized.
 
 ### `run`
 
@@ -307,8 +307,8 @@ Files are named `<target-id>-icon.<ext>`, e.g. `macos-MyApp-icon.png`.
 
 Writes a supporting skill for coding agents. There are currently two skills:
 
-- `strudel` - a pointer to `strudel help`/`strudel help <topic>`, with the topic list generated from the installed strudel's own `TOPICS`, so it can't drift out of date.
-- `release-action` - scaffolds the [`octavore/strudel-release-action`](https://github.com/octavore/strudel-release-action) GitHub Actions release workflow (signing, notarization, DMG packaging), including an optional `release.sh` template that bumps the version and tags a release.
+- `strudel`: a pointer to `strudel help` and `strudel help <topic>`, with the topic list generated from the installed strudel's own `TOPICS`.
+- `release-action`: scaffolds the [`octavore/strudel-release-action`](https://github.com/octavore/strudel-release-action) GitHub Actions release workflow (signing, notarization, DMG packaging), including an optional `release.sh` template that bumps the version and tags a release.
 
 ```sh
 strudel skill install                    # prompt for which skill(s) to install
@@ -376,7 +376,7 @@ The relationship between version and build_number is that a version ([`CFBundleS
 | `archs`                  | string[] | host architecture   | Architectures passed to `swift build --arch`. Set multiple for a universal binary, e.g. `["arm64", "x86_64"]`                                                                                                    |
 | `target_name`            | string   | value of `app.name` | Swift executable target name, if it differs from the app name                                                                                                                                                    |
 | `embed_libs`             | string[] | *(none)*            | Dynamic C FFI libraries to embed in `Contents/Frameworks` and sign. Paths relative to config file                                                                                                                |
-| `resources_dir`          | string   | *(none)*            | Directory whose contents are copied wholesale into `Contents/Resources/`                                                                                                                                         |
+| `resources_dir`          | string   | *(none)*            | Directory whose contents are copied in full into `Contents/Resources/`                                                                                                                                           |
 | `resources`              | string[] | *(none)*            | Individual files or folders to copy into `Contents/Resources/` by filename                                                                                                                                       |
 | `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements. `"auto"` lets strudel manage it on macOS, see [macOS provisioning profiles](#macos-provisioning-profiles) |
 
@@ -449,11 +449,12 @@ For iOS apps, this contains settings for `strudel run --sim` and `strudel run --
 | `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                                                              |
 | `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                                                                |
 | `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`. Takes precedence over `[build.icon]` if both are set            |
+| `device_family`     | array  | `["iphone"]`                   | `"iphone"` and/or `"ipad"`; add `"ipad"` for a universal app                                                                        |
 | `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                                                   |
 | `capabilities`      | array  | `[]`                           | Capability names to enable on the bundle ID, in addition to those found in the entitlements file. See [Capabilities](#capabilities) |
 
 > [!NOTE]
-> The flat, single-target form (a top-level `[app]`, as shown above) is always macOS, so `[ios]` only applies inside an iOS `[[target]]` block, or as a top-level fallback for iOS targets - see [Multiple targets](#multiple-targets).
+> The flat, single-target form (a top-level `[app]`, as shown above) is always macOS, so `[ios]` only applies inside an iOS `[[target]]` block, or as a top-level fallback for iOS targets. See [Multiple targets](#multiple-targets).
 
 > [!TIP]
 > strudel can auto-manage device registration and development provisioning profiles via the App Store Connect API. The usual flow is `strudel devices add` once, then `strudel run --device` to build, install, and launch. See [iOS device builds](#ios-device-builds) for the full workflow, or set `provisioning_profile` in `[build]` to manage the profile yourself.
@@ -485,7 +486,7 @@ An array of zero or more extensions embedded in the host app. Each entry produce
 
 | Key               | Type   | Default                                   | Description                                                                          |
 | ----------------- | ------ | ----------------------------------------- | ------------------------------------------------------------------------------------ |
-| `resources_dir`   | string | *(required)*                              | build output containing `manifest.json`; contents copied wholesale into `Resources/` |
+| `resources_dir`   | string | *(required)*                              | build output containing `manifest.json`; contents copied in full into `Resources/`   |
 | `principal_class` | string | `<target_name>.SafariWebExtensionHandler` | `NSExtensionPrincipalClass`                                                          |
 
 **`app_extension`-specific fields:**
@@ -510,7 +511,7 @@ A top-level key (like `[dmg]`, not nested under `[build]`) pointing at a `.xcass
 assets_dir = "Sources/App/Assets.xcassets"
 ```
 
-`actool`'s `--minimum-deployment-target` is read from `Package.swift`'s `platforms: [.macOS(.vXX)]` entry (via `swift package dump-package`); if the manifest declares no macOS platform minimum, it falls back to `11.0`.
+strudel reads `actool`'s `--minimum-deployment-target` from `Package.swift`'s `platforms: [.macOS(.vXX)]` entry (via `swift package dump-package`). If the manifest declares no macOS platform minimum, it falls back to `14.0`.
 
 ### `capabilities` (optional, macOS)
 
@@ -562,14 +563,14 @@ Apple developer identifiers, shared by signing, notarization, and provisioning-p
 
 Each identifier is resolved in priority order: **env var > `strudel.toml` > [global config](#global-config)**.
 
-| Key                        | Type    | Env var                  | Description                                                          |
-| -------------------------- | ------- | ------------------------ | -------------------------------------------------------------------- |
-| `identity`                 | string  | `APPLE_SIGNING_IDENTITY` | Signing identity, e.g. `Developer ID Application: You (XXXXXXXXXX)`  |
-| `team_id`                  | string  | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                                 |
-| `api_issuer`               | string  | `APPLE_API_ISSUER`       | App Store Connect issuer UUID (team accounts only)                   |
-| `api_key`                  | string  | `APPLE_API_KEY`          | App Store Connect key ID                                             |
-| `api_key_path`             | string  | `APPLE_API_KEY_PATH`     | Path to the `AuthKey_XXXXXXYYYY.p8` file                             |
-| `notarize_timeout`         | integer | -                        | Seconds to wait for notarization (`notarytool --timeout`)            |
+| Key                | Type    | Env var                  | Description                                                            |
+| ------------------ | ------- | ------------------------ | ---------------------------------------------------------------------- |
+| `identity`         | string  | `APPLE_SIGNING_IDENTITY` | Signing identity, e.g. `Developer ID Application: You (XXXXXXXXXX)`    |
+| `team_id`          | string  | `APPLE_TEAM_ID`          | 10-character Apple Developer Team ID                                   |
+| `api_issuer`       | string  | `APPLE_API_ISSUER`       | App Store Connect issuer UUID (team accounts only)                     |
+| `api_key`          | string  | `APPLE_API_KEY`          | App Store Connect key ID                                               |
+| `api_key_path`     | string  | `APPLE_API_KEY_PATH`     | Path to the `AuthKey_XXXXXXYYYY.p8` file                               |
+| `notarize_timeout` | integer | -                        | Seconds to wait for notarization (`notarytool --timeout`); default 600 |
 
 > [!WARNING]
 > Secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`) are read from the environment only and have no config key, so they are never written to a file you might commit. See [Signing in CI](#signing-in-ci).
@@ -684,8 +685,8 @@ Run [`strudel icon`](#icon) to render the configured icon to a PNG and preview i
 
 `strudel run --device` builds for a connected iOS device, then installs and launches it. strudel can auto-manage device registration and a development provisioning profile using one of two backends, selected by `[ios] provisioning` in `strudel.toml`:
 
-- `"app_store_connect"` - a paid Apple Developer account, driven through the App Store Connect API using the same credentials as notarization (see [Notarization auth](#notarization-auth)). Produces 1-year profiles.
-- `"free"` - any Apple ID, no paid account. Run `strudel login` once to sign in, then use the same device workflow below. Produces 7-day profiles, with a limit of 3 devices and 10 App IDs per team. Run `strudel help ios-free-provisioning` for the full walkthrough.
+- `"app_store_connect"`: a paid Apple Developer account, used through the App Store Connect API with the same credentials as notarization (see [Notarization auth](#notarization-auth)). Produces 1-year profiles.
+- `"free"`: any Apple ID, no paid account. Run `strudel login` once to sign in, then use the same device workflow below. Produces 7-day profiles, with a limit of 3 devices and 10 App IDs per team. Run `strudel help ios-free-provisioning` for the full walkthrough.
 
 Both backends share the device and profile workflow below; the free path just adds the one-time `strudel login`. `strudel status` shows the current session and per-target provisioning state.
 
@@ -804,7 +805,7 @@ These checks print a warning:
 
 #### Warnings
 
-If strudel cannot rely on a check, it prints a warning and the build continues. This applies to an ad-hoc build, missing API credentials, CI, a declined prompt, and a capability that App Store Connect rejects for a macOS bundle ID. Signing may then fail, or the app may misbehave at runtime. An explicit `provisioning_profile = "auto"` keeps its errors.
+If strudel cannot rely on a check, it prints a warning and the build continues. This applies to an ad-hoc build, missing API credentials, CI, a declined prompt, and a capability that App Store Connect rejects for a macOS bundle ID. Signing may then fail, or the app may misbehave at runtime. An explicit `provisioning_profile = "auto"` still fails on error.
 
 `strudel help entitlements` marks entries that are not verified. `?` means strudel has not verified whether macOS checks the capability against a profile. `†` means the capability is believed to need no profile on macOS. strudel has not verified which capabilities App Store Connect accepts for a macOS bundle ID.
 
@@ -934,11 +935,11 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 }
 ```
 
-> Don't `import SwiftUI` in the extension target unless you actually use it. SPM may try to link the private `SwiftUICore` framework and fail with "product being built is not an allowed client of it".
+> Do not `import SwiftUI` in the extension target unless you use it. SPM may try to link the private `SwiftUICore` framework and fail with "product being built is not an allowed client of it".
 
 #### 2. Web assets
 
-`resources_dir` points at the directory whose **contents** (not the directory itself) are copied wholesale into `<name>.appex/Contents/Resources/`. `ditto` is used so macOS metadata and symlinks are preserved. If you're using webpack/esbuild/etc., point `resources_dir` at the output directory and make sure `manifest.json` ends up at its root:
+`resources_dir` points at the directory whose **contents** (not the directory itself) are copied in full into `<name>.appex/Contents/Resources/`. strudel copies with `ditto` to preserve macOS metadata and symlinks. If you're using webpack/esbuild/etc., point `resources_dir` at the output directory and make sure `manifest.json` ends up at its root:
 
 ```raw
 extension/dist/
@@ -1209,10 +1210,10 @@ Run `strudel help extensions` for more.
 
 In this repo, under [`examples/`](./examples):
 
-- [`HelloWorldApp`](./examples/HelloWorldApp) - a minimal flat, single-target `strudel.toml`, annotated as a starting-point template.
-- [`MenuBarApp`](./examples/MenuBarApp) - a menu bar app (`Clipspect`) with a custom icon and bundled resources.
-- [`MultiTargetApp`](./examples/MultiTargetApp) - a macOS + iOS app built from one Swift package, using `[[target]]` blocks.
-- [`SafariExtension`](./examples/SafariExtension) - a host app with a Safari Web Extension, showing `[[extensions]]` and the `NSExtensionMain` shim.
+- [`HelloWorldApp`](./examples/HelloWorldApp): a minimal flat, single-target `strudel.toml`, annotated as a starting-point template.
+- [`MenuBarApp`](./examples/MenuBarApp): a menu bar app (`Clipspect`) with a custom icon and bundled resources.
+- [`MultiTargetApp`](./examples/MultiTargetApp): a macOS and iOS app built from one Swift package, using `[[target]]` blocks.
+- [`SafariExtension`](./examples/SafariExtension): a host app with a Safari Web Extension, showing `[[extensions]]` and the `NSExtensionMain` shim.
 
 Real-world apps built with strudel:
 

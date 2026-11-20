@@ -10,6 +10,7 @@ fmt = ["cargo clippy", "cargo +nightly fmt"]
 check = "cargo +nightly fmt -- --check"
 test = "cargo test --workspace --locked"
 lint = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+"fmt:md" = "rumdl fmt ."
 "lint:md" = "rumdl check ."
 ci = [":check", ":lint", ":lint:md", ":test"]
 release = "./scripts/release.sh"

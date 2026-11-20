@@ -98,9 +98,9 @@ pub fn run(topic: Option<&str>, mut app: Command) {
     }
 }
 
-/// Top-level subcommands (name, short about), in clap's declared order,
-/// excluding `help` itself. Shared by `strudel help` and `strudel skill
-/// install`, so neither can drift from the actual command list.
+/// Top-level subcommands as (name, short about) pairs.
+/// Order follows clap's declaration. Excludes `help`.
+/// Used by `strudel help` and `strudel skill install`.
 pub(crate) fn commands(app: &Command) -> Vec<(String, String)> {
     app.get_subcommands()
         .filter(|sub| sub.get_name() != "help")
@@ -214,8 +214,8 @@ fn print_targets() {
         </>
         A selector must select exactly one target. `MyApp` above works only if a
         single target carries that app name; when both a macOS and an iOS target do,
-        strudel will report an error. Exact id matches always works, eg `ios/App`
-        selects that target even alongside `ios/AppPro`.
+        strudel will report an error. Exact id matches always work. For example,
+        `ios/App` selects that target even alongside `ios/AppPro`.
 
         `build`, `run`, and `release` take the selector as a positional argument and
         dispatch per target based on its own platform (macOS or iOS). Other commands
@@ -281,10 +281,9 @@ fn print_config() {
         resources              = ["Assets/logo.png"]       # individual files/folders to copy into Contents/Resources/
         </>
         Both resolve relative to the config file's directory unless absolute, same as
-        any other path. If the resolved location doesn't exist, strudel falls back to
-        the current build's `.build/<<triple>>/release/` output dir instead - so a bare
-        name (e.g. a SwiftPM-generated resource bundle) still works without listing a
-        path.
+        any other path. If the resolved location does not exist, strudel falls back to
+        the current build's `.build/<<triple>>/release/` output dir instead. A bare
+        name (e.g. a SwiftPM-generated resource bundle) then works without a path.
 
         ## [[build.copy]] optional, repeatable
         # Arbitrary files/directories copied to a caller-chosen destination inside the
@@ -355,11 +354,11 @@ fn print_config() {
         ## [ios] optional
 
         Only valid inside an iOS [[target]] block, or as a top-level fallback for
-        iOS targets in a multi-target config - the flat single-app form above is
+        iOS targets in a multi-target config. The flat single-app form above is
         always macOS. See: <blue>strudel help targets</>
         <magenta>
         [ios]
-        simulator         = "iPhone 16"  # default; override with --simulator
+        simulator         = "iPhone 16"  # default; override with --sim <<name>>
         device            = "My iPhone"  # name or UDID; auto-detected if unset
         deployment_target = "18.0"       # iOS deployment target
         device_family     = ["iphone"]   # default; add "ipad" for a universal app
@@ -456,8 +455,8 @@ fn print_signing() {
 
         strudel signs inside-out:
           1. Embedded dylibs (Contents/Frameworks)
-          2. Each extension bundle - .appex or .systemextension (with the extension's
-             entitlements)
+          2. Each extension bundle (.appex or .systemextension), with the extension's
+             entitlements
           3. Host .app (with the host entitlements)
 
         We do not use --deep on the host sign as it would incorrectly re-apply host entitlements
@@ -508,8 +507,9 @@ fn print_notarize() {
 
         A "Developer" role key is enough for macOS app notarization, whether locally or in CI.
         If you also use strudel's iOS auto-provisioning (<magenta>"app_store_connect"</>) or
-        macOS <magenta>provisioning_profile = "auto"</>, use an "Admin" role key instead - device registration and profile management via the
-        App Store Connect API require additional permissions.
+        macOS <magenta>provisioning_profile = "auto"</>, use an "Admin" role key instead.
+        Device registration and profile management via the App Store Connect API
+        require additional permissions.
 
         ## Timeout
         <magenta>
@@ -531,10 +531,9 @@ fn print_notarize() {
     "#});
 }
 
-/// Render the capability table shown in `strudel help entitlements`: name,
-/// entitlement key, and markers for entries that are not verified. Built
-/// from [`CAPABILITIES`] directly so the help text can't drift from the
-/// actual table.
+/// Capability table for `strudel help entitlements`.
+/// Each row has the name, entitlement keys, and markers for unverified entries.
+/// Built from [`CAPABILITIES`].
 fn capabilities_table() -> String {
     let name_width = CAPABILITIES.iter().map(|c| c.name.len()).max().unwrap_or(0) + 2;
     CAPABILITIES
@@ -695,7 +694,7 @@ fn print_entitlements() {
         build continues. This applies to an ad-hoc build, missing API credentials, CI,
         a declined prompt, and a capability that App Store Connect rejects for a macOS
         bundle ID. Signing may then fail or the app may misbehave at runtime. An explicit
-        `provisioning_profile = "auto"` keeps its errors.
+        `provisioning_profile = "auto"` still fails on error.
 
         Supported capabilities (name, entitlement key):
         {}
@@ -782,8 +781,8 @@ fn print_extensions() {
 
         ## kind = "safari_web_extension"
 
-        Embeds a Safari Web Extension. The resources_dir is copied wholesale into
-        Contents/Resources/ (manifest.json, JS, HTML, icons, etc.).
+        Embeds a Safari Web Extension. The full contents of resources_dir are copied
+        into Contents/Resources/ (manifest.json, JS, HTML, icons, etc.).
         <magenta>
         [[extensions]]
         kind          = "safari_web_extension"
@@ -822,8 +821,8 @@ fn print_extensions() {
         A macOS System Extension (Network Extension or Endpoint Security), embedded under
         Contents/Library/SystemExtensions/. Unlike app extensions, a system extension is not
         sandboxed alongside the host app: once installed it runs as its own long-lived,
-        OS-managed process, activated at runtime by the host app via `SystemExtensions.framework` (`OSSystemExtensionRequest`). strudel only assembles and signs the bundle, it does not
-        call that API for you.
+        OS-managed process, activated at runtime by the host app via `SystemExtensions.framework` (`OSSystemExtensionRequest`). strudel only assembles and signs the bundle.
+        It does not call that API for you.
         <magenta>
         [[extensions]]
         kind                  = "system_extension"
@@ -989,9 +988,9 @@ fn print_ios_device() {
           5. Cache the profile at .strudel/<<bundle_id>>.mobileprovision
 
         On subsequent runs the cached profile is reused if it is still current. A profile
-        is considered stale when it has expired (within 5 minutes), is missing a device
-        UDID, or the application-identifier no longer matches. Stale profiles are silently
-        re-fetched.
+        is stale if it expires within 5 minutes, is missing a device UDID, or has a
+        different application-identifier. strudel re-fetches stale profiles without
+        prompting.
 
         To target specific devices for one build (all must be in devices.toml):
         <blue>
@@ -1060,16 +1059,16 @@ fn print_dylibs() {
         ## Resolving entries
 
         Every entry resolves relative to the config file's directory unless absolute,
-        same as any other path - including a bare name like `libFoo.dylib`. If the
-        resolved location doesn't exist, strudel falls back to whichever
+        same as any other path, including a bare name like `libFoo.dylib`. If the
+        resolved location does not exist, strudel falls back to whichever
         `.build/<<triple>>/release/` directory it just built for this invocation.
 
-        The fallback is what makes a bare name work for anything swift build produces
-        or links per-platform: it stays correct across build destinations (e.g.
-        switching between iOS simulator and device) without editing the list. A
-        vendored dylib or framework that lives outside the build output and is the
-        same for every triple just needs a real path (e.g. `vendor/libBar.dylib`) and
-        the fallback never triggers.
+        The fallback makes a bare name work for anything swift build produces or links
+        per-platform. It stays correct across build destinations (e.g. switching
+        between iOS simulator and device) without editing the list. A vendored dylib or
+        framework that lives outside the build output and is the same for every triple
+        needs a real path (e.g. `vendor/libBar.dylib`). The fallback does not trigger
+        for it.
 
         ## dylibs
 
@@ -1088,8 +1087,8 @@ fn print_dylibs() {
              code (e.g. Sparkle's bundled Autoupdate.app / XPC services) carries your
              own Team ID instead of the vendor's
 
-        No install-name rewrite is done for frameworks: SwiftPM binaryTargets are
-        already linked with an @rpath install name.
+        strudel does not rewrite install names for frameworks. SwiftPM binaryTargets
+        are already linked with an @rpath install name.
 
         strudel injects -rpath @executable_path/../Frameworks at link time via
         <blue>-Xlinker -rpath -Xlinker @executable_path/../Frameworks</> in <blue>swift build</>
@@ -1105,8 +1104,8 @@ fn print_dylibs() {
 
         ## Static libraries
 
-        Static libraries (.a) are linked directly into the binary and do not need to be
-        listed in embed_libs, nothing to embed or sign.
+        Static libraries (.a) are linked directly into the binary. They do not need to
+        be listed in embed_libs, since there is nothing to embed or sign.
     "#});
 }
 
@@ -1127,17 +1126,16 @@ fn print_copy() {
         sign     = true                  # codesign after copying; default: false
         entitlements_json_path = "helper-entitlements.json"  # optional, requires sign = true
         </>
-        This copies `path/to/helper` to `Contents/MacOS/helper` - same file name,
-        just relocated. `dest_dir` is created (including parent directories) if it
+        This copies `path/to/helper` to `Contents/MacOS/helper` with the same file name. `dest_dir` is created (including parent directories) if it
         doesn't already exist. Repeat `[[build.copy]]` for multiple entries.
 
         ## Signing
 
         `sign = true` codesigns the copied item before the outer bundle is sealed,
-        the same way `embed_libs` entries are signed - required for any Mach-O
-        executable or nested bundle placed outside Contents/Frameworks, since nested
-        code must carry its own valid signature for `codesign --verify --deep
-        --strict` and notarization to pass.
+        the same way `embed_libs` entries are signed. Set it for any Mach-O
+        executable or nested bundle placed outside Contents/Frameworks. Nested code
+        must carry its own valid signature for `codesign --verify --deep --strict`
+        and notarization to pass.
 
         strudel picks the codesign flags automatically based on `src`:
           - a directory (e.g. a nested helper `.app` or plugin bundle) is signed with
@@ -1259,7 +1257,7 @@ fn print_ci() {
               - uses: actions/checkout@v4
 
               - name: Install strudel
-                run: cargo install strudel   # or use cargo-dist / axo
+                run: cargo install strudel-cli   # or use cargo-dist / axo
 
               - name: Release
                 env:
@@ -1275,9 +1273,8 @@ fn print_ci() {
                   strudel release --ci
 
         Pass <blue>--ci</> to trim the per-second notarization countdown, which
-        otherwise spams captured CI logs with a line for every tick. Other output
-        (steps, errors, submission IDs) is unaffected, so it's safe to leave on
-        while debugging a CI run.
+        otherwise adds a line to captured CI logs for every tick. Other output
+        (steps, errors, submission IDs) is unaffected.
 
         ## Provisioning profiles
 
@@ -1312,8 +1309,8 @@ fn print_ios_free_provisioning() {
     print_help(&cformatdoc! {r#"
         # Free Apple ID provisioning
 
-        strudel can provision iOS device builds using any Apple ID - no paid Apple
-        Developer account required. This mirrors what Xcode does when you sign in with
+        strudel can provision iOS device builds using any Apple ID. No paid Apple
+        Developer account is required. This mirrors what Xcode does when you sign in with
         a plain Apple ID: 7-day development profiles, max 3 devices and 10 App IDs per
         Personal Team.
 
@@ -1383,13 +1380,13 @@ fn print_ios_free_provisioning() {
         Each refresh revokes the previous dev certificate for this machine (to stay
         within the 2-cert limit per team) and generates a new RSA keypair + CSR.
 
-        ## Under the hood
+        ## Implementation
 
         strudel implements the Apple developer-services provisioning protocol natively:
           - Authenticates via Apple's GrandSlam SRP-6a flow (SHA-256, custom pre-hash)
           - Generates anisette headers via <green>AOSKit.framework</> (no Docker required)
           - Calls <green>developerservices2.apple.com</> endpoints used by Xcode itself
-          - Shells <green>openssl</> to generate the RSA keypair + CSR
+          - Runs <green>openssl</> to generate the RSA keypair + CSR
 
         Known issue: <green>AOSKit.retrieveOTPHeadersForDSID:</> returned -45070 in early
         macOS 27 betas. If you see anisette errors, file an issue.
@@ -1552,7 +1549,7 @@ fn print_macos_app() {
     print_help(&cformatdoc! {r#"
         # macOS app checklist
 
-        Things that don't fail the build but read as unpolished, or break
+        Items that pass the build but look unpolished, or break
         sandboxed/notarized builds.
 
         ## Info.plist data are set in info_json_path
@@ -1593,20 +1590,20 @@ fn print_macos_app() {
 
         A MenuBarExtra label built from Image(nsImage:) needs isTemplate = true
         set on the underlying NSImage (plus manual resizing to ~18pt height,
-        preserving aspect ratio) or it won't tint correctly for light/dark mode
-        and click-highlight the way native status-item icons do.
+        preserving aspect ratio). Without it, the icon renders untinted in light
+        and dark mode and does not highlight on click like native status-item icons.
 
         ## Menu-bar-only apps opening a window
 
         With LSUIElement set, opening any window (Settings, About, a document)
         needs an explicit switch to .regular activation policy first, or the
         window can open behind other apps or not come to front at all. Switching
-        alone isn't enough: the policy change needs a beat to take effect, so
-        give it ~100ms before opening, or the window still opens behind.
+        alone is not enough. The policy change needs time to take effect, so wait
+        about 100ms before opening, or the window still opens behind.
 
         ## App Sandbox entitlements
 
-        Decide sandboxing up front; retrofitting it onto an app that assumed
+        Decide on sandboxing up front. Adding it to an app that assumed
         unrestricted file access is the most common late-stage rework. See
         <blue>strudel help entitlements</>.
 
