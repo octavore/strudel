@@ -124,6 +124,25 @@ impl AppleId {
         Ok(())
     }
 
+    /// Ensure the App ID for `bundle_id` exists, then enable `features` on it.
+    ///
+    /// Returns true if the App ID was updated. Features that are already
+    /// enabled are not sent again.
+    ///
+    /// Experimental. Apple does not document the underlying `updateAppId`
+    /// action.
+    pub fn ensure_capabilities(
+        &self,
+        session: &Session,
+        team_id: &str,
+        bundle_id: &str,
+        name: &str,
+        features: &[(&str, &str)],
+    ) -> Result<bool> {
+        dev_services::DevServicesClient::new(&self.agent, &self.anisette, session)
+            .ensure_capabilities(team_id, bundle_id, name, features)
+    }
+
     /// Generate a new RSA keypair and CSR, submit to Apple, and download the
     /// 7-day development profile for `bundle_id`. The returned `DevProfile`
     /// contains the raw `.mobileprovision` bytes, the signed certificate in

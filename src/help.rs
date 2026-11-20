@@ -545,6 +545,9 @@ fn capabilities_table() -> String {
                 Known::Unverified(false) => markers.push('†'),
                 Known::Unverified(true) | Known::Unknown => markers.push('?'),
             }
+            if c.free_feature.value().is_some() {
+                markers.push('*');
+            }
             cformat!(
                 "  {:<name_width$}  {}",
                 format!("{}{markers}", c.name),
@@ -705,6 +708,9 @@ fn print_entitlements() {
         Only capabilities listed above have a known App Store Connect API `CapabilityType`.
         Anything else, such as DriverKit or Matter, must be enabled by hand at
         <green>https://developer.apple.com/account/resources/identifiers/list</>.
+
+        `*` marks capabilities also supported (experimentally) under free/Apple ID
+        provisioning. See <blue>strudel help ios-free-provisioning</> for the free-tier caveats.
 
         ## iOS device builds
 
@@ -976,9 +982,10 @@ fn print_ios_device() {
         </>
         On first run, strudel calls the App Store Connect API to:
           1. Look up (or create) the bundle ID
-          2. Find your development certificate(s)
-          3. Create a development profile embedding all tracked devices
-          4. Cache the profile at .strudel/<<bundle_id>>.mobileprovision
+          2. Enable any required capabilities on it (see <blue>strudel help entitlements</>)
+          3. Find your development certificate(s)
+          4. Create a development profile embedding all tracked devices
+          5. Cache the profile at .strudel/<<bundle_id>>.mobileprovision
 
         On subsequent runs the cached profile is reused if it is still current. A profile
         is considered stale when it has expired (within 5 minutes), is missing a device
@@ -1385,6 +1392,19 @@ fn print_ios_free_provisioning() {
 
         Known issue: <green>AOSKit.retrieveOTPHeadersForDSID:</> returned -45070 in early
         macOS 27 betas. If you see anisette errors, file an issue.
+
+        ## Capabilities (experimental)
+
+        strudel can also enable a small set of capabilities on the App ID under free
+        provisioning. These are App Groups, iCloud, and Data Protection. They are marked
+        with `*` in <blue>strudel help entitlements</>.
+
+        The request uses an undocumented Apple endpoint, so treat it as best-effort.
+        Features already enabled on the App ID are not sent again. Apple limits personal
+        team accounts to a few capabilities.
+
+        For a capability that strudel cannot enable on a free account, it prints a warning
+        and continues the build. Enable it in the portal if your account supports it.
 
         ## See also
 

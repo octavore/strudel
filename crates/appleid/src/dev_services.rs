@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{Cursor, Write};
 use std::process::{Command, Stdio};
 
@@ -104,6 +105,19 @@ struct ListAppIdsResponse {
 struct AppIdEntry {
     identifier: String,
     app_id_id: String,
+    /// Enabled features by code. Values are booleans or strings.
+    #[serde(default)]
+    features: BTreeMap<String, plist::Value>,
+}
+
+/// Request body of `ios/updateAppId`. Feature codes are top-level keys.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAppIdBody {
+    team_id: String,
+    app_id_id: String,
+    #[serde(flatten)]
+    features: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -232,6 +246,17 @@ impl<'a> DevServicesClient<'a> {
     }
 
     pub fn ensure_app_id(&self, team_id: &str, bundle_id: &str, name: &str) -> Result<String> {
+        Ok(self
+            .ensure_app_id_entry(team_id, bundle_id, name)?
+            .app_id_id)
+    }
+
+    fn ensure_app_id_entry(
+        &self,
+        team_id: &str,
+        bundle_id: &str,
+        name: &str,
+    ) -> Result<AppIdEntry> {
         let resp: ListAppIdsResponse = parse(self.post(
             "ios/listAppIds",
             TeamIdBody {
@@ -239,8 +264,8 @@ impl<'a> DevServicesClient<'a> {
             },
         )?)?;
 
-        if let Some(existing) = resp.app_ids.iter().find(|a| a.identifier == bundle_id) {
-            return Ok(existing.app_id_id.clone());
+        if let Some(existing) = resp.app_ids.into_iter().find(|a| a.identifier == bundle_id) {
+            return Ok(existing);
         }
 
         let resp: AddAppIdResponse = parse(self.post(
@@ -251,7 +276,40 @@ impl<'a> DevServicesClient<'a> {
                 name: name.into(),
             },
         )?)?;
-        Ok(resp.app_id.app_id_id)
+        Ok(resp.app_id)
+    }
+
+    /// Ensure the App ID exists, then enable features on it.
+    ///
+    /// Returns true if `updateAppId` was sent. It is skipped if every feature
+    /// is already enabled.
+    ///
+    /// Experimental. The `updateAppId` action name and request shape are
+    /// inferred from Xcode's network behavior. Apple does not document them.
+    /// A wrong code or shape is reported by [`check_result_code`].
+    ///
+    /// `features` is `(feature code, enabled value)` pairs, such as
+    /// `("APG3427HIY", "on")` for App Groups.
+    pub fn ensure_capabilities(
+        &self,
+        team_id: &str,
+        bundle_id: &str,
+        name: &str,
+        features: &[(&str, &str)],
+    ) -> Result<bool> {
+        if features.is_empty() {
+            return Ok(false);
+        }
+        let entry = self.ensure_app_id_entry(team_id, bundle_id, name)?;
+        let missing = missing_features(&entry.features, features);
+        if missing.is_empty() {
+            return Ok(false);
+        }
+        self.post(
+            "ios/updateAppId",
+            update_app_id_body(team_id, &entry.app_id_id, &missing),
+        )?;
+        Ok(true)
     }
 
     // Generates a keypair + CSR internally, submits to Apple, returns DER cert +
@@ -523,6 +581,51 @@ impl<'a> DevServicesClient<'a> {
     }
 }
 
+fn update_app_id_body(
+    team_id: &str,
+    app_id_id: &str,
+    features: &[(&str, &str)],
+) -> UpdateAppIdBody {
+    UpdateAppIdBody {
+        team_id: team_id.into(),
+        app_id_id: app_id_id.into(),
+        features: features
+            .iter()
+            .map(|(code, value)| (code.to_string(), value.to_string()))
+            .collect(),
+    }
+}
+
+/// Features that are not enabled on the App ID yet.
+fn missing_features<'a>(
+    enabled: &BTreeMap<String, plist::Value>,
+    wanted: &[(&'a str, &'a str)],
+) -> Vec<(&'a str, &'a str)> {
+    wanted
+        .iter()
+        .filter(|(code, value)| {
+            !enabled
+                .get(*code)
+                .is_some_and(|have| feature_matches(have, value))
+        })
+        .copied()
+        .collect()
+}
+
+/// True if an enabled feature value equals the wanted value. Booleans match
+/// `on` and `off`.
+fn feature_matches(have: &plist::Value, want: &str) -> bool {
+    match have {
+        plist::Value::Boolean(b) => match want {
+            "on" | "true" => *b,
+            "off" | "false" => !*b,
+            _ => false,
+        },
+        plist::Value::String(s) => s == want,
+        _ => false,
+    }
+}
+
 fn parse<T: serde::de::DeserializeOwned>(dict: plist::Dictionary) -> Result<T> {
     plist::from_value(&plist::Value::Dictionary(dict)).context("deserializing response")
 }
@@ -595,6 +698,80 @@ mod tests {
         assert_eq!(bundle_id_display("com.example.myapp"), "Myapp");
         assert_eq!(bundle_id_display("MyApp"), "MyApp");
         assert_eq!(bundle_id_display("com.co.App"), "App");
+    }
+
+    #[test]
+    fn update_app_id_body_puts_features_at_top_level() {
+        let body = update_app_id_body("TEAM1", "APPID1", &[("APG3427HIY", "on"), ("iCloud", "on")]);
+        let dict = plist::to_value(&body).unwrap().into_dictionary().unwrap();
+        assert_eq!(dict.get("teamId").unwrap().as_string(), Some("TEAM1"));
+        assert_eq!(dict.get("appIdId").unwrap().as_string(), Some("APPID1"));
+        assert_eq!(dict.get("APG3427HIY").unwrap().as_string(), Some("on"));
+        assert_eq!(dict.get("iCloud").unwrap().as_string(), Some("on"));
+        assert_eq!(dict.len(), 4);
+    }
+
+    const LIST_APP_IDS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>resultCode</key><integer>0</integer>
+  <key>appIds</key><array>
+    <dict>
+      <key>identifier</key><string>com.example.other</string>
+      <key>appIdId</key><string>OTHER</string>
+    </dict>
+    <dict>
+      <key>identifier</key><string>com.example.app</string>
+      <key>appIdId</key><string>APPID1</string>
+      <key>features</key><dict>
+        <key>APG3427HIY</key><true/>
+        <key>iCloud</key><false/>
+        <key>dataProtection</key><string>complete</string>
+      </dict>
+    </dict>
+  </array>
+</dict></plist>"#;
+
+    fn fixture_entry(bundle_id: &str) -> AppIdEntry {
+        let val = plist::Value::from_reader(Cursor::new(LIST_APP_IDS.as_bytes())).unwrap();
+        let resp: ListAppIdsResponse = parse(val.into_dictionary().unwrap()).unwrap();
+        resp.app_ids
+            .into_iter()
+            .find(|a| a.identifier == bundle_id)
+            .unwrap()
+    }
+
+    #[test]
+    fn missing_features_skips_enabled_features() {
+        let entry = fixture_entry("com.example.app");
+        let missing = missing_features(
+            &entry.features,
+            &[
+                ("APG3427HIY", "on"),
+                ("iCloud", "on"),
+                ("dataProtection", "complete"),
+            ],
+        );
+        assert_eq!(missing, vec![("iCloud", "on")]);
+    }
+
+    #[test]
+    fn missing_features_detects_value_mismatch() {
+        let entry = fixture_entry("com.example.app");
+        let missing = missing_features(
+            &entry.features,
+            &[
+                ("dataProtection", "completeUnlessOpen"),
+                ("APG3427HIY", "off"),
+            ],
+        );
+        assert_eq!(missing.len(), 2);
+    }
+
+    #[test]
+    fn missing_features_is_everything_without_features() {
+        let entry = fixture_entry("com.example.other");
+        let missing = missing_features(&entry.features, &[("APG3427HIY", "on")]);
+        assert_eq!(missing, vec![("APG3427HIY", "on")]);
     }
 
     #[test]

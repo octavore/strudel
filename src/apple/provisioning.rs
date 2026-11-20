@@ -2,9 +2,10 @@ use anyhow::{Context, Result, bail};
 use appleid::{AppleId, Session, Team};
 use clml::cprintln;
 
+use crate::apple::capabilities::{self, CapabilityDef, Known, Severity};
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder::keychain as kc;
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, ResolvedIosSection};
 use crate::devices::DeviceSet;
 use crate::paths::{Paths, StrudelData, ensure_strudel_dir};
 
@@ -131,7 +132,11 @@ pub fn registered_udids(_cfg: &ResolvedConfig) -> Result<Vec<String>> {
 /// Fetch a 7-day development profile via Apple ID, cache it at
 /// `paths.cached_profile`, and import the returned cert+key into the persistent
 /// dev keychain so codesign can use the identity.
-pub fn auto_fetch_profile(cfg: &ResolvedConfig, paths: &Paths) -> Result<()> {
+pub fn auto_fetch_profile(
+    cfg: &ResolvedConfig,
+    ios: &ResolvedIosSection,
+    paths: &Paths,
+) -> Result<()> {
     let data = StrudelData::locate()?;
     let apple_id = get_apple_id(&data)?;
     let session = load_session_or_err(&data)?;
@@ -144,6 +149,8 @@ pub fn auto_fetch_profile(cfg: &ResolvedConfig, paths: &Paths) -> Result<()> {
              Run `strudel devices add` to register your device(s)."
         );
     }
+
+    ensure_capabilities(&apple_id, &session, &team, cfg, ios)?;
     let udids: Vec<&str> = device_set.device.iter().map(|d| d.udid.as_str()).collect();
 
     // Reuse a previously issued cert+key if it's still valid, so refreshing the
@@ -252,6 +259,120 @@ pub fn dev_cert_sha1() -> Result<Option<String>> {
     Ok(parse_fingerprint(&stdout))
 }
 
+/// Enable required capabilities that free accounts can use.
+///
+/// See [`capabilities::CapabilityDef::free_feature`]. Capabilities requested
+/// through `build.entitlements_json_path` or `[ios] capabilities` that free
+/// provisioning cannot enable produce a warning. A failed update is an error
+/// for `Verified` features and a warning for the rest.
+fn ensure_capabilities(
+    apple_id: &AppleId,
+    session: &Session,
+    team: &Team,
+    cfg: &ResolvedConfig,
+    ios: &ResolvedIosSection,
+) -> Result<()> {
+    let required =
+        capabilities::required(cfg.entitlements_json_path.as_deref(), &ios.capabilities)?;
+    let plan = FreePlan::new(required);
+
+    if !plan.unsupported.is_empty() {
+        let names: Vec<&str> = plan.unsupported.iter().map(|c| c.name).collect();
+        cprintln!(
+            "<yellow>warning:</yellow> These capabilities cannot be enabled under free \
+             provisioning and need a paid Apple Developer Program account: {}",
+            names.join(", ")
+        );
+    }
+
+    for (severity, caps) in [
+        (Severity::Error, &plan.verified),
+        (Severity::Warning, &plan.unverified),
+    ] {
+        if caps.is_empty() {
+            continue;
+        }
+        cprintln!("<dim>Enabling capabilities on the App ID (experimental)...</dim>");
+        let result = apple_id.ensure_capabilities(
+            session,
+            &team.id,
+            &cfg.bundle_id,
+            &cfg.app_name,
+            &feature_pairs(caps),
+        );
+        report_enable_result(severity, caps, &cfg.bundle_id, result)?;
+    }
+    Ok(())
+}
+
+/// Required capabilities grouped by how free provisioning handles them.
+struct FreePlan {
+    /// Free feature is `Verified`. A failed update is an error.
+    verified: Vec<&'static CapabilityDef>,
+    /// Free feature is `Unverified`. A failed update is a warning.
+    unverified: Vec<&'static CapabilityDef>,
+    /// No known free feature.
+    unsupported: Vec<&'static CapabilityDef>,
+}
+
+impl FreePlan {
+    fn new(required: Vec<&'static CapabilityDef>) -> Self {
+        let mut plan = FreePlan {
+            verified: Vec::new(),
+            unverified: Vec::new(),
+            unsupported: Vec::new(),
+        };
+        for cap in required {
+            match (&cap.free_feature, cap.free_feature.severity()) {
+                (Known::Unknown, _) => plan.unsupported.push(cap),
+                (_, Severity::Error) => plan.verified.push(cap),
+                (_, Severity::Warning) => plan.unverified.push(cap),
+            }
+        }
+        plan
+    }
+}
+
+/// Feature code and value of each capability that has a free feature.
+fn feature_pairs(caps: &[&'static CapabilityDef]) -> Vec<(&'static str, &'static str)> {
+    caps.iter()
+        .filter_map(|c| c.free_feature.value().map(|f| (f.code, f.value)))
+        .collect()
+}
+
+/// Report the outcome of an `updateAppId` call. A failure is an error if
+/// `severity` is `Error` and a warning otherwise.
+fn report_enable_result(
+    severity: Severity,
+    caps: &[&'static CapabilityDef],
+    bundle_id: &str,
+    result: Result<bool>,
+) -> Result<()> {
+    match result {
+        Ok(true) => {
+            let names: Vec<&str> = caps.iter().map(|c| c.name).collect();
+            cprintln!("  Enabled {}", names.join(", "));
+            Ok(())
+        },
+        Ok(false) => Ok(()),
+        Err(err) => {
+            let err = err.context(format!(
+                "Failed to enable capabilities on App ID {bundle_id}"
+            ));
+            match severity {
+                Severity::Error => Err(err),
+                Severity::Warning => {
+                    cprintln!(
+                        "<yellow>warning:</yellow> {err:#}. Enable the capabilities by hand if \
+                         the app needs them."
+                    );
+                    Ok(())
+                },
+            }
+        },
+    }
+}
+
 fn get_apple_id(_data: &StrudelData) -> Result<AppleId> {
     AppleId::new().context("initializing Apple ID client")
 }
@@ -284,4 +405,82 @@ fn load_session_or_err(data: &StrudelData) -> Result<Session> {
 fn save_session(data: &StrudelData, session: &Session) -> Result<()> {
     let s = serde_json::to_string_pretty(session).context("serializing session")?;
     std::fs::write(&data.session_json, s).context("saving session")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::apple::capabilities::{CapabilityType, FreeFeature};
+
+    fn named(name: &str) -> &'static CapabilityDef {
+        capabilities::lookup_name(name).unwrap()
+    }
+
+    static VERIFIED: CapabilityDef = CapabilityDef {
+        name: "Test Verified",
+        entitlement_keys: &["com.apple.developer.test"],
+        capability_type: CapabilityType::AppGroups,
+        macos: Known::Unknown,
+        requires_profile: Known::Unknown,
+        identifiers: false,
+        free_feature: Known::Verified(FreeFeature {
+            code: "TEST",
+            value: "on",
+        }),
+        source: Some("test"),
+    };
+
+    #[test]
+    fn free_plan_groups_by_free_feature() {
+        let plan = FreePlan::new(vec![named("App Groups"), named("HealthKit"), &VERIFIED]);
+        assert_eq!(plan.verified.len(), 1);
+        assert_eq!(plan.verified[0].name, "Test Verified");
+        assert_eq!(plan.unverified.len(), 1);
+        assert_eq!(plan.unverified[0].name, "App Groups");
+        assert_eq!(plan.unsupported.len(), 1);
+        assert_eq!(plan.unsupported[0].name, "HealthKit");
+    }
+
+    #[test]
+    fn feature_pairs_use_table_codes() {
+        let pairs = feature_pairs(&[named("App Groups"), named("Data Protection")]);
+        assert_eq!(
+            pairs,
+            vec![("APG3427HIY", "on"), ("dataProtection", "complete")]
+        );
+    }
+
+    #[test]
+    fn unverified_failure_warns() {
+        let caps = [named("App Groups")];
+        let result = report_enable_result(
+            Severity::Warning,
+            &caps,
+            "com.example.app",
+            Err(anyhow::anyhow!("rejected")),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn verified_failure_errors() {
+        let caps = [&VERIFIED];
+        let err = report_enable_result(
+            Severity::Error,
+            &caps,
+            "com.example.app",
+            Err(anyhow::anyhow!("rejected")),
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("com.example.app"), "{msg}");
+        assert!(msg.contains("rejected"), "{msg}");
+    }
+
+    #[test]
+    fn success_is_ok_for_either_severity() {
+        let caps = [named("iCloud")];
+        assert!(report_enable_result(Severity::Error, &caps, "a", Ok(true)).is_ok());
+        assert!(report_enable_result(Severity::Warning, &caps, "a", Ok(false)).is_ok());
+    }
 }

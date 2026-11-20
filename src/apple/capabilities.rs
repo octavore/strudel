@@ -43,7 +43,6 @@ impl<T> Known<T> {
     }
 
     /// Value of the fact, verified or not. `None` if unknown.
-    #[allow(dead_code)]
     pub fn value(&self) -> Option<&T> {
         match self {
             Known::Verified(v) | Known::Unverified(v) => Some(v),
@@ -127,13 +126,12 @@ impl CapabilityType {
 
 /// Feature code and enabled value for the developer-services protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct FreeFeature {
     pub code: &'static str,
     pub value: &'static str,
 }
 
-/// Fields `free_feature` and `source` are not read by build logic yet.
+/// Field `source` is not read by build logic.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct CapabilityDef {
