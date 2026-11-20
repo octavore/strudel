@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use crate::config::build_config::BuildConfig;
 use crate::config::build_target::{IosDeviceFamily, IosProvisioningBackend};
 use crate::config::{
-    GlobalConfig, ResolvedConfig, ResolvedIosSection, ResolvedMacOsSection, ResolvedTargetPlatform,
-    Sourced,
+    ExtensionKind, GlobalConfig, ResolvedConfig, ResolvedExtension, ResolvedIosSection,
+    ResolvedMacOsSection, ResolvedTargetPlatform, Sourced,
 };
 
 pub const FULL: &str = indoc::indoc! {r#"
@@ -112,6 +112,25 @@ pub fn resolved_ios() -> ResolvedConfig {
         }
         .into(),
     )
+}
+
+/// An `app_extension` entry for an iOS target, with no profile of its own.
+pub fn resolved_ios_extension(name: &str, bundle_id: &str) -> ResolvedExtension {
+    ResolvedExtension {
+        kind: ExtensionKind::AppExtension,
+        target_name: name.into(),
+        bundle_id: bundle_id.into(),
+        name: name.into(),
+        info_json_path: None,
+        entitlements_json_path: None,
+        provisioning_profile: None,
+        manage_provisioning_profile: false,
+        resources_dir: None,
+        principal_class: Some(format!("{name}.Provider")),
+        extension_point_identifier: Some(
+            "com.apple.authentication-services-credential-provider-ui".into(),
+        ),
+    }
 }
 
 /// [`resolved`] with a macOS target platform and no DMG styling.

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::{Context, Result, bail};
 use appleid::{AppleId, Session, Team};
 use clml::cprintln;
@@ -129,12 +131,22 @@ pub fn registered_udids(_cfg: &ResolvedConfig) -> Result<Vec<String>> {
     Ok(devices.into_iter().map(|d| d.udid).collect())
 }
 
+/// Bundle ID that a free development profile is fetched for. This is the host
+/// app or one extension.
+pub struct FreeProfileTarget<'a> {
+    pub bundle_id: &'a str,
+    /// App or extension name, used as the App ID name.
+    pub label: &'a str,
+    /// Where the fetched profile is cached.
+    pub cache_path: &'a Path,
+}
+
 /// Fetch a 7-day development profile via Apple ID, cache it at
-/// `paths.cached_profile`, and import the returned cert+key into the persistent
+/// `target.cache_path`, and import the returned cert+key into the persistent
 /// dev keychain so codesign can use the identity. `caps` are enabled on the
 /// App ID first where free provisioning supports them.
 pub fn auto_fetch_profile(
-    cfg: &ResolvedConfig,
+    target: &FreeProfileTarget,
     caps: &[&'static CapabilityDef],
     paths: &Paths,
 ) -> Result<()> {
@@ -151,7 +163,7 @@ pub fn auto_fetch_profile(
         );
     }
 
-    ensure_capabilities(&apple_id, &session, &team, cfg, caps)?;
+    ensure_capabilities(&apple_id, &session, &team, target, caps)?;
     let udids: Vec<&str> = device_set.device.iter().map(|d| d.udid.as_str()).collect();
 
     // Reuse a previously issued cert+key if it's still valid, so refreshing the
@@ -168,7 +180,7 @@ pub fn auto_fetch_profile(
         .fetch_development_profile(
             &session,
             &team.id,
-            &cfg.bundle_id,
+            target.bundle_id,
             &udids,
             cached_identity,
             |certs| {
@@ -194,11 +206,11 @@ pub fn auto_fetch_profile(
         })?;
 
     ensure_strudel_dir(&paths.strudel_dir)?;
-    std::fs::write(&paths.cached_profile, &profile.mobileprovision)
+    std::fs::write(target.cache_path, &profile.mobileprovision)
         .context("writing provisioning profile")?;
     cprintln!(
         "<green>✔</green> Profile cached at {}",
-        paths.cached_profile.display()
+        target.cache_path.display()
     );
 
     std::fs::write(&data.cert_der, &profile.cert_der).context("writing cached dev cert")?;
@@ -269,7 +281,7 @@ fn ensure_capabilities(
     apple_id: &AppleId,
     session: &Session,
     team: &Team,
-    cfg: &ResolvedConfig,
+    target: &FreeProfileTarget,
     caps: &[&'static CapabilityDef],
 ) -> Result<()> {
     let plan = FreePlan::new(caps);
@@ -294,11 +306,11 @@ fn ensure_capabilities(
         let result = apple_id.ensure_capabilities(
             session,
             &team.id,
-            &cfg.bundle_id,
-            &cfg.app_name,
+            target.bundle_id,
+            target.label,
             &feature_pairs(caps),
         );
-        report_enable_result(severity, caps, &cfg.bundle_id, result)?;
+        report_enable_result(severity, caps, target.bundle_id, result)?;
     }
     Ok(())
 }

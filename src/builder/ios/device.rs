@@ -1,11 +1,12 @@
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clml::{cformat, cformatdoc, cprintln};
 
 use crate::apple::provisioning::{self, ensure_keychain_ready};
 use crate::builder::ios::IosTarget;
+use crate::builder::ios::bundle::ios_appex_dir;
 use crate::builder::keychain::parse_identity_line;
 use crate::builder::profile::{check_identity_authorized, decode_profile};
 use crate::builder::{IosBuilder, is_framework};
@@ -26,11 +27,26 @@ impl IosBuilder {
         // Resolve target devices (returns UDIDs).
         let target_udids = self.resolve_target_udids(device_selectors)?;
 
-        // Resolve provisioning profile.
-        let profile_path = self.resolve_profile(&target_udids)?;
+        // Resolve the provisioning profile of the host (first) and of each
+        // extension. Each extension is sandboxed on its own bundle ID, so the
+        // host's profile does not cover it.
+        let profile_targets = self.profile_targets();
+        let mut profiles = Vec::with_capacity(profile_targets.len());
+        for target in &profile_targets {
+            profiles.push(self.resolve_profile(target, &target_udids)?);
+        }
+        let (profile_path, extension_profiles) = profiles
+            .split_first()
+            .context("Host profile target is missing")?;
 
         self.step("Embedding provisioning profile...");
-        self.copy_file(&profile_path, &app_bundle.join("embedded.mobileprovision"))?;
+        self.copy_file(profile_path, &app_bundle.join("embedded.mobileprovision"))?;
+        let mut appexes = Vec::new();
+        for (ext, ext_profile) in self.cfg.extensions.iter().zip(extension_profiles) {
+            let appex = ios_appex_dir(&app_bundle, ext);
+            self.copy_file(ext_profile, &appex.join("embedded.mobileprovision"))?;
+            appexes.push((appex, ext_profile.as_path()));
+        }
 
         // For free provisioning, always sign with the exact certificate we
         // issued, identified by SHA-1, ignoring any configured
@@ -54,7 +70,7 @@ impl IosBuilder {
         } else {
             &self.cfg.sign_identity
         };
-        self.sign_ios_device(&app_bundle, &profile_path, identity)?;
+        self.sign_ios_device(&app_bundle, profile_path, &appexes, identity)?;
 
         let app_str = app_bundle.to_str().unwrap();
         for udid in &target_udids {
@@ -123,17 +139,30 @@ impl IosBuilder {
         Ok(())
     }
 
-    /// Sign a device `.app` bundle with entitlements extracted directly from
-    /// the provisioning profile. Using profile-derived entitlements (rather
-    /// than a hand-edited JSON) ensures the signature matches the profile
-    /// exactly. `--generate-entitlement-der` is required on modern iOS.
+    /// Sign a device `.app` bundle and its extensions, inside-out: embedded
+    /// libraries, then each `.appex` (`appexes`, with the profile it embeds),
+    /// then the host. Each bundle is signed with entitlements extracted
+    /// directly from its own provisioning profile. Using profile-derived
+    /// entitlements (rather than a hand-edited JSON) ensures the signature
+    /// matches the profile exactly. `--generate-entitlement-der` is required on
+    /// modern iOS.
     fn sign_ios_device(
         &self,
         app_bundle: &Path,
         profile_path: &Path,
+        appexes: &[(PathBuf, &Path)],
         identity: &str,
     ) -> Result<()> {
         if self.dry_run {
+            for (appex, appex_profile) in appexes {
+                self.echo(cformatdoc! {"
+                    <dim>[dry-run]</dim> security cms -D -i {} | extract Entitlements
+                    <dim>[dry-run]</dim> codesign --force --sign {identity} --entitlements \
+                    appex-entitlements.plist --generate-entitlement-der {}",
+                    appex_profile.display(),
+                    appex.display()
+                });
+            }
             self.echo(cformatdoc! {"
                 <dim>[dry-run]</dim> security cms -D -i {} | extract Entitlements
                 <dim>[dry-run]</dim> codesign --force --sign {identity} --entitlements \
@@ -147,27 +176,6 @@ impl IosBuilder {
         self.step("Checking signing identity...");
         self.check_signing_identity(identity)?;
 
-        let profile_plist = decode_profile(profile_path)?;
-
-        self.step("Checking certificate is authorized by profile...");
-        check_identity_authorized(
-            identity,
-            &profile_plist,
-            "Run: strudel profile fetch --force",
-        )?;
-
-        let entitlements = profile_plist
-            .as_dictionary()
-            .and_then(|d| d.get("Entitlements"))
-            .context("Provisioning profile has no Entitlements key")?;
-
-        let ent_plist_path = app_bundle
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join("ios-device-entitlements.plist");
-        plist::to_file_xml(&ent_plist_path, entitlements)
-            .context("Failed to write entitlements plist")?;
-        let ent_str = ent_plist_path.to_str().unwrap();
         let bundle_str = app_bundle.to_str().unwrap();
 
         if !self.cfg.embed_libs.is_empty() {
@@ -190,18 +198,23 @@ impl IosBuilder {
             }
         }
 
-        std::process::Command::new("codesign")
-            .args([
-                "--force",
-                "--sign",
-                identity,
-                "--entitlements",
-                ent_str,
-                "--generate-entitlement-der",
-                bundle_str,
-            ])
-            .status()
-            .context("Failed to run codesign")?;
+        for (appex, appex_profile) in appexes {
+            self.step(&format!("Signing extension {}...", appex.display()));
+            let ent_plist_path = app_bundle.parent().unwrap_or(Path::new(".")).join(format!(
+                "{}.entitlements.plist",
+                appex
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("appex")
+            ));
+            self.codesign_with_profile(appex, appex_profile, identity, &ent_plist_path)?;
+        }
+
+        let ent_plist_path = app_bundle
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("ios-device-entitlements.plist");
+        self.codesign_with_profile(app_bundle, profile_path, identity, &ent_plist_path)?;
 
         self.step("Verifying device signature...");
         let verify_status = std::process::Command::new("codesign")
@@ -220,6 +233,45 @@ impl IosBuilder {
             );
         }
 
+        Ok(())
+    }
+
+    /// Sign `bundle` with the entitlements of `profile_path`, written to
+    /// `ent_plist_path` first. Fails if the profile does not authorize
+    /// `identity`.
+    fn codesign_with_profile(
+        &self,
+        bundle: &Path,
+        profile_path: &Path,
+        identity: &str,
+        ent_plist_path: &Path,
+    ) -> Result<()> {
+        let profile_plist = decode_profile(profile_path)?;
+
+        self.step("Checking certificate is authorized by profile...");
+        check_identity_authorized(
+            identity,
+            &profile_plist,
+            "Run: strudel profile fetch --force",
+        )?;
+
+        let entitlements = profile_plist
+            .as_dictionary()
+            .and_then(|d| d.get("Entitlements"))
+            .context("Provisioning profile has no Entitlements key")?;
+        plist::to_file_xml(ent_plist_path, entitlements)
+            .context("Failed to write entitlements plist")?;
+
+        let status = std::process::Command::new("codesign")
+            .args(["--force", "--sign", identity, "--entitlements"])
+            .arg(ent_plist_path)
+            .arg("--generate-entitlement-der")
+            .arg(bundle)
+            .status()
+            .context("Failed to run codesign")?;
+        if !status.success() {
+            bail!("codesign failed for {}", bundle.display());
+        }
         Ok(())
     }
 

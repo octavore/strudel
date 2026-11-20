@@ -1,17 +1,142 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clml::cformat;
 use serde_json::{Map, Value, json};
 
+use crate::builder::bundle::build_ns_extension;
 use crate::builder::ios::IosTarget;
 use crate::builder::{IosBuilder, read_partial_info_plist, resolve_build_artifact};
-use crate::config::{IosDeviceFamily, ResolvedIcon};
+use crate::config::{IosDeviceFamily, ResolvedExtension, ResolvedIcon};
 use crate::icon::{ios, render};
 use crate::shell::ShellCommand;
 
+/// Location of an extension in the host bundle:
+/// `<app>.app/PlugIns/<name>.appex`.
+pub(super) fn ios_appex_dir(app_bundle: &Path, ext: &ResolvedExtension) -> PathBuf {
+    app_bundle
+        .join("PlugIns")
+        .join(format!("{}.appex", ext.name))
+}
+
 impl IosBuilder {
+    /// Assemble every configured extension under `<app>.app/PlugIns/`. iOS
+    /// `.appex` bundles are flat: the executable and `Info.plist` sit at the
+    /// bundle root. Provisioning profiles are embedded later, at signing time.
+    pub(super) fn assemble_ios_extensions(
+        &self,
+        app_bundle: &Path,
+        target: IosTarget,
+        bin_dir: &Path,
+    ) -> Result<()> {
+        for ext in &self.cfg.extensions {
+            self.assemble_ios_appex(ext, &ios_appex_dir(app_bundle, ext), target, bin_dir)?;
+        }
+        Ok(())
+    }
+
+    fn assemble_ios_appex(
+        &self,
+        ext: &ResolvedExtension,
+        appex: &Path,
+        target: IosTarget,
+        bin_dir: &Path,
+    ) -> Result<()> {
+        self.step(&format!("Assembling extension `{}`...", ext.name));
+
+        // Building all package targets is intentional: a Package.swift that
+        // declares both the host and the extension as executableTargets
+        // produces both binaries from a single `swift build` invocation.
+        let binary = self.find_binary_in(bin_dir, &ext.target_name)?;
+        self.create_dir(appex)?;
+        self.copy_file(&binary, &appex.join(&ext.target_name))?;
+
+        let mut info = match &ext.info_json_path {
+            Some(path) => {
+                let s = fs::read_to_string(path)
+                    .with_context(|| format!("Failed to read info JSON at {}", path.display()))?;
+                serde_json::from_str::<Map<String, Value>>(&s).with_context(|| {
+                    format!(
+                        "Failed to parse info JSON at {}, must be a map.",
+                        path.display()
+                    )
+                })?
+            },
+            None => Map::new(),
+        };
+
+        info.entry("CFBundleName")
+            .or_insert_with(|| json!(&ext.name));
+        info.entry("CFBundleDisplayName")
+            .or_insert_with(|| json!(&ext.name));
+        info.insert("CFBundleExecutable".into(), json!(&ext.target_name));
+        info.insert("CFBundleIdentifier".into(), json!(&ext.bundle_id));
+        info.insert("CFBundleInfoDictionaryVersion".into(), json!("6.0"));
+        info.insert("CFBundlePackageType".into(), json!("XPC!"));
+        info.insert(
+            "CFBundleShortVersionString".into(),
+            json!(&self.cfg.version),
+        );
+        info.insert("CFBundleVersion".into(), json!(&self.cfg.build_number));
+        info.insert(
+            "MinimumOSVersion".into(),
+            json!(&self.ios.deployment_target),
+        );
+        info.entry("UIDeviceFamily").or_insert_with(|| {
+            json!(
+                self.ios
+                    .device_family
+                    .iter()
+                    .map(|f| f.ui_device_family())
+                    .collect::<Vec<_>>()
+            )
+        });
+        match target {
+            IosTarget::Simulator => {
+                info.insert(
+                    "CFBundleSupportedPlatforms".into(),
+                    json!(["iPhoneSimulator"]),
+                );
+                info.insert("DTPlatformName".into(), json!("iphonesimulator"));
+            },
+            IosTarget::Device => {
+                info.insert("CFBundleSupportedPlatforms".into(), json!(["iPhoneOS"]));
+                info.insert("DTPlatformName".into(), json!("iphoneos"));
+            },
+        }
+
+        // A dict of the same name supplied via `info_json_path` is merged with
+        // the one strudel generates.
+        let user_ns_extension = match info.remove("NSExtension") {
+            Some(Value::Object(m)) => m,
+            Some(_) => bail!(
+                "`NSExtension` in the info json for extension `{}` must be an object",
+                ext.name
+            ),
+            None => Map::new(),
+        };
+        info.insert(
+            "NSExtension".into(),
+            Value::Object(build_ns_extension(ext, user_ns_extension)),
+        );
+
+        let json_bytes = serde_json::to_vec_pretty(&info)?;
+        let plist_path = appex.join("Info.plist");
+        self.sh.run_stdin(
+            &[
+                "plutil",
+                "-convert",
+                "xml1",
+                "-o",
+                plist_path.to_str().unwrap(),
+                "-",
+            ],
+            &json_bytes,
+        )?;
+        Ok(())
+    }
+
     /// Assemble a flat iOS `.app` bundle (no `Contents/` subdirectory).
     /// Generates `Info.plist` from `info_json_path` (if set) merged with
     /// required iOS keys. Optionally compiles the asset catalog.
@@ -389,7 +514,7 @@ mod tests {
 
     use super::*;
     use crate::builder::{IosBuilder, OutputFlags};
-    use crate::config::fixtures::resolved_ios;
+    use crate::config::fixtures::{resolved_ios, resolved_ios_extension};
 
     #[test]
     fn ios_app_bundle_path_is_flat() {
@@ -404,6 +529,88 @@ mod tests {
             ..Default::default()
         };
         IosBuilder::new(resolved_ios(), output, false).unwrap()
+    }
+
+    #[test]
+    fn appex_is_flat_and_carries_ns_extension_keys() {
+        let dir = tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(bin_dir.join("Ext"), b"binary").unwrap();
+
+        let mut cfg = resolved_ios();
+        cfg.extensions = vec![resolved_ios_extension("Ext", "com.example.app.Ext")];
+        let builder = IosBuilder::new(cfg, OutputFlags::default(), false).unwrap();
+
+        let app = dir.path().join("App.app");
+        builder
+            .assemble_ios_extensions(&app, IosTarget::Device, &bin_dir)
+            .unwrap();
+
+        let appex = app.join("PlugIns/Ext.appex");
+        assert!(appex.join("Ext").is_file());
+        assert!(!appex.join("Contents").exists());
+
+        let info = plist::Value::from_file(appex.join("Info.plist")).unwrap();
+        let info = info.as_dictionary().unwrap();
+        assert_eq!(
+            info["CFBundleIdentifier"].as_string(),
+            Some("com.example.app.Ext")
+        );
+        assert_eq!(info["CFBundleExecutable"].as_string(), Some("Ext"));
+        assert_eq!(info["CFBundlePackageType"].as_string(), Some("XPC!"));
+        assert_eq!(info["DTPlatformName"].as_string(), Some("iphoneos"));
+        let ns = info["NSExtension"].as_dictionary().unwrap();
+        assert_eq!(
+            ns["NSExtensionPointIdentifier"].as_string(),
+            Some("com.apple.authentication-services-credential-provider-ui")
+        );
+        assert_eq!(
+            ns["NSExtensionPrincipalClass"].as_string(),
+            Some("Ext.Provider")
+        );
+    }
+
+    #[test]
+    fn appex_merges_user_ns_extension_attributes() {
+        let dir = tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(bin_dir.join("Ext"), b"binary").unwrap();
+        let info_json = dir.path().join("info.json");
+        std::fs::write(
+            &info_json,
+            r#"{"NSExtension":{"NSExtensionAttributes":{"ASCredentialProviderExtensionCapabilities":{"ProvidesPasswords":true}}}}"#,
+        )
+        .unwrap();
+
+        let mut ext = resolved_ios_extension("Ext", "com.example.app.Ext");
+        ext.info_json_path = Some(info_json);
+        let mut cfg = resolved_ios();
+        cfg.extensions = vec![ext];
+        let builder = IosBuilder::new(cfg, OutputFlags::default(), false).unwrap();
+
+        let app = dir.path().join("App.app");
+        builder
+            .assemble_ios_extensions(&app, IosTarget::Simulator, &bin_dir)
+            .unwrap();
+
+        let info = plist::Value::from_file(app.join("PlugIns/Ext.appex/Info.plist")).unwrap();
+        let ns = info.as_dictionary().unwrap()["NSExtension"]
+            .as_dictionary()
+            .unwrap();
+        assert_eq!(
+            ns["NSExtensionAttributes"].as_dictionary().unwrap()
+                ["ASCredentialProviderExtensionCapabilities"]
+                .as_dictionary()
+                .unwrap()["ProvidesPasswords"]
+                .as_boolean(),
+            Some(true)
+        );
+        assert_eq!(
+            info.as_dictionary().unwrap()["DTPlatformName"].as_string(),
+            Some("iphonesimulator")
+        );
     }
 
     #[test]

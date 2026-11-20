@@ -6,6 +6,7 @@ use clml::{cformat, cprintln};
 use serde::Deserialize;
 
 use crate::builder::ios::IosTarget;
+use crate::builder::ios::bundle::ios_appex_dir;
 use crate::builder::{IosBuilder, is_framework};
 use crate::config::IosDeviceFamily;
 use crate::shell::ShellCommand;
@@ -67,6 +68,17 @@ impl IosBuilder {
                     self.sh.run(cmd.arg(dylib.to_str().unwrap()))?;
                 }
             }
+        }
+
+        // Sign inside-out: a bundle's signature seals the extensions nested in
+        // it.
+        for ext in &self.cfg.extensions {
+            self.step(&format!("Ad-hoc signing extension `{}`...", ext.name));
+            self.sh.run(
+                ShellCommand::new("codesign")
+                    .args(["--force", "--sign", "-", "--timestamp=none"])
+                    .arg(ios_appex_dir(&app_bundle, ext).to_str().unwrap()),
+            )?;
         }
 
         self.step("Ad-hoc signing simulator bundle...");

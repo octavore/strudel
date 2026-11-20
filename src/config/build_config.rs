@@ -18,7 +18,7 @@ use crate::config::resolved::{
     ValueSource,
 };
 use crate::config::utils::{env_or_global, resolve_path, resolve_to};
-use crate::config::{IosDeviceFamily, IosProvisioningBackend, ResolvedConfig};
+use crate::config::{ExtensionKind, IosDeviceFamily, IosProvisioningBackend, ResolvedConfig};
 
 /// The on-disk `strudel.toml`. Single-target configs use the flat form
 /// (`[app]`, `[build]`, `[dmg]`) and are always macOS; multiple or non-macOS
@@ -286,11 +286,21 @@ fn resolve_target(
     // iOS manages profiles by default, so "auto" there asks for what leaving
     // the key unset already does. Accept it as a synonym, spelled the way a
     // macOS target spells it, and normalize it back to unset: which backend
-    // supplies an iOS profile is `[ios] provisioning`, and `[ios]` extensions
-    // have no profile of their own to manage.
+    // supplies an iOS profile is `[ios] provisioning`, and an extension without
+    // a pinned profile gets one from the same backend.
     let mut host_profile = build.provisioning_profile;
     if platform == Platform::Ios {
         host_profile = host_profile.filter(|p| !p.is_auto());
+        if let Some(ext) = extensions
+            .iter()
+            .find(|e| e.kind != ExtensionKind::AppExtension)
+        {
+            bail!(
+                "extension `{}` has an unsupported kind for an iOS target: only \
+                 `kind = \"app_extension\"` is supported on iOS",
+                ext.name
+            );
+        }
         for ext in &mut extensions {
             if ext.manage_provisioning_profile {
                 ext.provisioning_profile = None;
@@ -781,10 +791,68 @@ mod tests {
         let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
         assert_eq!(r.provisioning_profile, None);
         assert!(!r.manage_provisioning_profile);
-        // Nothing in the iOS pipeline provisions an extension, so "auto" there
-        // must not leave behind a cache path no step ever writes.
+        // The iOS pipeline caches an extension's profile under its own path, so
+        // "auto" there normalizes to unset like the host's.
         assert_eq!(r.extensions[0].provisioning_profile, None);
         assert!(!r.extensions[0].manage_provisioning_profile);
+    }
+
+    #[test]
+    fn a_pinned_extension_profile_path_is_kept_on_ios() {
+        let cfg = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "X"
+            app.bundle_id = "com.example.x"
+            app.version = "1"
+            ios.provisioning = "free"
+
+            [[target.extensions]]
+            kind = "app_extension"
+            extension_point_identifier = "com.apple.authentication-services-credential-provider-ui"
+            target_name = "Ext"
+            bundle_id = "com.example.x.ext"
+            entitlements_json_path = "ext.json"
+            provisioning_profile = "profiles/Ext.mobileprovision"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        assert_eq!(
+            r.extensions[0].provisioning_profile,
+            Some(PathBuf::from("/cfg/profiles/Ext.mobileprovision"))
+        );
+        assert!(!r.extensions[0].manage_provisioning_profile);
+    }
+
+    #[test]
+    fn ios_rejects_extension_kinds_other_than_app_extension() {
+        for body in [
+            r#"kind = "safari_web_extension"
+               resources_dir = "ext""#,
+            r#"kind = "system_extension"
+               system_extension_type = "network_extension""#,
+            r#"kind = "xpc_service""#,
+        ] {
+            let cfg = parse_build_config(&format!(
+                r#"
+                [[target]]
+                platform = "ios"
+                app.name = "X"
+                app.bundle_id = "com.example.x"
+                app.version = "1"
+                ios.provisioning = "free"
+
+                [[target.extensions]]
+                {body}
+                target_name = "Ext"
+                bundle_id = "com.example.x.ext"
+                entitlements_json_path = "ext.json"
+                "#
+            ))
+            .unwrap();
+            let err = format!("{:#}", cfg.resolve(Path::new("/cfg"), None).unwrap_err());
+            assert!(err.contains("only `kind = \"app_extension\"`"), "{err}");
+        }
     }
 
     #[test]

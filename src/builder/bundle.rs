@@ -3,8 +3,11 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use clml::cprintln;
+use serde_json::{Value, json};
 
 use crate::builder::BuilderCore;
+use crate::config::{ExtensionKind, ResolvedExtension};
 
 /// Whether an `embed_libs` entry is a `.framework` directory bundle rather
 /// than a flat dylib.
@@ -33,6 +36,59 @@ pub(crate) fn resolve_build_artifact(entry: &Path, bin_dir: &Path) -> PathBuf {
         },
         None => entry.to_path_buf(),
     }
+}
+
+/// Build the extension's `NSExtension` dict by layering strudel's
+/// config-derived keys over `user_ns_ext` (an `NSExtension` object taken from
+/// `info_json_path`, empty if none). strudel owns `NSExtensionPointIdentifier`
+/// and `NSExtensionPrincipalClass`; every other subkey the user provides
+/// (`NSExtensionAttributes`, `NSExtensionActivationRule`,
+/// `NSExtensionMainStoryboard`, etc) passes through untouched. For Safari web
+/// extensions `SFSafariWebExtensionManifestPath` defaults to
+/// `Resources/manifest.json` but can be overridden.
+pub(crate) fn build_ns_extension(
+    ext: &ResolvedExtension,
+    mut ns_ext: serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    match ext.kind {
+        ExtensionKind::SafariWebExtension => {
+            let principal = ext.principal_class.as_deref().unwrap_or("");
+            ns_ext.insert(
+                "NSExtensionPointIdentifier".into(),
+                json!("com.apple.Safari.web-extension"),
+            );
+            ns_ext.insert("NSExtensionPrincipalClass".into(), json!(principal));
+            ns_ext
+                .entry("SFSafariWebExtensionManifestPath".to_string())
+                .or_insert_with(|| json!("Resources/manifest.json"));
+        },
+        ExtensionKind::AppExtension => {
+            let ident = ext.extension_point_identifier.as_deref().unwrap_or("");
+            ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
+            match ext.principal_class.as_deref() {
+                Some(class) => {
+                    ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
+                },
+                None if !ns_ext.contains_key("NSExtensionPrincipalClass") => {
+                    cprintln!(
+                        "<yellow>warning:</yellow> App Extension `{}` is missing `principal_class`, which may be required depending on the extension point.",
+                        ext.name
+                    );
+                },
+                None => {},
+            }
+        },
+        ExtensionKind::SystemExtension => {
+            let ident = ext.extension_point_identifier.as_deref().unwrap_or("");
+            ns_ext.insert("NSExtensionPointIdentifier".into(), json!(ident));
+            if let Some(class) = ext.principal_class.as_deref() {
+                ns_ext.insert("NSExtensionPrincipalClass".into(), json!(class));
+            }
+        },
+        // XPC services have no `NSExtension` dict.
+        ExtensionKind::XpcService => {},
+    }
+    ns_ext
 }
 
 impl BuilderCore {

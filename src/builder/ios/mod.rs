@@ -16,13 +16,13 @@ mod sim;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clml::cprintln;
 
 use crate::builder::IosBuilder;
 use crate::shell::ShellCommand;
 
 /// Simulator or device target. This selects the SDK, triple suffix, and
 /// platform keys that go into the iOS `Info.plist`.
+#[derive(Clone, Copy)]
 enum IosTarget {
     Simulator,
     Device,
@@ -34,13 +34,6 @@ impl IosBuilder {
     /// builds, `strudel build` (Simulator assembly only), and `run --sim`
     /// (Simulator assembly, then ad-hoc sign, install, and launch).
     fn compile_and_assemble(&self, target: IosTarget) -> Result<PathBuf> {
-        if !self.cfg.extensions.is_empty() {
-            cprintln!(
-                "<yellow>warning:</yellow> iOS extension bundling is not yet supported; \
-                 [[extensions]] in this target will be ignored."
-            );
-        }
-
         let target_name = &self.cfg.target_name;
         let config_flag = if self.debug { "debug" } else { "release" };
         let deployment = &self.ios.deployment_target;
@@ -105,6 +98,16 @@ impl IosBuilder {
                 "-Xlinker",
                 "@executable_path/Frameworks",
             ]);
+            // An extension executable sits in `PlugIns/<name>.appex/`, two
+            // levels below the host's `Frameworks/`.
+            if !self.cfg.extensions.is_empty() {
+                build_cmd = build_cmd.arg_group([
+                    "-Xlinker",
+                    "-rpath",
+                    "-Xlinker",
+                    "@executable_path/../../Frameworks",
+                ]);
+            }
         }
         self.sh.run_streamed_env(build_cmd)?;
 
@@ -115,6 +118,7 @@ impl IosBuilder {
         let bundle_dir = self.paths.build_dir.join(bundle_dir_name);
         let app_bundle = bundle_dir.join(format!("{target_name}.app"));
         self.assemble_ios_bundle(&binary, &app_bundle, target, &bin_dir)?;
+        self.assemble_ios_extensions(&app_bundle, target, &bin_dir)?;
 
         Ok(app_bundle)
     }
