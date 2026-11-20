@@ -378,6 +378,23 @@ pub enum ResolvedTargetPlatform {
     Ios(ResolvedIosSection),
 }
 
+impl ResolvedTargetPlatform {
+    pub fn platform(&self) -> Platform {
+        match self {
+            ResolvedTargetPlatform::Mac(_) => Platform::Macos,
+            ResolvedTargetPlatform::Ios(_) => Platform::Ios,
+        }
+    }
+
+    /// Capability display names from the `capabilities` config key.
+    pub fn capability_names(&self) -> &[String] {
+        match self {
+            ResolvedTargetPlatform::Mac(m) => &m.capabilities,
+            ResolvedTargetPlatform::Ios(i) => &i.capabilities,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedMacOsSection {
     pub dmg: Option<ResolvedDmg>,

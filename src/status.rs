@@ -16,7 +16,8 @@ use crate::apple::capabilities::{self, CapabilityDef, Severity};
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder;
 use crate::builder::profile::{
-    PinnedExpectations, check_pinned_dict, load_entitlements, missing_capabilities, stale_reason,
+    PinnedExpectations, ProfileExpectations, StaleReason, check_pinned_dict, missing_capabilities,
+    profile_problems,
 };
 use crate::config::{
     GlobalConfig, IosProvisioningBackend, Platform, ResolvedConfig, ResolvedIosSection,
@@ -153,7 +154,8 @@ fn extensions_block(cfg: &ResolvedConfig) {
         let check = ProfileCheck::new(
             cfg,
             &ext.bundle_id,
-            Vec::new(),
+            ext.entitlements_json_path.as_deref(),
+            &[],
             !ext.manage_provisioning_profile,
         );
         match builder::decode_profile(path) {
@@ -516,34 +518,15 @@ fn macos_profile_block(cfg: &ResolvedConfig) {
         "provisioning profile",
         format!("{}  {}", shorten(path), dim(&format!("({mode})"))),
     );
-    let check = ProfileCheck::new(
-        cfg,
-        &cfg.bundle_id,
-        target_capabilities(cfg),
-        !cfg.manage_provisioning_profile,
-    );
+    let check = ProfileCheck::host(cfg, !cfg.manage_provisioning_profile);
     match builder::decode_profile(path) {
         Ok(value) => print_profile_details(value.as_dictionary(), None, &check),
         Err(e) => cprintln!("      <red>could not decode: {}</red>", e),
     }
 }
 
-/// Capabilities the target needs, from its entitlements file and
-/// `capabilities` key. On macOS, only those that may require a profile.
-fn target_capabilities(cfg: &ResolvedConfig) -> Vec<&'static CapabilityDef> {
-    let (names, is_macos) = match &cfg.target_platform {
-        ResolvedTargetPlatform::Mac(m) => (&m.capabilities, true),
-        ResolvedTargetPlatform::Ios(i) => (&i.capabilities, false),
-    };
-    let mut caps =
-        capabilities::required(cfg.entitlements_json_path.as_deref(), names).unwrap_or_default();
-    if is_macos {
-        caps.retain(|c| c.may_require_profile());
-    }
-    caps
-}
-
-/// What a profile is checked against in `strudel profile`.
+/// What a profile is checked against in `strudel profile`. Matches the
+/// checks a build makes.
 struct ProfileCheck {
     platform: Platform,
     bundle_id: String,
@@ -556,28 +539,44 @@ struct ProfileCheck {
 }
 
 impl ProfileCheck {
+    /// Check for the host app profile, with capabilities from its
+    /// entitlements file and `capabilities` key.
+    fn host(cfg: &ResolvedConfig, pinned: bool) -> Self {
+        ProfileCheck::new(
+            cfg,
+            &cfg.bundle_id,
+            cfg.entitlements_json_path.as_deref(),
+            cfg.target_platform.capability_names(),
+            pinned,
+        )
+    }
+
+    /// Check for `bundle_id`, with capabilities from `entitlements_path` and
+    /// `capability_names`. An unreadable entitlements file gives no
+    /// capabilities.
     fn new(
         cfg: &ResolvedConfig,
         bundle_id: &str,
-        capabilities: Vec<&'static CapabilityDef>,
+        entitlements_path: Option<&Path>,
+        capability_names: &[String],
         pinned: bool,
     ) -> Self {
-        let (platform, udids) = match &cfg.target_platform {
-            ResolvedTargetPlatform::Mac(_) => (Platform::Macos, Vec::new()),
-            ResolvedTargetPlatform::Ios(_) => {
-                let udids = DeviceSet::load(&Paths::new(cfg).devices_toml)
-                    .map(|set| set.udids().into_iter().map(str::to_string).collect())
-                    .unwrap_or_default();
-                (Platform::Ios, udids)
-            },
+        let platform = cfg.target_platform.platform();
+        let udids = match platform {
+            Platform::Macos => Vec::new(),
+            Platform::Ios => DeviceSet::load(&Paths::new(cfg).devices_toml)
+                .map(|set| set.udids().into_iter().map(str::to_string).collect())
+                .unwrap_or_default(),
         };
+        let required =
+            capabilities::required(entitlements_path, capability_names).unwrap_or_default();
         ProfileCheck {
             platform,
             bundle_id: bundle_id.to_string(),
             team_id: cfg.team_id.to_string(),
             udids,
-            capabilities,
-            entitlements: load_entitlements(cfg.entitlements_json_path.as_deref()),
+            capabilities: required.profile_capabilities(platform),
+            entitlements: required.entitlements,
             pinned,
         }
     }
@@ -613,13 +612,16 @@ fn print_profile_check(dict: &plist::Dictionary, check: &ProfileCheck) {
 
     let now = SystemTime::now();
     let udids: Vec<&str> = check.udids.iter().map(String::as_str).collect();
+    let profile = ProfileExpectations {
+        bundle_id: &check.bundle_id,
+        team_id: &check.team_id,
+        required_udids: &udids,
+        capabilities: &check.capabilities,
+    };
     if check.pinned {
         let expect = PinnedExpectations {
             platform: check.platform,
-            bundle_id: &check.bundle_id,
-            team_id: &check.team_id,
-            required_udids: &udids,
-            capabilities: &check.capabilities,
+            profile,
             entitlements: check.entitlements.as_ref(),
         };
         let findings = check_pinned_dict(dict, &expect, now);
@@ -635,22 +637,17 @@ fn print_profile_check(dict: &plist::Dictionary, check: &ProfileCheck) {
             }
         }
     } else {
-        match stale_reason(
-            dict,
-            now,
-            &udids,
-            &check.bundle_id,
-            &check.team_id,
-            &check.capabilities,
-        ) {
-            None => subfield("status", cformat!("<green>current</green>")),
-            Some(reason) => subfield(
+        let problems = profile_problems(dict, &profile, now);
+        if problems.is_empty() {
+            subfield("status", cformat!("<green>current</green>"));
+        } else {
+            subfield(
                 "status",
                 cformat!(
                     "<yellow>stale: {}</yellow> <dim>(replaced on next fetch)</dim>",
-                    reason
+                    StaleReason::Problems(problems)
                 ),
-            ),
+            );
         }
     }
 }
@@ -694,12 +691,7 @@ fn profile_lines(paths: &Paths, cfg: &ResolvedConfig, expected_owner: Option<&st
         return;
     }
     field2(label, shorten(&path));
-    let check = ProfileCheck::new(
-        cfg,
-        &cfg.bundle_id,
-        target_capabilities(cfg),
-        cfg.provisioning_profile.is_some(),
-    );
+    let check = ProfileCheck::host(cfg, cfg.provisioning_profile.is_some());
     match builder::decode_profile(&path) {
         Ok(value) => print_profile_details(value.as_dictionary(), expected_owner, &check),
         Err(e) => cprintln!("      <red>could not decode: {}</red>", e),

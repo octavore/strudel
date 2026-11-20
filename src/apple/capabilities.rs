@@ -14,6 +14,8 @@ use anyhow::{Context, Result};
 use clml::cprintln;
 use serde::{Deserialize, Serialize};
 
+use crate::config::Platform;
+
 /// Fact about a capability, with its verification state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Known<T> {
@@ -131,9 +133,7 @@ pub struct FreeFeature {
     pub value: &'static str,
 }
 
-/// Field `source` is not read by build logic.
-#[derive(Debug)]
-#[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CapabilityDef {
     /// Display name as shown in the Developer Portal / Xcode capabilities UI.
     pub name: &'static str,
@@ -156,7 +156,8 @@ pub struct CapabilityDef {
     /// Experimental. Apple does not document this scheme.
     pub free_feature: Known<FreeFeature>,
     /// Apple documentation URL or test that verified the entry. Required if
-    /// any field is `Verified`.
+    /// any field is `Verified`. Not read by build logic.
+    #[allow(dead_code)]
     pub source: Option<&'static str>,
 }
 
@@ -452,18 +453,61 @@ pub const CAPABILITIES: &[CapabilityDef] = &[
     },
 ];
 
-/// Capabilities required for a build, sorted by name without duplicates.
+/// Capabilities required for one bundle ID, with the entitlements they were
+/// read from.
+#[derive(Debug, Default)]
+pub struct RequiredCapabilities {
+    /// Sorted by name without duplicates.
+    pub caps: Vec<&'static CapabilityDef>,
+    /// Parsed entitlements JSON. `None` if no entitlements file is configured.
+    pub entitlements: Option<serde_json::Value>,
+    /// Sorted `com.apple.developer.*` entitlement keys that match no
+    /// capability.
+    pub unmatched_keys: Vec<String>,
+}
+
+impl RequiredCapabilities {
+    /// Print a warning for entitlement keys that match no capability.
+    pub fn warn_unmatched(&self) {
+        if self.unmatched_keys.is_empty() {
+            return;
+        }
+        cprintln!(
+            "<yellow>warning:</yellow> No known capability for entitlement {}. \
+             Enable the capability by hand if the app needs it: \
+             https://developer.apple.com/account/resources/identifiers/list",
+            self.unmatched_keys.join(", ")
+        );
+    }
+
+    /// Capabilities a provisioning profile is checked for. iOS checks every
+    /// capability. macOS checks those that may require a profile and exist on
+    /// macOS.
+    pub fn profile_capabilities(&self, platform: Platform) -> Vec<&'static CapabilityDef> {
+        self.caps
+            .iter()
+            .copied()
+            .filter(|c| match platform {
+                Platform::Ios => true,
+                Platform::Macos => c.may_require_profile() && !c.ios_only(),
+            })
+            .collect()
+    }
+}
+
+/// Capabilities required for a build.
 ///
 /// Includes capabilities found in `entitlements_json_path`, matched by
 /// entitlement key. Also includes those in `capability_names`, matched by
 /// display name and ignoring case. Entitlement keys with no known capability
-/// are skipped, for example `application-identifier`. An unknown name in
-/// `capability_names` is an error.
+/// are skipped, for example `application-identifier`. Unknown
+/// `com.apple.developer.*` keys are listed in `unmatched_keys`. An unknown
+/// name in `capability_names` is an error.
 pub fn required(
     entitlements_json_path: Option<&Path>,
     capability_names: &[String],
-) -> Result<Vec<&'static CapabilityDef>> {
-    let mut caps: Vec<&'static CapabilityDef> = Vec::new();
+) -> Result<RequiredCapabilities> {
+    let mut required = RequiredCapabilities::default();
 
     if let Some(path) = entitlements_json_path {
         let raw = fs::read_to_string(path)
@@ -471,30 +515,24 @@ pub fn required(
         let value: serde_json::Value = serde_json::from_str(&raw)
             .with_context(|| format!("Entitlements file is not valid JSON: {}", path.display()))?;
         if let Some(obj) = value.as_object() {
-            for key in obj.keys() {
-                if let Some(cap) = by_entitlement_key(key) {
-                    caps.push(cap);
-                }
-            }
-            let unmatched = unmatched_developer_keys(obj.keys().map(String::as_str));
-            if !unmatched.is_empty() {
-                cprintln!(
-                    "<yellow>warning:</yellow> No known capability for entitlement {}. \
-                     Enable the capability by hand if the app needs it: \
-                     https://developer.apple.com/account/resources/identifiers/list",
-                    unmatched.join(", ")
-                );
-            }
+            required
+                .caps
+                .extend(obj.keys().filter_map(|key| by_entitlement_key(key)));
+            required.unmatched_keys = unmatched_developer_keys(obj.keys().map(String::as_str))
+                .into_iter()
+                .map(str::to_string)
+                .collect();
         }
+        required.entitlements = Some(value);
     }
 
     for name in capability_names {
-        caps.push(lookup_name(name)?);
+        required.caps.push(lookup_name(name)?);
     }
 
-    caps.sort_by_key(|c| c.name);
-    caps.dedup_by_key(|c| c.name);
-    Ok(caps)
+    required.caps.sort_by_key(|c| c.name);
+    required.caps.dedup_by_key(|c| c.name);
+    Ok(required)
 }
 
 /// Look up a capability by display name. An unknown name is an error.
@@ -596,8 +634,38 @@ mod tests {
             r#"{"aps-environment": "development", "application-identifier": "x"}"#,
         )
         .unwrap();
-        let caps = required(Some(&path), &[]).unwrap();
-        assert_eq!(names(&caps), ["Push Notifications"]);
+        let required = required(Some(&path), &[]).unwrap();
+        assert_eq!(names(&required.caps), ["Push Notifications"]);
+        assert!(required.unmatched_keys.is_empty());
+        assert!(required.entitlements.is_some());
+    }
+
+    #[test]
+    fn required_lists_unmatched_developer_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("entitlements.json");
+        fs::write(&path, r#"{"com.apple.developer.zeta": true}"#).unwrap();
+        let required = required(Some(&path), &[]).unwrap();
+        assert_eq!(required.unmatched_keys, ["com.apple.developer.zeta"]);
+    }
+
+    #[test]
+    fn macos_profile_capabilities_skip_capabilities_that_need_no_profile() {
+        let required = RequiredCapabilities {
+            caps: vec![
+                by_name("Hotspot").unwrap(),
+                by_name("Network Extensions").unwrap(),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            names(&required.profile_capabilities(Platform::Macos)),
+            ["Network Extensions"]
+        );
+        assert_eq!(
+            names(&required.profile_capabilities(Platform::Ios)),
+            ["Hotspot", "Network Extensions"]
+        );
     }
 
     #[test]
@@ -606,8 +674,8 @@ mod tests {
         let path = dir.path().join("entitlements.json");
         fs::write(&path, r#"{"aps-environment": "development"}"#).unwrap();
         let extra = ["healthkit".to_string(), "Push Notifications".to_string()];
-        let caps = required(Some(&path), &extra).unwrap();
-        assert_eq!(names(&caps), ["HealthKit", "Push Notifications"]);
+        let required = required(Some(&path), &extra).unwrap();
+        assert_eq!(names(&required.caps), ["HealthKit", "Push Notifications"]);
     }
 
     #[test]

@@ -1,15 +1,15 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use clml::{cformat, cformatdoc, cprintln};
+use clml::{cformat, cformatdoc};
 
 use crate::apple::appstore::AppStoreClient;
-use crate::apple::capabilities::{CapabilityDef, CapabilityType, Severity};
+use crate::apple::capabilities::{CapabilityDef, CapabilityType, RequiredCapabilities};
 use crate::apple::{capabilities, provisioning};
 use crate::builder::IosBuilder;
 use crate::builder::profile::{
-    CertKind, Finding, PinnedExpectations, ProfileRequest, check_pinned_profile, load_entitlements,
-    profile_is_current,
+    CertKind, PinnedExpectations, ProfileExpectations, ProfileRequest, check_pinned_profile,
+    report_pinned_findings, stale_reason,
 };
 use crate::config::{IosProvisioningBackend, Platform};
 use crate::devices::DeviceSet;
@@ -26,18 +26,9 @@ impl IosBuilder {
         let cached = &self.paths.cached_profile;
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;
         let udids = device_set.udids();
-        let caps = self.required_capabilities()?;
+        let caps = self.required_capabilities()?.caps;
 
-        let current = !force
-            && cached.exists()
-            && profile_is_current(
-                cached,
-                &udids,
-                &self.cfg.bundle_id,
-                &self.cfg.team_id,
-                &caps,
-            )?;
-        if current {
+        if !force && self.cached_profile_is_current(&udids, &caps) {
             self.note(cformat!(
                 "<green>✔</green> Cached profile is current: {}",
                 cached.display()
@@ -79,27 +70,18 @@ impl IosBuilder {
     /// profile is checked locally and makes no network calls.
     pub(super) fn resolve_profile(&self, target_udids: &[String]) -> Result<PathBuf> {
         let udid_refs: Vec<&str> = target_udids.iter().map(String::as_str).collect();
-        let caps = self.required_capabilities()?;
+        let required = self.required_capabilities()?;
 
         if let Some(ref p) = self.cfg.provisioning_profile {
             if !self.dry_run {
-                self.check_configured_profile(p, &udid_refs, &caps)?;
+                self.check_configured_profile(p, &udid_refs, &required)?;
             }
             return Ok(p.clone());
         }
 
         let cached = &self.paths.cached_profile;
 
-        if !self.dry_run
-            && cached.exists()
-            && profile_is_current(
-                cached,
-                &udid_refs,
-                &self.cfg.bundle_id,
-                &self.cfg.team_id,
-                &caps,
-            )?
-        {
+        if !self.dry_run && self.cached_profile_is_current(&udid_refs, &required.caps) {
             self.note(cformat!(
                 "<green>✔</green> Using cached profile: {}",
                 cached.display()
@@ -115,8 +97,19 @@ impl IosBuilder {
             return Ok(cached.clone());
         }
 
-        self.auto_fetch_profile(&caps)?;
+        self.auto_fetch_profile(&required.caps)?;
         Ok(cached.clone())
+    }
+
+    /// Cached profile exists and passes the checks in [`stale_reason`].
+    fn cached_profile_is_current(&self, udids: &[&str], caps: &[&'static CapabilityDef]) -> bool {
+        let expect = ProfileExpectations {
+            bundle_id: &self.cfg.bundle_id,
+            team_id: &self.cfg.team_id,
+            required_udids: udids,
+            capabilities: caps,
+        };
+        stale_reason(&self.paths.cached_profile, &expect, None).is_none()
     }
 
     /// Check the configured profile without network calls. Warnings are
@@ -125,18 +118,23 @@ impl IosBuilder {
         &self,
         path: &Path,
         udids: &[&str],
-        caps: &[&'static CapabilityDef],
+        required: &RequiredCapabilities,
     ) -> Result<()> {
-        let entitlements = load_entitlements(self.cfg.entitlements_json_path.as_deref());
         let expect = PinnedExpectations {
             platform: Platform::Ios,
-            bundle_id: &self.cfg.bundle_id,
-            team_id: &self.cfg.team_id,
-            required_udids: udids,
-            capabilities: caps,
-            entitlements: entitlements.as_ref(),
+            profile: ProfileExpectations {
+                bundle_id: &self.cfg.bundle_id,
+                team_id: &self.cfg.team_id,
+                required_udids: udids,
+                capabilities: &required.caps,
+            },
+            entitlements: required.entitlements.as_ref(),
         };
-        report_pinned_findings(check_pinned_profile(path, &expect, None))
+        report_pinned_findings(
+            check_pinned_profile(path, &expect, None),
+            "Remove `provisioning_profile` from strudel.toml to let strudel manage the profile \
+             automatically.",
+        )
     }
 
     /// Fetch (or re-create) a development profile and write it to the cache.
@@ -148,7 +146,7 @@ impl IosBuilder {
             self.note(cformat!(
                 "<dim>Using free provisioning (7-day profiles, max 3 devices, max 10 App IDs).</dim>"
             ));
-            return provisioning::auto_fetch_profile(&self.cfg, &self.ios, &self.paths);
+            return provisioning::auto_fetch_profile(&self.cfg, caps, &self.paths);
         }
 
         let device_set = DeviceSet::load(&self.paths.devices_toml)?;
@@ -159,8 +157,7 @@ impl IosBuilder {
             );
         }
 
-        let client =
-            AppStoreClient::from_config(&self.cfg, true)?.show_progress(!self.echo_suppressed());
+        let client = AppStoreClient::from_config(&self.cfg)?.show_progress(!self.echo_suppressed());
 
         self.step("Finding development certificates...");
         let cert_ids = CertKind::Development.list(&client)?;
@@ -252,32 +249,15 @@ impl IosBuilder {
 
     /// Capabilities to enable on the bundle ID, from entitlement keys found
     /// in `build.entitlements_json_path` and `[ios] capabilities` names.
-    fn required_capabilities(&self) -> Result<Vec<&'static CapabilityDef>> {
-        capabilities::required(
+    /// Prints a warning for entitlement keys that match no capability.
+    fn required_capabilities(&self) -> Result<RequiredCapabilities> {
+        let required = capabilities::required(
             self.cfg.entitlements_json_path.as_deref(),
             &self.ios.capabilities,
-        )
+        )?;
+        required.warn_unmatched();
+        Ok(required)
     }
-}
-
-/// Print the warnings in `findings`. Fail if any finding is an error.
-fn report_pinned_findings(findings: Vec<Finding>) -> Result<()> {
-    let (errors, warnings): (Vec<Finding>, Vec<Finding>) = findings
-        .into_iter()
-        .partition(|f| f.severity == Severity::Error);
-    for finding in &warnings {
-        cprintln!("<yellow>warning:</yellow> {}", finding.message);
-    }
-    if errors.is_empty() {
-        return Ok(());
-    }
-    let list: Vec<String> = errors.iter().map(|f| format!("- {}", f.message)).collect();
-    bail!(
-        "Configured provisioning profile cannot be used:\n{}\n\
-         Remove `provisioning_profile` from strudel.toml to let strudel manage the \
-         profile automatically.",
-        list.join("\n")
-    )
 }
 
 #[cfg(test)]
@@ -286,33 +266,6 @@ mod tests {
     use crate::builder::OutputFlags;
     use crate::config::ResolvedTargetPlatform;
     use crate::config::fixtures::resolved_ios;
-
-    fn finding(severity: Severity, message: &str) -> Finding {
-        Finding {
-            severity,
-            message: message.to_string(),
-        }
-    }
-
-    #[test]
-    fn warnings_do_not_fail() {
-        let findings = vec![finding(Severity::Warning, "lacks a key")];
-        assert!(report_pinned_findings(findings).is_ok());
-    }
-
-    #[test]
-    fn errors_fail_and_are_all_listed() {
-        let findings = vec![
-            finding(Severity::Error, "expired"),
-            finding(Severity::Warning, "lacks a key"),
-            finding(Severity::Error, "wrong team"),
-        ];
-        let err = report_pinned_findings(findings).unwrap_err().to_string();
-        assert!(err.contains("- expired"));
-        assert!(err.contains("- wrong team"));
-        assert!(!err.contains("lacks a key"));
-        assert!(err.contains("Remove `provisioning_profile`"));
-    }
 
     #[test]
     fn pinned_profile_is_checked_without_network_calls() {
@@ -336,6 +289,7 @@ mod tests {
         let names: Vec<&str> = builder
             .required_capabilities()
             .unwrap()
+            .caps
             .iter()
             .map(|c| c.name)
             .collect();

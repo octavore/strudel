@@ -5,6 +5,7 @@ use serde_json::json;
 
 use super::client::AppStoreClient;
 use super::types::{IdOnly, ListEnvelope, Resource, SingleEnvelope};
+use crate::config::Platform;
 
 impl AppStoreClient {
     /// Look up the bundle ID resource by identifier, without creating it.
@@ -29,17 +30,17 @@ impl AppStoreClient {
     }
 
     /// Find or create the bundle ID resource. Returns the resource ID.
-    /// `platform` is the ASC `BundleIdPlatform` value (`"IOS"` or
-    /// `"MAC_OS"`), used only when the bundle ID doesn't already exist.
+    /// `platform` is used only when the bundle ID doesn't already exist.
     pub fn find_or_create_bundle_id(
         &self,
         bundle_id: &str,
         name: &str,
-        platform: &str,
+        platform: Platform,
     ) -> Result<String> {
         if let Some(id) = self.find_bundle_id(bundle_id)? {
             return Ok(id);
         }
+        let platform = bundle_id_platform(platform);
         let body = json!({
             "data": {
                 "type": "bundleIds",
@@ -60,5 +61,13 @@ impl AppStoreClient {
                     Err(e)
                 }
             })
+    }
+}
+
+/// ASC `BundleIdPlatform` value for `platform`.
+fn bundle_id_platform(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Ios => "IOS",
+        Platform::Macos => "MAC_OS",
     }
 }

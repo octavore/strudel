@@ -2,10 +2,10 @@ use anyhow::{Context, Result, bail};
 use appleid::{AppleId, Session, Team};
 use clml::cprintln;
 
-use crate::apple::capabilities::{self, CapabilityDef, Known, Severity};
+use crate::apple::capabilities::{CapabilityDef, Known, Severity};
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder::keychain as kc;
-use crate::config::{ResolvedConfig, ResolvedIosSection};
+use crate::config::ResolvedConfig;
 use crate::devices::DeviceSet;
 use crate::paths::{Paths, StrudelData, ensure_strudel_dir};
 
@@ -131,10 +131,11 @@ pub fn registered_udids(_cfg: &ResolvedConfig) -> Result<Vec<String>> {
 
 /// Fetch a 7-day development profile via Apple ID, cache it at
 /// `paths.cached_profile`, and import the returned cert+key into the persistent
-/// dev keychain so codesign can use the identity.
+/// dev keychain so codesign can use the identity. `caps` are enabled on the
+/// App ID first where free provisioning supports them.
 pub fn auto_fetch_profile(
     cfg: &ResolvedConfig,
-    ios: &ResolvedIosSection,
+    caps: &[&'static CapabilityDef],
     paths: &Paths,
 ) -> Result<()> {
     let data = StrudelData::locate()?;
@@ -150,7 +151,7 @@ pub fn auto_fetch_profile(
         );
     }
 
-    ensure_capabilities(&apple_id, &session, &team, cfg, ios)?;
+    ensure_capabilities(&apple_id, &session, &team, cfg, caps)?;
     let udids: Vec<&str> = device_set.device.iter().map(|d| d.udid.as_str()).collect();
 
     // Reuse a previously issued cert+key if it's still valid, so refreshing the
@@ -261,8 +262,7 @@ pub fn dev_cert_sha1() -> Result<Option<String>> {
 
 /// Enable required capabilities that free accounts can use.
 ///
-/// See [`capabilities::CapabilityDef::free_feature`]. Capabilities requested
-/// through `build.entitlements_json_path` or `[ios] capabilities` that free
+/// See [`CapabilityDef::free_feature`]. Capabilities in `caps` that free
 /// provisioning cannot enable produce a warning. A failed update is an error
 /// for `Verified` features and a warning for the rest.
 fn ensure_capabilities(
@@ -270,11 +270,9 @@ fn ensure_capabilities(
     session: &Session,
     team: &Team,
     cfg: &ResolvedConfig,
-    ios: &ResolvedIosSection,
+    caps: &[&'static CapabilityDef],
 ) -> Result<()> {
-    let required =
-        capabilities::required(cfg.entitlements_json_path.as_deref(), &ios.capabilities)?;
-    let plan = FreePlan::new(required);
+    let plan = FreePlan::new(caps);
 
     if !plan.unsupported.is_empty() {
         let names: Vec<&str> = plan.unsupported.iter().map(|c| c.name).collect();
@@ -316,13 +314,13 @@ struct FreePlan {
 }
 
 impl FreePlan {
-    fn new(required: Vec<&'static CapabilityDef>) -> Self {
+    fn new(required: &[&'static CapabilityDef]) -> Self {
         let mut plan = FreePlan {
             verified: Vec::new(),
             unverified: Vec::new(),
             unsupported: Vec::new(),
         };
-        for cap in required {
+        for &cap in required {
             match (&cap.free_feature, cap.free_feature.severity()) {
                 (Known::Unknown, _) => plan.unsupported.push(cap),
                 (_, Severity::Error) => plan.verified.push(cap),
@@ -410,7 +408,7 @@ fn save_session(data: &StrudelData, session: &Session) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apple::capabilities::{CapabilityType, FreeFeature};
+    use crate::apple::capabilities::{self, CapabilityType, FreeFeature};
 
     fn named(name: &str) -> &'static CapabilityDef {
         capabilities::lookup_name(name).unwrap()
@@ -432,7 +430,7 @@ mod tests {
 
     #[test]
     fn free_plan_groups_by_free_feature() {
-        let plan = FreePlan::new(vec![named("App Groups"), named("HealthKit"), &VERIFIED]);
+        let plan = FreePlan::new(&[named("App Groups"), named("HealthKit"), &VERIFIED]);
         assert_eq!(plan.verified.len(), 1);
         assert_eq!(plan.verified[0].name, "Test Verified");
         assert_eq!(plan.unverified.len(), 1);

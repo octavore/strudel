@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::apple::appstore::types::{ApiErrors, Claims};
-use crate::config::ResolvedConfig;
+use crate::config::{Platform, ResolvedConfig};
 
 pub struct AppStoreClient {
     key_id: String,
@@ -34,7 +34,7 @@ fn api_error(code: u16, body: &str) -> anyhow::Error {
 }
 
 impl AppStoreClient {
-    pub fn from_config(cfg: &ResolvedConfig, is_ios: bool) -> Result<Self> {
+    pub fn from_config(cfg: &ResolvedConfig) -> Result<Self> {
         let mut msg = indoc! {"
             App Store Connect API credentials are required to manage provisioning profiles and capabilities.
             Please set your API key id, API key path, and API issuer, either as environment variables:
@@ -46,7 +46,7 @@ impl AppStoreClient {
             or under [apple] in strudel.toml. Run `strudel help notarize` for details.
          "}
         .to_string();
-        if is_ios {
+        if cfg.target_platform.platform() == Platform::Ios {
             msg.push_str(indoc! {"
 
                 Alternatively, set [ios] provisioning = \"free\" in strudel.toml and run `strudel login`

@@ -28,7 +28,6 @@ pub(crate) mod keychain;
 mod macos;
 pub(crate) mod profile;
 
-use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
@@ -80,10 +79,6 @@ pub struct MacosBuilder {
     /// countdown) that's noisy in captured CI logs but harmless on a real
     /// terminal.
     ci: bool,
-    /// Bundle IDs opted into managed provisioning by a capability instead of
-    /// an explicit `provisioning_profile = "auto"`. Failures to create these
-    /// profiles are warnings.
-    capability_managed: HashSet<String>,
 }
 
 /// The iOS build pipeline. Wraps a [`BuilderCore`] and the resolved `[ios]`
@@ -312,7 +307,6 @@ impl MacosBuilder {
             resume,
             skip_notarization,
             ci,
-            capability_managed: HashSet::new(),
         })
     }
 
