@@ -36,6 +36,7 @@ strudel skill preview # preview the skill doc
   - [Multiple targets](#multiple-targets)
   - [Icons](#icons)
   - [iOS device builds](#ios-device-builds)
+  - [iOS extensions](#ios-extensions)
   - [Capabilities](#capabilities)
   - [Signing \& notarization](#signing--notarization)
   - [Safari Web Extensions](#safari-web-extensions)
@@ -713,6 +714,47 @@ strudel profile fetch --out profiles   # also copy the profile into ./profiles
 ```
 
 To opt out of auto-management and supply your own profile, set `provisioning_profile` under `[build]`; strudel then uses that file as-is and checks it locally. See [Capabilities](#capabilities) for the checks and `strudel help ios-device` for the full workflow.
+
+### iOS extensions
+
+iOS targets support `kind = "app_extension"` entries in `[[extensions]]`, such as an AutoFill credential provider. Other kinds are rejected on iOS. Each extension is built from its own `executableTarget`, with the same `NSExtensionMain` shim as on macOS (see [App Extensions](#app-extensions)), and is embedded as a flat `.appex` under `<app>.app/PlugIns/`.
+
+```toml
+[[extensions]]
+kind                       = "app_extension"
+target_name                = "AutofillExtension"
+bundle_id                  = "com.example.myapp.Autofill"
+extension_point_identifier = "com.apple.authentication-services-credential-provider-ui"
+principal_class            = "AutofillExtension.CredentialProviderViewController"
+entitlements_json_path     = "autofill/entitlements.json"
+info_json_path             = "autofill/info.json"
+```
+
+For an AutoFill credential provider, `autofill/entitlements.json` enables the capability:
+
+```json
+{ "com.apple.developer.authentication-services.autofill-credential-provider": true }
+```
+
+`autofill/info.json` declares what the provider offers:
+
+```json
+{
+  "NSExtension": {
+    "NSExtensionAttributes": {
+      "ASCredentialProviderExtensionCapabilities": { "ProvidesPasswords": true }
+    }
+  }
+}
+```
+
+The principal class subclasses `ASCredentialProviderViewController`.
+
+Each extension has its own bundle ID, so it gets its own provisioning profile, fetched by the same backend as the host (`[ios] provisioning`) and cached at `.strudel/<extension bundle_id>.mobileprovision`. `strudel profile fetch` fetches the host and extension profiles. To pin an extension's profile, set `provisioning_profile` to a path in its `[[extensions]]` entry. Every extension counts toward the 10 App ID limit of free provisioning.
+
+strudel signs the embedded libraries, then each extension with its own profile's entitlements, then the host app. Simulator builds are signed ad-hoc, extensions first.
+
+After the first install, enable the provider in Settings > General > AutoFill & Passwords.
 
 ### Capabilities
 

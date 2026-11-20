@@ -235,11 +235,12 @@ fn print_targets() {
 
         Override per-target with <magenta>build.build_dir</>.
 
-        ## iOS extension caveat
+        ## iOS extensions
 
-        Assembling and signing [[extensions]] inside an iOS bundle is not yet
-        supported. A warning is printed and the extensions list is ignored for
-        iOS `strudel build` and `strudel run`.
+        iOS targets support `kind = "app_extension"` entries in [[extensions]].
+        Each is embedded as a flat .appex under <<name>>.app/PlugIns/, with its own
+        provisioning profile cached at `.strudel/<<extension bundle_id>>.mobileprovision`.
+        Other extension kinds are rejected on iOS.
 
         ## See also
 
