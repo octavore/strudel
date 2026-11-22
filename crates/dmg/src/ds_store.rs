@@ -1,3 +1,83 @@
+//! `.DS_Store` writer for DMG Finder window layout.
+//!
+//! All integers are big-endian. The file is a buddy allocator holding one
+//! B-tree of records.
+//!
+//! # File header
+//!
+//! - `0x00`: `00 00 00 01`.
+//! - `0x04`: `Bud1` magic.
+//! - `0x08`: offset of the bookkeeping block, `u32`.
+//! - `0x0C`: size of the bookkeeping block, `u32`.
+//! - `0x10`: copy of the bookkeeping offset.
+//! - `0x14`: 16 bytes of unknown purpose. The first word is the address of the
+//!   B-tree block in Finder-written stores. The other words are zero.
+//!
+//! Offsets are relative to file offset 4. Block address `a` is at file offset
+//! `(a & !0x1F) + 4` with size `2^(a & 0x1F)`. Sizes range from `2^5` to
+//! `2^31`.
+//!
+//! # Bookkeeping block
+//!
+//! - Block count, `u32`, then a zero `u32`.
+//! - Block address table, padded to a multiple of 256 entries.
+//! - Table of contents. Entry count, then per entry a length-prefixed name and
+//!   a block number. Stores written for Finder windows have one entry,
+//!   `DSDB`.
+//! - Free list of 32 buckets, one per power of two from `2^0` to `2^31`. Each
+//!   bucket is a `u32` count followed by that many offsets.
+//!
+//! # DSDB master block
+//!
+//! Five `u32` fields. Root node block number, tree height, record count, node
+//! count, and page size. Page size is always `0x1000`, including if the leaf
+//! block is smaller.
+//!
+//! # B-tree node
+//!
+//! A `u32` `P` and a `u32` record count. `P` is zero in a leaf. Records
+//! follow.
+//!
+//! # Record
+//!
+//! - Filename length in UTF-16 code units, `u32`, then the filename as UTF-16BE.
+//! - Four-byte structure id.
+//! - Four-byte data type.
+//! - Payload by data type.
+//!
+//! Data types written here:
+//!
+//! - `long`: `u32`.
+//! - `type`: four raw bytes.
+//! - `blob`: `u32` length, then the bytes.
+//!
+//! Records sort by filename, then structure id.
+//!
+//! # Structure ids
+//!
+//! - `bwsp`: binary plist with window settings. Keys include `WindowBounds`,
+//!   `SidebarWidth`, and the `Show*` booleans.
+//! - `icvp`: binary plist with icon view settings. Keys include `iconSize`,
+//!   `textSize`, `gridSpacing`, `labelOnBottom`, `showIconPreview`,
+//!   `showItemInfo`, `arrangeBy`, `backgroundType`, and the background color
+//!   or image alias keys. `backgroundType` is 0 for the default, 1 for a color,
+//!   and 2 for an image.
+//! - `vSrn`: `long` with value 1. Present on directories only.
+//! - `vstl`: `type` with the view style. `icnv` is icon view.
+//! - `Iloc`: 16-byte blob with icon x and y as `u32`, then six `0xFF` bytes and
+//!   two zero bytes.
+//!
+//! # Known limitations
+//!
+//! - Output uses a fixed layout with a 4 KiB leaf. Finder writes a 1 KiB leaf
+//!   in a smaller file.
+//! - Finder-written window stores do not contain `vstl`, `ViewStyle`,
+//!   `ShowPathbar`, or `SidebarWidth`. The effect of writing them is untested.
+//! - `WindowBounds` is `{{x, y}, {width, height}}`. The coordinate origin and
+//!   the title bar adjustment in [`build_bwsp_plist`] are untested.
+//! - The words at `0x2C` and `0x30` are not documented. Both equal the
+//!   bookkeeping block size in Finder-written stores.
+
 use std::io::{Cursor, Seek, SeekFrom, Write};
 
 use anyhow::{Result, ensure};
@@ -257,7 +337,7 @@ fn assemble(records: &[Record]) -> Result<Vec<u8>> {
             0x0000_100C, // root B-tree block address
         ],
     )?;
-    put(&mut cur, 0x2C, &[0x0000_0800, 0x0000_0800])?; // allocator-size copies
+    put(&mut cur, 0x2C, &[0x0000_0800, 0x0000_0800])?; // purpose unknown
 
     // DSDB master block @ file 0x44
     put(
