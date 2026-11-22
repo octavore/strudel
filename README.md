@@ -528,7 +528,7 @@ Controls the Finder window layout of the DMG produced by `strudel release`. By d
 | Key              | Type    | Default   | Description                                                                                                             |
 | ---------------- | ------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `plain`          | bool    | `false`   | Skip the styled window; produce a plain compressed DMG instead                                                          |
-| `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, defaults to white |
+| `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, Finder's default background is used |
 | `window_width`   | integer | `660`     | Finder window width in pixels                                                                                           |
 | `window_height`  | integer | `400`     | Finder window height in pixels                                                                                          |
 | `icon_size`      | integer | `128`     | Icon size in pixels                                                                                                     |

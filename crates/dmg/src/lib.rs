@@ -14,7 +14,7 @@ pub enum DmgBackground {
     Color(u8, u8, u8),
     /// Path to a background image (PNG or TIFF).
     Path(PathBuf),
-    /// No background configuration is written; Finder uses its own default.
+    /// Write `backgroundType` 0. Finder uses its own default.
     #[default]
     None,
 }

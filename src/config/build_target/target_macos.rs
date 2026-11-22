@@ -21,7 +21,7 @@ pub struct DmgSection {
     #[serde(default)]
     pub plain: bool,
     /// Background for the DMG Finder window: a `#RRGGBB` hex color, or a path
-    /// to a PNG or JPEG background image. When absent, defaults to white.
+    /// to a PNG or JPEG background image. When absent, Finder's default background is used.
     pub background: Option<String>,
     /// Finder window width in pixels. Default: 660.
     pub window_width: Option<u32>,
@@ -50,11 +50,7 @@ impl DmgSection {
         }
         let background = match self.background {
             Some(s) => resolve_background(&s, config_dir)?,
-            // An incomplete `icvp` record (missing backgroundType/color) can
-            // cause Finder to discard the whole view-options blob, including
-            // iconSize - so an unset background must still resolve to an
-            // explicit white, not `DmgBackground::None`.
-            None => DmgBackground::Color(255, 255, 255),
+            None => DmgBackground::None,
         };
         Ok(Some(ResolvedDmg {
             background,
@@ -78,4 +74,26 @@ fn resolve_background(s: &str, config_dir: &Path) -> Result<DmgBackground> {
         return Ok(DmgBackground::Color(rgba[0], rgba[1], rgba[2]));
     }
     Ok(DmgBackground::Path(resolve_to(config_dir, s.into())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_background_resolves_to_color() {
+        let bg = resolve_background("#204080", Path::new("/cfg")).unwrap();
+        assert_eq!(bg, DmgBackground::Color(0x20, 0x40, 0x80));
+    }
+
+    #[test]
+    fn path_background_resolves_relative_to_config_dir() {
+        let bg = resolve_background("assets/bg.png", Path::new("/cfg")).unwrap();
+        assert_eq!(bg, DmgBackground::Path("/cfg/assets/bg.png".into()));
+    }
+
+    #[test]
+    fn invalid_hex_background_is_an_error() {
+        assert!(resolve_background("#12345", Path::new("/cfg")).is_err());
+    }
 }

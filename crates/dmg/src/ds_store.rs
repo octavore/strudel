@@ -104,8 +104,7 @@ pub enum Background {
     Color(u8, u8, u8),
     /// Raw macOS Alias record bytes for the background image.
     Image(Vec<u8>),
-    /// No `backgroundType`/color/image keys are written; Finder falls back to
-    /// its own default.
+    /// Write `backgroundType` 0. Finder uses its own default background.
     None,
 }
 
@@ -286,7 +285,9 @@ fn build_icvp_plist(spec: &DsStoreSpec<'_>) -> Result<Vec<u8>> {
             );
             d.insert("backgroundColorBlue".into(), Value::Real(*b as f64 / 255.0));
         },
-        Background::None => {},
+        Background::None => {
+            d.insert("backgroundType".into(), Value::Integer(0.into()));
+        },
     }
 
     plist_to_bytes(Value::Dictionary(d))
@@ -523,6 +524,36 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort_by_key(|s| tn1150_key(s));
         assert_eq!(names, sorted);
+    }
+
+    fn icvp_dict(background: Background) -> Dictionary {
+        let spec = DsStoreSpec {
+            background,
+            ..spec()
+        };
+        let bytes = build_icvp_plist(&spec).unwrap();
+        Value::from_reader(std::io::Cursor::new(bytes))
+            .unwrap()
+            .into_dictionary()
+            .unwrap()
+    }
+
+    #[test]
+    fn color_background_writes_type_and_components() {
+        let d = icvp_dict(Background::Color(0x20, 0x40, 0x80));
+        assert_eq!(d["backgroundType"].as_signed_integer(), Some(1));
+        assert_eq!(d["backgroundColorRed"].as_real(), Some(32.0 / 255.0));
+        assert_eq!(d["backgroundColorGreen"].as_real(), Some(64.0 / 255.0));
+        assert_eq!(d["backgroundColorBlue"].as_real(), Some(128.0 / 255.0));
+        assert!(!d.contains_key("backgroundImageAlias"));
+    }
+
+    #[test]
+    fn no_background_writes_default_type_only() {
+        let d = icvp_dict(Background::None);
+        assert_eq!(d["backgroundType"].as_signed_integer(), Some(0));
+        assert!(!d.contains_key("backgroundColorRed"));
+        assert!(!d.contains_key("backgroundImageAlias"));
     }
 
     fn read_u32(b: &[u8], off: usize) -> u32 {

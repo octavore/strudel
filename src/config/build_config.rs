@@ -1189,7 +1189,7 @@ mod tests {
         assert_eq!(dmg.window_width, 660);
         assert_eq!(dmg.window_height, 400);
         assert_eq!(dmg.icon_size, 128);
-        assert_eq!(dmg.background, DmgBackground::Color(255, 255, 255));
+        assert_eq!(dmg.background, DmgBackground::None);
     }
 
     #[test]
@@ -1324,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn dmg_background_absent_resolves_to_white() {
+    fn dmg_background_absent_resolves_to_none() {
         let cfg = parse_build_config(indoc! { r#"
             [app]
             name = "MyApp"
@@ -1341,11 +1341,7 @@ mod tests {
             panic!("expected a macOS target");
         };
         let dmg = macos.dmg.as_ref().expect("dmg should be Some");
-        // An unset background must still resolve to an explicit color (not
-        // `DmgBackground::None`) so the icvp record stays complete - an
-        // incomplete record can make Finder discard the whole view-options
-        // blob, including iconSize.
-        assert_eq!(dmg.background, DmgBackground::Color(255, 255, 255));
+        assert_eq!(dmg.background, DmgBackground::None);
     }
 
     #[test]
@@ -1368,7 +1364,7 @@ mod tests {
             .dmg
             .as_ref()
             .expect("empty [dmg] section should use defaults");
-        assert_eq!(dmg.background, DmgBackground::Color(255, 255, 255));
+        assert_eq!(dmg.background, DmgBackground::None);
         assert_eq!(dmg.window_width, 660);
         assert_eq!(dmg.window_height, 400);
         assert_eq!(dmg.icon_size, 128);
