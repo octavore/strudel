@@ -157,6 +157,11 @@ impl MacosBuilder {
                 } else {
                     self.copy_file(&item.src, &dest)?;
                 }
+                self.note(cformat!(
+                    "<green>✔</green> {} <dim>-></dim> {}",
+                    item.src.display(),
+                    dest.strip_prefix(app_bundle).unwrap_or(&dest).display()
+                ));
             }
         }
 
