@@ -74,20 +74,30 @@ impl MacosBuilder {
         self.step("Validating signing identity...");
         let identity = &self.cfg.sign_identity;
 
-        let identity_in = |args: &[&str]| -> Result<bool> {
+        // Hash of the first listed identity whose name matches.
+        let identity_in = |args: &[&str]| -> Result<Option<String>> {
             let out = Command::new("security")
                 .args(args)
                 .output()
                 .context("Failed to run `security find-identity`")?;
+            let needle = format!("\"{identity}\"");
             Ok(String::from_utf8_lossy(&out.stdout)
                 .lines()
-                .any(|line| line.contains(&format!("\"{identity}\""))))
+                .find(|line| line.contains(&needle))
+                .map(|line| {
+                    line.split_whitespace()
+                        .nth(1)
+                        .unwrap_or_default()
+                        .to_string()
+                }))
         };
 
-        if identity_in(&["find-identity", "-v", "-p", "codesigning"])? {
-            self.note(cformat!("<green>✔</green> Signing identity found"));
+        if let Some(hash) = identity_in(&["find-identity", "-v", "-p", "codesigning"])? {
+            self.note(cformat!(
+                "<green>✔</green> Signing identity found: {identity} <dim>({hash})</dim>"
+            ));
             Ok(false)
-        } else if identity_in(&["find-identity", "-p", "codesigning"])? {
+        } else if identity_in(&["find-identity", "-p", "codesigning"])?.is_some() {
             cprintln!(
                 "<yellow>warning:</yellow> Signing identity \"{identity}\" is self-signed \
                  and will not be trusted by other machines."
@@ -206,7 +216,30 @@ impl MacosBuilder {
             check_identity_authorized(&self.cfg.sign_identity, &profile, &remedy)?;
         }
 
-        self.note(cformat!("<green>✔</green> Provisioning profile validated"));
+        let field = |key: &str| dict.get(key).and_then(plist::Value::as_string);
+        let teams = dict
+            .get("TeamIdentifier")
+            .and_then(plist::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(plist::Value::as_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        let expires = dict
+            .get("ExpirationDate")
+            .and_then(plist::Value::as_date)
+            .map(|d| d.to_xml_format())
+            .unwrap_or_default();
+        self.note(cformat!(
+            "<green>✔</green> Provisioning profile validated: {}",
+            field("Name").unwrap_or("(unnamed)")
+        ));
+        self.note(cformat!(
+            "  <dim>uuid {}, team {teams}, expires {expires}</dim>",
+            field("UUID").unwrap_or("?")
+        ));
         Ok(profile)
     }
 
