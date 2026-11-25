@@ -42,16 +42,18 @@ impl AnisetteProvider {
                 objc2::msg_send![aos_cls, retrieveOTPHeadersForDSID: &*dsid_ns];
             let otp_dict = otp_result.context("retrieveOTPHeadersForDSID: returned nil")?;
 
-            // OTP headers: only available when the account is registered with
-            // AOSKit (i.e. signed in via System Settings > Apple Account).
-            // Omit them silently rather than failing, Apple may accept the
-            // request without them when the gs_token is otherwise valid.
-            if let Ok(v) = nsobj_string(&otp_dict, "X-Apple-MD") {
-                h.insert("X-Apple-I-MD".to_string(), v);
-            }
-            if let Ok(v) = nsobj_string(&otp_dict, "X-Apple-MD-M") {
-                h.insert("X-Apple-I-MD-M".to_string(), v);
-            }
+            // OTP headers are only available when this Mac is signed in to an
+            // Apple Account in System Settings.
+            let (Ok(md), Ok(md_m)) = (
+                nsobj_string(&otp_dict, "X-Apple-MD"),
+                nsobj_string(&otp_dict, "X-Apple-MD-M"),
+            ) else {
+                bail!(
+                    "Machine anisette headers are unavailable. Sign in to an Apple Account in System Settings on this Mac and try again"
+                );
+            };
+            h.insert("X-Apple-I-MD".to_string(), md);
+            h.insert("X-Apple-I-MD-M".to_string(), md_m);
             h.insert("X-Apple-I-MD-RINFO".to_string(), "17106176".to_string());
 
             // Machine serial number from AOSUtilities.
