@@ -67,11 +67,18 @@ fn gsa_post(
         .header("Content-Type", "text/x-xml-plist")
         .header("Accept", "text/x-xml-plist")
         .header("Accept-Language", "en-US,en;q=0.9")
-        .header("User-Agent", "akd/1.0 CFNetwork/1490.0.4 Darwin/24.6.0")
-        .header(
+        .header("User-Agent", "akd/1.0 CFNetwork/1490.0.4 Darwin/24.6.0");
+    // Anisette supplies the client info of this machine if available. Sending a
+    // second, different value would conflict with it.
+    if !anisette_headers
+        .keys()
+        .any(|k| k.eq_ignore_ascii_case("X-Mme-Client-Info"))
+    {
+        req = req.header(
             "X-MMe-Client-Info",
             "<MacBookPro18,3> <macOS;15.5;24F74> <com.apple.AuthKit/1 (com.apple.akd/1.0)>",
         );
+    }
     for (k, v) in anisette_headers {
         req = req.header(k.as_str(), v.as_str());
     }
