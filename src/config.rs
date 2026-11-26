@@ -1,5 +1,6 @@
 mod build_config;
 mod build_target;
+pub mod edit;
 mod extension;
 mod global;
 mod icon_section;

@@ -109,6 +109,7 @@ pub fn resolved_ios() -> ResolvedConfig {
             provisioning: IosProvisioningBackend::AppStoreConnect,
             apple_id: None,
             capabilities: Vec::new(),
+            containers: Vec::new(),
         }
         .into(),
     )
@@ -140,6 +141,7 @@ pub fn resolved_macos() -> ResolvedConfig {
             dmg: None,
             assets_dir: None,
             capabilities: Vec::new(),
+            containers: Vec::new(),
         }
         .into(),
     )

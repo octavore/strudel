@@ -389,6 +389,14 @@ impl ResolvedTargetPlatform {
             ResolvedTargetPlatform::Ios(i) => &i.capabilities,
         }
     }
+
+    /// iCloud container identifiers from the `containers` config key.
+    pub fn container_identifiers(&self) -> &[String] {
+        match self {
+            ResolvedTargetPlatform::Mac(m) => &m.containers,
+            ResolvedTargetPlatform::Ios(i) => &i.containers,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -402,6 +410,9 @@ pub struct ResolvedMacOsSection {
     /// Store Connect API, merged with any inferred from
     /// `entitlements_json_path`. See [`crate::apple::capabilities`].
     pub capabilities: Vec<String>,
+    /// Validated, deduplicated iCloud container identifiers to link to
+    /// the bundle ID. Empty by default.
+    pub containers: Vec<String>,
 }
 
 impl From<ResolvedMacOsSection> for ResolvedTargetPlatform {
@@ -425,6 +436,9 @@ pub struct ResolvedIosSection {
     /// Store Connect API, merged with any inferred from
     /// `entitlements_json_path`. See [`crate::apple::capabilities`].
     pub capabilities: Vec<String>,
+    /// Validated, deduplicated iCloud container identifiers to link to
+    /// the bundle ID. Empty by default.
+    pub containers: Vec<String>,
 }
 
 impl From<ResolvedIosSection> for ResolvedTargetPlatform {

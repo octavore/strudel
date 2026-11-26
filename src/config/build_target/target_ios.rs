@@ -75,6 +75,13 @@ pub struct IosSection {
     /// capabilities strudel knows the ASC `CapabilityType` for can be listed
     /// here; see `strudel help entitlements` for the supported set.
     pub capabilities: Option<Vec<String>>,
+
+    /// iCloud container identifiers (e.g. `"iCloud.com.example.app"`) to
+    /// link to the bundle ID. Replaces the top-level `containers` value, and
+    /// `containers = []` opts out. Containers are created with `strudel
+    /// icloud-containers create` and linked with `strudel icloud-containers
+    /// link`, never during a build.
+    pub containers: Option<Vec<String>>,
 }
 
 impl IosSection {
@@ -92,6 +99,7 @@ impl IosSection {
             provisioning: self.provisioning.or(shared.provisioning),
             apple_id: self.apple_id.or(shared.apple_id),
             capabilities: self.capabilities.or(shared.capabilities),
+            containers: self.containers.or(shared.containers),
         }
     }
 }

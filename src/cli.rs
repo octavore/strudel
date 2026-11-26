@@ -3,7 +3,8 @@ mod clean;
 mod config;
 mod devices;
 mod help;
-mod helpers;
+pub(crate) mod helpers;
+mod icloud_containers;
 mod icon;
 mod increment_version;
 mod init;
@@ -25,6 +26,7 @@ use crate::cli::clean::CleanCmd;
 use crate::cli::config::ConfigCmd;
 use crate::cli::devices::DevicesCmd;
 use crate::cli::help::HelpCmd;
+use crate::cli::icloud_containers::IcloudContainersCmd;
 use crate::cli::icon::IconCmd;
 use crate::cli::init::InitCmd;
 use crate::cli::login::LoginCmd;
@@ -63,8 +65,10 @@ enum Cmd {
     Init(InitCmd),
 
     /// Sign in with an Apple ID for free iOS provisioning (7-day profiles,
-    /// max 3 devices). Saves the session to ~/.local/share/strudel/.
-    /// Set [ios] provisioning = "free" in strudel.toml to enable.
+    /// max 3 devices). Saves the session to ~/.local/share/strudel/. Run it
+    /// again to add another Apple ID. Set [ios] provisioning = "free" in
+    /// strudel.toml to enable. Paid teams use a session only for
+    /// `icloud-containers`.
     #[command(args_conflicts_with_subcommands = true)]
     Login(LoginCmd),
 
@@ -84,14 +88,19 @@ enum Cmd {
     Release(ReleaseCmd),
 
     /* configuration commands */
-    /// (iOS) Manage tracked iOS devices. Run with no subcommand to list devices
-    /// tracked in .strudel/devices.toml.
+    /// Manage tracked devices. Run with no subcommand to list iOS devices
+    /// tracked in .strudel/devices.toml. `devices add` on a macOS target adds
+    /// this Mac for macOS development profiles.
     #[command(args_conflicts_with_subcommands = true)]
     Devices(DevicesCmd),
     /// Show provisioning-profile status for each target. Run `strudel profile
     /// fetch` to create or refresh the strudel-managed profiles.
     #[command(args_conflicts_with_subcommands = true)]
     Profile(ProfileCmd),
+    /// Create and list iCloud containers on the team, and link them to App
+    /// IDs. Only `icloud-containers create` creates containers, and only
+    /// `icloud-containers link` links them. Builds do not do either.
+    IcloudContainers(IcloudContainersCmd),
 
     /* helper commands */
     /// Remove the strudel output directory and run `swift package clean`
@@ -132,6 +141,7 @@ impl Cli {
             Cmd::Release(c) => c.execute(&config),
             Cmd::Devices(c) => c.execute(&config),
             Cmd::Profile(c) => c.execute(&config),
+            Cmd::IcloudContainers(c) => c.execute(&config),
             Cmd::Clean(c) => c.execute(&config),
             Cmd::Config(c) => c.execute(&config),
             Cmd::Icon(c) => c.execute(&config),

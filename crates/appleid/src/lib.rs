@@ -3,6 +3,7 @@ mod dev_services;
 mod grandslam;
 
 use anyhow::Result;
+pub use dev_services::{CloudContainer, TeamNotEligible, validate_container_identifier};
 use serde::{Deserialize, Serialize};
 
 /// Serializable session returned by `login`; persist this to avoid
@@ -141,6 +142,67 @@ impl AppleId {
     ) -> Result<bool> {
         dev_services::DevServicesClient::new(&self.agent, &self.anisette, session)
             .ensure_capabilities(team_id, bundle_id, name, features)
+    }
+
+    /// Codes of the features in `features` that are not enabled on the App ID
+    /// of `bundle_id`. All of them if the App ID does not exist. Read-only.
+    pub fn missing_app_id_features(
+        &self,
+        session: &Session,
+        team_id: &str,
+        bundle_id: &str,
+        features: &[(&str, &str)],
+    ) -> Result<Vec<String>> {
+        dev_services::DevServicesClient::new(&self.agent, &self.anisette, session)
+            .missing_app_id_features(team_id, bundle_id, features)
+    }
+
+    /// List the iCloud containers on the team. Read-only.
+    ///
+    /// Fails with [`TeamNotEligible`] (see `anyhow::Error::downcast_ref`) if
+    /// the team has no paid Apple Developer Program membership.
+    pub fn list_cloud_containers(
+        &self,
+        session: &Session,
+        team_id: &str,
+    ) -> Result<Vec<CloudContainer>> {
+        dev_services::DevServicesClient::new(&self.agent, &self.anisette, session)
+            .list_cloud_containers(team_id)
+    }
+
+    /// Create an iCloud container on the team. Containers cannot be deleted.
+    ///
+    /// Experimental. The request shape is unverified. See
+    /// `DevServicesClient::create_cloud_container`.
+    pub fn create_cloud_container(
+        &self,
+        session: &Session,
+        team_id: &str,
+        identifier: &str,
+        name: &str,
+    ) -> Result<CloudContainer> {
+        dev_services::DevServicesClient::new(&self.agent, &self.anisette, session)
+            .create_cloud_container(team_id, identifier, name)
+    }
+
+    /// Ensure the App ID for `bundle_id` exists, then associate containers
+    /// with it, keeping the containers it already has. `container_ids` are
+    /// [`CloudContainer::id`] values.
+    ///
+    /// Returns true if the App ID was updated.
+    ///
+    /// Experimental. The request shape is unverified. See
+    /// `DevServicesClient::associate_cloud_containers`.
+    pub fn ensure_cloud_containers(
+        &self,
+        session: &Session,
+        team_id: &str,
+        bundle_id: &str,
+        name: &str,
+        container_ids: &[String],
+    ) -> Result<bool> {
+        dev_services::DevServicesClient::new(&self.agent, &self.anisette, session)
+            .ensure_cloud_containers(team_id, bundle_id, name, container_ids)
     }
 
     /// Generate a new RSA keypair and CSR, submit to Apple, and download the

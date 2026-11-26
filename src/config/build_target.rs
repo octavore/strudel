@@ -4,7 +4,7 @@ mod target_macos;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub use crate::config::build_target::target_ios::{
     IosDeviceFamily, IosProvisioningBackend, IosSection,
@@ -126,6 +126,12 @@ pub enum TargetPlatform {
         /// the ASC `CapabilityType` for can be listed here; see `strudel
         /// help entitlements` for the supported set.
         capabilities: Option<Vec<String>>,
+        /// iCloud container identifiers (e.g. `"iCloud.com.example.app"`) to
+        /// link to the bundle ID. Replaces the top-level `containers` value,
+        /// and `containers = []` opts out. Containers are created with
+        /// `strudel icloud-containers create` and linked with `strudel
+        /// icloud-containers link`, never during a build.
+        containers: Option<Vec<String>>,
     },
     Ios {
         #[serde(default)]
@@ -134,7 +140,7 @@ pub enum TargetPlatform {
 }
 
 /// The target platform for a build target.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Platform {
     Macos,

@@ -73,6 +73,10 @@ pub struct SingleBuildConfig {
     /// Store Connect API. See `strudel help entitlements`.
     pub capabilities: Option<Vec<String>>,
 
+    /// iCloud container identifiers to link to the bundle ID. See
+    /// `strudel help entitlements`.
+    pub containers: Option<Vec<String>>,
+
     #[serde(default)]
     pub apple: AppleSection,
 }
@@ -82,6 +86,10 @@ pub struct SingleBuildConfig {
 #[serde(deny_unknown_fields)]
 pub struct MultiBuildConfig {
     pub target: Vec<BuildTarget>,
+
+    /// iCloud container identifiers inherited by every target that does not
+    /// set its own `containers`. Must appear before any `[table]` header.
+    pub containers: Option<Vec<String>>,
 
     /// Shared iOS defaults inherited by targets that don't set their own
     /// `[ios]` field; per-target fields take precedence over this.
@@ -115,6 +123,7 @@ impl BuildConfig {
                     dmg,
                     assets_dir,
                     capabilities,
+                    containers,
                     apple,
                 } = single;
                 let target = BuildTarget {
@@ -125,17 +134,33 @@ impl BuildConfig {
                         dmg,
                         assets_dir,
                         capabilities,
+                        containers,
                     },
                 };
                 vec![resolve_target(
-                    target, &apple, None, true, config_dir, global,
+                    target, &apple, None, None, true, config_dir, global,
                 )?]
             },
             BuildConfig::Multi(multi) => {
-                let MultiBuildConfig { target, ios, apple } = multi;
+                let MultiBuildConfig {
+                    target,
+                    containers,
+                    ios,
+                    apple,
+                } = multi;
                 target
                     .into_iter()
-                    .map(|t| resolve_target(t, &apple, ios.as_ref(), false, config_dir, global))
+                    .map(|t| {
+                        resolve_target(
+                            t,
+                            &apple,
+                            ios.as_ref(),
+                            containers.as_deref(),
+                            false,
+                            config_dir,
+                            global,
+                        )
+                    })
                     .collect::<Result<Vec<_>>>()?
             },
         };
@@ -174,6 +199,24 @@ fn validate_capability_names(names: Vec<String>) -> Result<Vec<String>> {
         capabilities::lookup_name(name)?;
     }
     Ok(names)
+}
+
+/// Pick the container identifiers for a target. A per-target value replaces
+/// the top-level value, and an empty list opts out. Reject an invalid
+/// identifier and drop duplicates.
+fn resolve_containers(
+    target: Option<Vec<String>>,
+    top_level: Option<&[String]>,
+) -> Result<Vec<String>> {
+    let chosen = target.unwrap_or_else(|| top_level.map(<[String]>::to_vec).unwrap_or_default());
+    let mut identifiers: Vec<String> = Vec::with_capacity(chosen.len());
+    for identifier in chosen {
+        appleid::validate_container_identifier(&identifier)?;
+        if !identifiers.contains(&identifier) {
+            identifiers.push(identifier);
+        }
+    }
+    Ok(identifiers)
 }
 
 /// Target ids are derived as `{platform}/{app.name}`, so two `[[target]]`
@@ -218,6 +261,7 @@ fn resolve_target(
     target: BuildTarget,
     apple: &AppleSection,
     shared_ios: Option<&IosSection>,
+    top_level_containers: Option<&[String]>,
     is_single: bool,
     config_dir: &Path,
     global: &GlobalConfig,
@@ -250,6 +294,7 @@ fn resolve_target(
             dmg,
             assets_dir,
             capabilities,
+            containers,
         } => ResolvedMacOsSection {
             dmg: match dmg {
                 Some(d) => d.resolve(config_dir)?,
@@ -257,6 +302,7 @@ fn resolve_target(
             },
             assets_dir: assets_dir.map(|p| resolve_to(config_dir, p)),
             capabilities: validate_capability_names(capabilities.unwrap_or_default())?,
+            containers: resolve_containers(containers, top_level_containers)?,
         }
         .into(),
         TargetPlatform::Ios { ios } => {
@@ -273,6 +319,7 @@ fn resolve_target(
                 })?,
                 apple_id: ios.apple_id,
                 capabilities: validate_capability_names(ios.capabilities.unwrap_or_default())?,
+                containers: resolve_containers(ios.containers, top_level_containers)?,
             }
         }
         .into(),
@@ -1118,6 +1165,143 @@ mod tests {
             "ios\"\nios.provisioning = \"app_store_connect\"\nios.capabilities = [\"healthkit\"]",
         );
         resolve_capabilities(&ios).unwrap();
+    }
+
+    /// Resolve every target of `config` and return each target's containers,
+    /// keyed by target id.
+    fn resolved_containers(config: &str) -> Result<Vec<(String, Vec<String>)>> {
+        let project = parse_build_config(config)?.resolve_project(Path::new("/cfg"), None)?;
+        Ok(project
+            .targets
+            .iter()
+            .map(|t| {
+                (
+                    t.target_id.clone(),
+                    t.target_platform.container_identifiers().to_vec(),
+                )
+            })
+            .collect())
+    }
+
+    fn app_lines(name: &str) -> String {
+        format!(
+            "app.name = \"{name}\"\napp.bundle_id = \"com.example.{name}\"\n\
+             app.version = \"1.0.0\"\napp.build_number = \"1\"\n"
+        )
+    }
+
+    fn ids(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn containers_default_to_empty() {
+        let cfg = format!(
+            "[[target]]\nplatform = \"macos\"\n{}\n[[target]]\nplatform = \"ios\"\n\
+             ios.provisioning = \"app_store_connect\"\n{}",
+            app_lines("Mac"),
+            app_lines("Phone"),
+        );
+        let got = resolved_containers(&cfg).unwrap();
+        assert!(got.iter().all(|(_, c)| c.is_empty()), "{got:?}");
+    }
+
+    #[test]
+    fn top_level_containers_are_inherited_by_every_target() {
+        let cfg = format!(
+            "containers = [\"iCloud.com.example.app\"]\n\
+             [[target]]\nplatform = \"macos\"\n{}\n[[target]]\nplatform = \"ios\"\n\
+             ios.provisioning = \"app_store_connect\"\n{}",
+            app_lines("Mac"),
+            app_lines("Phone"),
+        );
+        let got = resolved_containers(&cfg).unwrap();
+        assert_eq!(got.len(), 2);
+        for (_, containers) in got {
+            assert_eq!(containers, ids(&["iCloud.com.example.app"]));
+        }
+    }
+
+    #[test]
+    fn ios_section_replaces_top_level_containers() {
+        let cfg = format!(
+            "containers = [\"iCloud.com.example.top\"]\n\
+             [ios]\ncontainers = [\"iCloud.com.example.shared\"]\n\
+             [[target]]\nplatform = \"macos\"\n{}\n[[target]]\nplatform = \"ios\"\n\
+             ios.provisioning = \"app_store_connect\"\n{}",
+            app_lines("Mac"),
+            app_lines("Phone"),
+        );
+        let got = resolved_containers(&cfg).unwrap();
+        assert_eq!(got[0].1, ids(&["iCloud.com.example.top"]));
+        assert_eq!(got[1].1, ids(&["iCloud.com.example.shared"]));
+    }
+
+    #[test]
+    fn per_target_containers_replace_the_levels_below() {
+        let cfg = format!(
+            "containers = [\"iCloud.com.example.top\"]\n\
+             [ios]\ncontainers = [\"iCloud.com.example.shared\"]\n\
+             [[target]]\nplatform = \"macos\"\ncontainers = [\"iCloud.com.example.mac\"]\n{}\n\
+             [[target]]\nplatform = \"ios\"\nios.containers = [\"iCloud.com.example.ios\"]\n\
+             ios.provisioning = \"app_store_connect\"\n{}",
+            app_lines("Mac"),
+            app_lines("Phone"),
+        );
+        let got = resolved_containers(&cfg).unwrap();
+        assert_eq!(got[0].1, ids(&["iCloud.com.example.mac"]));
+        assert_eq!(got[1].1, ids(&["iCloud.com.example.ios"]));
+    }
+
+    #[test]
+    fn empty_containers_list_opts_out() {
+        let cfg = format!(
+            "containers = [\"iCloud.com.example.top\"]\n\
+             [[target]]\nplatform = \"macos\"\ncontainers = []\n{}\n\
+             [[target]]\nplatform = \"ios\"\nios.containers = []\n\
+             ios.provisioning = \"app_store_connect\"\n{}",
+            app_lines("Mac"),
+            app_lines("Phone"),
+        );
+        let got = resolved_containers(&cfg).unwrap();
+        assert!(got.iter().all(|(_, c)| c.is_empty()), "{got:?}");
+    }
+
+    #[test]
+    fn single_target_top_level_containers_apply_to_the_macos_target() {
+        let cfg = indoc! { r#"
+            containers = ["iCloud.com.example.app", "iCloud.com.example.app"]
+
+            [app]
+            name = "MyApp"
+            bundle_id = "com.example.myapp"
+            version = "1.0.0"
+            build_number = "1"
+        "# };
+        let got = resolved_containers(cfg).unwrap();
+        assert_eq!(
+            got,
+            vec![("macos/MyApp".to_string(), ids(&["iCloud.com.example.app"]))]
+        );
+    }
+
+    #[test]
+    fn invalid_container_identifier_fails_resolution() {
+        for bad in ["com.example.app", "icloud.com.example.app", "iCloud."] {
+            let top = format!(
+                "containers = [\"{bad}\"]\n[[target]]\nplatform = \"macos\"\n{}",
+                app_lines("Mac")
+            );
+            let err = resolved_containers(&top).unwrap_err();
+            assert!(err.to_string().contains("iCloud container"), "{bad}: {err}");
+
+            let per_target = format!(
+                "[[target]]\nplatform = \"ios\"\nios.containers = [\"{bad}\"]\n\
+                 ios.provisioning = \"app_store_connect\"\n{}",
+                app_lines("Phone")
+            );
+            assert!(resolved_containers(&per_target).is_err(), "{bad}");
+        }
     }
 
     #[test]
