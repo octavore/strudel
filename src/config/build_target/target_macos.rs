@@ -21,7 +21,8 @@ pub struct DmgSection {
     #[serde(default)]
     pub plain: bool,
     /// Background for the DMG Finder window: a `#RRGGBB` hex color, or a path
-    /// to a PNG or JPEG background image. When absent, Finder's default background is used.
+    /// to a PNG or JPEG background image. When absent, Finder's default
+    /// background is used.
     pub background: Option<String>,
     /// Finder window width in pixels. Default: 660.
     pub window_width: Option<u32>,

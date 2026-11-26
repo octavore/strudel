@@ -22,8 +22,7 @@
 //! - Block count, `u32`, then a zero `u32`.
 //! - Block address table, padded to a multiple of 256 entries.
 //! - Table of contents. Entry count, then per entry a length-prefixed name and
-//!   a block number. Stores written for Finder windows have one entry,
-//!   `DSDB`.
+//!   a block number. Stores written for Finder windows have one entry, `DSDB`.
 //! - Free list of 32 buckets, one per power of two from `2^0` to `2^31`. Each
 //!   bucket is a `u32` count followed by that many offsets.
 //!
@@ -40,7 +39,8 @@
 //!
 //! # Record
 //!
-//! - Filename length in UTF-16 code units, `u32`, then the filename as UTF-16BE.
+//! - Filename length in UTF-16 code units, `u32`, then the filename as
+//!   UTF-16BE.
 //! - Four-byte structure id.
 //! - Four-byte data type.
 //! - Payload by data type.
@@ -59,8 +59,8 @@
 //!   `SidebarWidth`, and the `Show*` booleans.
 //! - `icvp`: binary plist with icon view settings. Keys include `iconSize`,
 //!   `textSize`, `gridSpacing`, `labelOnBottom`, `showIconPreview`,
-//!   `showItemInfo`, `arrangeBy`, `backgroundType`, and the background color
-//!   or image alias keys. `backgroundType` is 0 for the default, 1 for a color,
+//!   `showItemInfo`, `arrangeBy`, `backgroundType`, and the background color or
+//!   image alias keys. `backgroundType` is 0 for the default, 1 for a color,
 //!   and 2 for an image.
 //! - `vSrn`: `long` with value 1. Present on directories only.
 //! - `vstl`: `type` with the view style. `icnv` is icon view.
