@@ -1,7 +1,7 @@
 //! `strudel status` prints the environment, global config, the Apple ID
-//! session stored under `~/.local/share/strudel/`, and the per-project
-//! `.strudel/` provisioning artifacts. `strudel login status` prints just the
-//! Apple ID session block.
+//! sessions stored under `~/.local/share/strudel/accounts/`, and the
+//! per-project `.strudel/` provisioning artifacts. `strudel login status`
+//! prints just the Apple ID session block.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -12,6 +12,8 @@ use anyhow::Result;
 use appleid::Session;
 use clml::{cformat, cprintln};
 
+use crate::apple::accounts::{self, Account};
+use crate::apple::appstore::AppStoreClient;
 use crate::apple::capabilities::{self, CapabilityDef, Severity};
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder;
@@ -23,7 +25,7 @@ use crate::config::{
     GlobalConfig, IosProvisioningBackend, Platform, ResolvedConfig, ResolvedIosSection,
     ResolvedTargetPlatform, ValueSource, load_config,
 };
-use crate::devices::DeviceSet;
+use crate::devices::{DeviceSet, PortalEntry, print_registration, print_untracked};
 use crate::paths::{Paths, StrudelData};
 
 /// `strudel status`: print the environment, global config, Apple ID session,
@@ -38,9 +40,9 @@ pub fn run(config_path: &Path, target: Option<&str>) -> Result<()> {
     let uses_free_provisioning = load_config(config_path)
         .ok()
         .map(|p| p.targets.iter().any(is_free_provisioning_target));
-    let session = apple_id_section(uses_free_provisioning)?;
+    let accounts = apple_id_section(uses_free_provisioning)?;
     println!();
-    project_section(config_path, target, session.as_ref());
+    project_section(config_path, target, &accounts);
     Ok(())
 }
 
@@ -84,9 +86,10 @@ fn tool_version(cmd: &str, args: &[&str]) -> String {
 /// status for each selected target, without fetching or refreshing anything.
 pub fn profile_info(config_path: &Path, target: Option<&str>) -> Result<()> {
     let project = load_config(config_path)?;
-    let session = StrudelData::locate()
+    let accounts = StrudelData::locate()
         .ok()
-        .and_then(|d| read_session(&d.session_json));
+        .and_then(|d| accounts::list(&d).ok())
+        .unwrap_or_default();
 
     let targets = match target {
         Some(selector) => vec![project.resolve_target(selector)?],
@@ -100,7 +103,7 @@ pub fn profile_info(config_path: &Path, target: Option<&str>) -> Result<()> {
             cfg.bundle_id
         );
         match &cfg.target_platform {
-            ResolvedTargetPlatform::Ios(ios) => ios_provisioning_block(cfg, ios, session.as_ref()),
+            ResolvedTargetPlatform::Ios(ios) => ios_provisioning_block(cfg, ios, &accounts),
             ResolvedTargetPlatform::Mac(_) => macos_profile_block(cfg),
         }
         extensions_block(cfg);
@@ -255,48 +258,49 @@ fn global_config_section() -> Result<()> {
 /// `uses_free_provisioning` is `Some(bool)` when the caller could load the
 /// project and check whether any target has `[ios] provisioning = "free"`;
 /// `None` when there's no project context (e.g. `strudel login status`).
-fn apple_id_section(uses_free_provisioning: Option<bool>) -> Result<Option<Session>> {
+fn apple_id_section(uses_free_provisioning: Option<bool>) -> Result<Vec<Account>> {
     let data = StrudelData::locate()?;
-    let dir = data.session_json.parent().unwrap_or(Path::new("~"));
-    header("Apple ID session", Some(dir));
+    header("Apple ID sessions", Some(data.accounts_dir.as_path()));
 
-    let session = read_session(&data.session_json);
-    match &session {
-        Some(session) => {
-            cprintln!("  <green>●</green> signed in");
-            field("apple id", session.apple_id.clone());
-            field("dsid", mask(&session.dsid));
-            account_lines(session);
-        },
-        None => {
-            // Not signed in but no free-provisioning target needs it: purely
-            // informational, so it stays dim like other neutral state.
-            // Otherwise it's an actionable gap - call it out in yellow.
-            match uses_free_provisioning {
-                Some(false) => cprintln!(
-                    "  <dim>○ not signed in - not required (no target here uses free \
-                     provisioning)</dim>"
-                ),
-                _ => cprintln!(
-                    "  <yellow>○ not signed in</yellow> <dim>(run `strudel login` for free \
-                     provisioning; not required if a target uses `app_store_connect` \
-                     provisioning instead)</dim>"
-                ),
-            }
-        },
+    let accounts = accounts::list(&data)?;
+    if accounts.is_empty() {
+        // Not signed in but no free-provisioning target needs it: purely
+        // informational, so it stays dim like other neutral state.
+        // Otherwise it's an actionable gap - call it out in yellow.
+        match uses_free_provisioning {
+            Some(false) => cprintln!(
+                "  <dim>○ not signed in - not required (no target here uses free \
+                 provisioning)</dim>"
+            ),
+            _ => cprintln!(
+                "  <yellow>○ not signed in</yellow> <dim>(run `strudel login` for free \
+                 provisioning; not required if a target uses `app_store_connect` \
+                 provisioning instead)</dim>"
+            ),
+        }
     }
-
-    // explicitly hide when not free provisioning
-    if uses_free_provisioning != Some(false) {
-        field(
-            "dev cert apple id",
-            opt(&apple_id_from_cert(&data.cert_der)),
-        );
-        field("dev cert", describe_cert(&data.cert_der));
-        field("dev key", present(&data.key_pem));
+    for account in &accounts {
+        cprintln!("  <green>●</green> signed in");
+        field("apple id", account.email.clone());
+        match account.load_session() {
+            Ok(session) => {
+                field("dsid", mask(&session.dsid));
+                account_lines(&session);
+            },
+            Err(e) => cprintln!("  <yellow>could not read session: {e:#}</yellow>"),
+        }
+        // explicitly hide when not free provisioning
+        if uses_free_provisioning != Some(false) {
+            let cert_der = account.cert_der();
+            field("dev cert apple id", opt(&apple_id_from_cert(&cert_der)));
+            field("dev cert", describe_cert(&cert_der));
+            field("dev key", present(&account.key_pem()));
+        }
+    }
+    if !accounts.is_empty() && uses_free_provisioning != Some(false) {
         field("dev keychain", present(&data.keychain_db));
     }
-    Ok(session)
+    Ok(accounts)
 }
 
 /// Fetch and print developer teams + their registered devices from Apple's
@@ -345,7 +349,7 @@ fn account_lines(session: &Session) {
     }
 }
 
-fn project_section(config_path: &Path, target: Option<&str>, session: Option<&Session>) {
+fn project_section(config_path: &Path, target: Option<&str>, accounts: &[Account]) {
     let project = match load_config(config_path) {
         Ok(p) => p,
         Err(_) => {
@@ -364,11 +368,11 @@ fn project_section(config_path: &Path, target: Option<&str>, session: Option<&Se
         {
             continue;
         }
-        target_block(cfg, session);
+        target_block(cfg, accounts);
     }
 }
 
-fn target_block(cfg: &ResolvedConfig, session: Option<&Session>) {
+fn target_block(cfg: &ResolvedConfig, accounts: &[Account]) {
     let platform = match &cfg.target_platform {
         ResolvedTargetPlatform::Mac(_) => "macos",
         ResolvedTargetPlatform::Ios(_) => "ios",
@@ -387,7 +391,7 @@ fn target_block(cfg: &ResolvedConfig, session: Option<&Session>) {
         },
         ResolvedTargetPlatform::Ios(ios) => {
             ios_sign_identity_field(cfg, ios);
-            ios_provisioning_block(cfg, ios, session);
+            ios_provisioning_block(cfg, ios, accounts);
         },
     }
     extensions_block(cfg);
@@ -564,12 +568,11 @@ impl ProfileCheck {
         pinned: bool,
     ) -> Self {
         let platform = cfg.target_platform.platform();
-        let udids = match platform {
-            Platform::Macos => Vec::new(),
-            Platform::Ios => DeviceSet::load(&Paths::new(cfg).devices_toml)
-                .map(|set| set.udids().into_iter().map(str::to_string).collect())
-                .unwrap_or_default(),
-        };
+        // On macOS, only a development profile lists devices. The check
+        // ignores these UDIDs for a profile without `ProvisionedDevices`.
+        let udids = DeviceSet::load_for(&Paths::new(cfg).devices_toml, platform)
+            .map(|set| set.udids().into_iter().map(str::to_string).collect())
+            .unwrap_or_default();
         let required =
             capabilities::required(entitlements_path, capability_names).unwrap_or_default();
         ProfileCheck {
@@ -613,7 +616,13 @@ fn print_profile_check(dict: &plist::Dictionary, check: &ProfileCheck) {
     }
 
     let now = SystemTime::now();
-    let udids: Vec<&str> = check.udids.iter().map(String::as_str).collect();
+    let lists_devices = dict.contains_key("ProvisionedDevices");
+    let udids: Vec<&str> = check
+        .udids
+        .iter()
+        .filter(|_| check.platform == Platform::Ios || lists_devices)
+        .map(String::as_str)
+        .collect();
     let profile = ProfileExpectations {
         bundle_id: &check.bundle_id,
         team_id: &check.team_id,
@@ -658,11 +667,7 @@ fn print_profile_check(dict: &plist::Dictionary, check: &ProfileCheck) {
 /// one iOS target. Shared by `strudel login status` (as part of the full
 /// project dump) and `strudel profile` (on its own), so the two commands
 /// don't drift out of sync.
-fn ios_provisioning_block(
-    cfg: &ResolvedConfig,
-    ios: &ResolvedIosSection,
-    session: Option<&Session>,
-) {
+fn ios_provisioning_block(cfg: &ResolvedConfig, ios: &ResolvedIosSection, accounts: &[Account]) {
     let backend = match ios.provisioning {
         IosProvisioningBackend::Free => "free (Apple ID, 7-day profiles)",
         IosProvisioningBackend::AppStoreConnect => "app_store_connect",
@@ -673,12 +678,11 @@ fn ios_provisioning_block(
     // Free profiles are tied to whichever Apple ID requested them; only that
     // check makes sense for the free backend, and only when signed in.
     let expected_owner = matches!(ios.provisioning, IosProvisioningBackend::Free)
-        .then_some(session)
-        .flatten()
-        .map(|s| s.apple_id.as_str());
+        .then(|| expected_owner(accounts, &cfg.team_id))
+        .flatten();
 
     let paths = Paths::new(cfg);
-    profile_lines(&paths, cfg, expected_owner);
+    profile_lines(&paths, cfg, expected_owner.as_deref());
     device_lines(&paths);
 }
 
@@ -772,7 +776,7 @@ fn print_owner_check(dict: &plist::Dictionary, expected: &str) {
 }
 
 fn device_lines(paths: &Paths) {
-    let set = match DeviceSet::load(&paths.devices_toml) {
+    let set = match DeviceSet::load_for(&paths.devices_toml, Platform::Ios) {
         Ok(s) => s,
         Err(_) => return,
     };
@@ -813,12 +817,23 @@ fn field2(label: &str, value: String) {
 }
 
 fn subfield(label: &str, value: String) {
-    cprintln!("      <dim>{:<14}</dim> {}", format!("{label}"), value);
+    cprintln!("      <dim>{:<14}</dim> {}", label, value);
 }
 
-fn read_session(path: &Path) -> Option<Session> {
-    let s = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&s).ok()
+/// Apple ID that owns free profiles of `team_id`. Without a team ID, the only
+/// signed-in account. `None` if the owner is unclear.
+fn expected_owner(accounts: &[Account], team_id: &str) -> Option<String> {
+    if team_id.is_empty() {
+        return match accounts {
+            [only] => Some(only.email.clone()),
+            _ => None,
+        };
+    }
+    let mut owners = accounts.iter().filter(|a| a.has_team(team_id));
+    match (owners.next(), owners.next()) {
+        (Some(owner), None) => Some(owner.email.clone()),
+        _ => None,
+    }
 }
 
 /// Extract the Apple ID email from a cached dev certificate's subject. Apple

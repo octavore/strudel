@@ -19,11 +19,11 @@ pub(crate) struct LoginCmd {
 
 #[derive(Subcommand)]
 enum LoginAction {
-    /// Show just the Apple ID session: signed-in state, apple id, and dsid.
+    /// Show every Apple ID session: signed-in state, apple id, and dsid.
     /// Run `strudel status` for the full picture (config, project, etc.)
     Status,
-    /// Sign out and clear the saved Apple ID session and cached dev
-    /// credentials
+    /// Sign out one Apple ID and clear its session and cached dev
+    /// credentials. Shows a picker if several are signed in.
     Clear,
 }
 

@@ -85,7 +85,8 @@ pub fn run_init(output_dir: &Path) -> Result<()> {
         };
 
         let already_signed_in = StrudelData::locate()
-            .map(|data| data.session_json.exists())
+            .and_then(|data| crate::apple::accounts::list(&data))
+            .map(|accounts| !accounts.is_empty())
             .unwrap_or(false);
         if matches!(provisioning, IosProvisioningBackend::Free) && !already_signed_in {
             let sign_in_now = inquire::Confirm::new("Sign in with your Apple ID now?")

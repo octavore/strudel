@@ -4,18 +4,20 @@ use anyhow::{Context, Result, bail};
 use appleid::{AppleId, Session, Team};
 use clml::cprintln;
 
+use crate::apple::accounts::{self, Account};
 use crate::apple::capabilities::{CapabilityDef, Known, Severity};
 use crate::apple::fingerprint::parse_fingerprint;
 use crate::builder::keychain as kc;
-use crate::config::ResolvedConfig;
-use crate::devices::DeviceSet;
+use crate::config::{Platform, ResolvedConfig};
+use crate::devices::{DeviceSet, PortalEntry};
 use crate::paths::{Paths, StrudelData, ensure_strudel_dir};
 
 /// Interactive sign-in. Prompts for Apple ID + password + 2FA and persists
-/// the resulting session under `~/.local/share/strudel/session.json`.
+/// the resulting session under
+/// `~/.local/share/strudel/accounts/<dsid>/session.json`.
 pub fn login(apple_id_email: Option<String>) -> Result<()> {
     let data = StrudelData::locate()?;
-    let apple_id = get_apple_id(&data)?;
+    let apple_id = get_apple_id()?;
 
     let email = match apple_id_email {
         Some(e) => e.to_string(),
@@ -39,11 +41,24 @@ pub fn login(apple_id_email: Option<String>) -> Result<()> {
         })
         .context("Apple ID sign-in failed")?;
 
-    save_session(&data, &session)?;
-    cprintln!("<green>✔</green> Signed in. Session saved.");
+    let account = Account::create(&data, &session)?;
+    account.save_session(&session)?;
+    cprintln!(
+        "<green>✔</green> Signed in as {}. Session saved.",
+        account.email
+    );
+    match account.refresh_teams(&apple_id) {
+        Ok(teams) => {
+            for team in &teams {
+                cprintln!("<dim>  team {} ({})</dim>", team.name, team.id);
+            }
+        },
+        Err(e) => cprintln!("<yellow>Could not list teams: {e:#}</yellow>"),
+    }
     cprintln!(
         "<dim>Free provisioning: 7-day profiles, max 3 devices, max 10 App IDs.\n\
-         For unlimited, use a paid account + App Store Connect.</dim>"
+         For unlimited, use a paid account + App Store Connect.\n\
+         Paid teams use the session only for `strudel icloud-containers`.</dim>"
     );
     nudge_device_registration(&apple_id, &session);
     Ok(())
@@ -54,7 +69,7 @@ pub fn login(apple_id_email: Option<String>) -> Result<()> {
 /// `strudel devices add`. Best-effort: a network/auth error here
 /// shouldn't fail `login` itself, since sign-in already succeeded.
 fn nudge_device_registration(apple_id: &AppleId, session: &Session) {
-    let result = pick_team(apple_id, session).and_then(|team| {
+    let result = pick_team(apple_id, session, "").and_then(|team| {
         apple_id
             .list_devices(session, &team.id)
             .with_context(|| format!("listing devices for team {}", team.name))
@@ -73,22 +88,29 @@ fn nudge_device_registration(apple_id: &AppleId, session: &Session) {
     }
 }
 
-/// Clear the persisted session and cached credentials.
+/// Clear the session and cached credentials of one account. A picker chooses
+/// the account if several are signed in.
 pub fn logout() -> Result<()> {
     let data = StrudelData::locate()?;
-    let targets: Vec<&std::path::Path> = [&data.session_json, &data.cert_der, &data.key_pem]
-        .into_iter()
-        .filter(|p| p.exists())
-        .map(|p| p.as_path())
-        .collect();
+    let mut signed_in = accounts::list(&data)?;
 
-    if targets.is_empty() {
-        cprintln!("<dim>Nothing to clear; no session or cached credentials found.</dim>");
-        return Ok(());
-    }
+    let account = match signed_in.len() {
+        0 => {
+            cprintln!("<dim>Nothing to clear; no session or cached credentials found.</dim>");
+            return Ok(());
+        },
+        1 => signed_in.remove(0),
+        _ => {
+            let emails: Vec<String> = signed_in.iter().map(|a| a.email.clone()).collect();
+            let choice = inquire::Select::new("Sign out which Apple ID?", emails)
+                .raw_prompt()
+                .context("reading Apple ID choice")?;
+            signed_in.remove(choice.index)
+        },
+    };
 
-    cprintln!("This will remove:");
-    for path in &targets {
+    cprintln!("This will remove {}:", account.email);
+    for path in account.files() {
         cprintln!("  <dim>{}</dim>", path.display());
     }
     let confirmed = inquire::Confirm::new("Continue?")
@@ -100,35 +122,77 @@ pub fn logout() -> Result<()> {
         return Ok(());
     }
 
-    for path in &targets {
-        std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
-    }
-    cprintln!("<green>✔</green> Logged out. Session and cached credentials cleared.");
+    account.remove()?;
+    cprintln!(
+        "<green>✔</green> Logged out {}. Session and cached credentials cleared.",
+        account.email
+    );
     Ok(())
 }
 
-/// Register a device on the Apple developer portal via Apple ID.
-pub fn register_device(_cfg: &ResolvedConfig, name: &str, udid: &str) -> Result<()> {
+/// Apple ID client, account, session, and team of a free-provisioning flow.
+struct FreeSession {
+    apple_id: AppleId,
+    account: Account,
+    session: Session,
+    team: Team,
+}
+
+/// Sign-in state for `team_id`. An empty `team_id` uses the only signed-in
+/// account and its personal team.
+fn free_session(team_id: &str) -> Result<FreeSession> {
     let data = StrudelData::locate()?;
-    let apple_id = get_apple_id(&data)?;
-    let session = load_session_or_err(&data)?;
-    let team = pick_team(&apple_id, &session)?;
+    let apple_id = get_apple_id()?;
+    let account = accounts::for_config(&data, &apple_id, team_id)?;
+    let session = account.load_session()?;
+    let team = pick_team(&apple_id, &session, team_id)?;
+    Ok(FreeSession {
+        apple_id,
+        account,
+        session,
+        team,
+    })
+}
+
+/// Account whose dev certificate signs free-provisioned builds of `team_id`.
+pub fn free_account(team_id: &str) -> Result<Account> {
+    let data = StrudelData::locate()?;
+    let apple_id = get_apple_id()?;
+    accounts::for_config(&data, &apple_id, team_id)
+}
+
+/// Register a device on the Apple developer portal via Apple ID.
+pub fn register_device(cfg: &ResolvedConfig, name: &str, udid: &str) -> Result<()> {
+    let FreeSession {
+        apple_id,
+        session,
+        team,
+        ..
+    } = free_session(&cfg.team_id)?;
     apple_id
         .add_device(&session, &team.id, name, udid)
         .with_context(|| format!("Failed to register device {name} ({udid})"))?;
     Ok(())
 }
 
-/// List the UDIDs registered on the signed-in Apple ID's team.
-pub fn registered_udids(_cfg: &ResolvedConfig) -> Result<Vec<String>> {
-    let data = StrudelData::locate()?;
-    let apple_id = get_apple_id(&data)?;
-    let session = load_session_or_err(&data)?;
-    let team = pick_team(&apple_id, &session)?;
+/// List the devices registered on the team of the config's Apple ID.
+pub fn registered_devices(cfg: &ResolvedConfig) -> Result<Vec<PortalEntry>> {
+    let FreeSession {
+        apple_id,
+        session,
+        team,
+        ..
+    } = free_session(&cfg.team_id)?;
     let devices = apple_id
         .list_devices(&session, &team.id)
         .with_context(|| format!("listing devices for team {}", team.name))?;
-    Ok(devices.into_iter().map(|d| d.udid).collect())
+    Ok(devices
+        .into_iter()
+        .map(|d| PortalEntry {
+            name: d.name,
+            udid: d.udid,
+        })
+        .collect())
 }
 
 /// Bundle ID that a free development profile is fetched for. This is the host
@@ -139,6 +203,8 @@ pub struct FreeProfileTarget<'a> {
     pub label: &'a str,
     /// Where the fetched profile is cached.
     pub cache_path: &'a Path,
+    /// Configured team ID. Empty if unset.
+    pub team_id: &'a str,
 }
 
 /// Fetch a 7-day development profile via Apple ID, cache it at
@@ -151,11 +217,14 @@ pub fn auto_fetch_profile(
     paths: &Paths,
 ) -> Result<()> {
     let data = StrudelData::locate()?;
-    let apple_id = get_apple_id(&data)?;
-    let session = load_session_or_err(&data)?;
-    let team = pick_team(&apple_id, &session)?;
+    let FreeSession {
+        apple_id,
+        account,
+        session,
+        team,
+    } = free_session(target.team_id)?;
 
-    let device_set = DeviceSet::load(&paths.devices_toml)?;
+    let device_set = DeviceSet::load_for(&paths.devices_toml, Platform::Ios)?;
     if device_set.device.is_empty() {
         bail!(
             "No devices tracked in .strudel/devices.toml.\n\
@@ -168,8 +237,8 @@ pub fn auto_fetch_profile(
 
     // Reuse a previously issued cert+key if it's still valid, so refreshing the
     // 7-day profile doesn't revoke and reissue the (year-long) cert each time.
-    let cached_cert = std::fs::read(&data.cert_der).ok();
-    let cached_key = std::fs::read(&data.key_pem).ok();
+    let cached_cert = std::fs::read(account.cert_der()).ok();
+    let cached_key = std::fs::read(account.key_pem()).ok();
     let cached_identity = match (&cached_cert, &cached_key) {
         (Some(c), Some(k)) => Some((c.as_slice(), k.as_slice())),
         _ => None,
@@ -213,8 +282,8 @@ pub fn auto_fetch_profile(
         target.cache_path.display()
     );
 
-    std::fs::write(&data.cert_der, &profile.cert_der).context("writing cached dev cert")?;
-    std::fs::write(&data.key_pem, &profile.key_pem).context("writing cached dev key")?;
+    std::fs::write(account.cert_der(), &profile.cert_der).context("writing cached dev cert")?;
+    std::fs::write(account.key_pem(), &profile.key_pem).context("writing cached dev key")?;
 
     kc::dev::import_dev_cert(&profile.cert_der, &profile.key_pem, &data.keychain_db)
         .context("importing dev cert into persistent keychain")?;
@@ -223,14 +292,14 @@ pub fn auto_fetch_profile(
 }
 
 /// Ensure the persistent dev keychain is in the search list (and re-import the
-/// cert if the cache exists). Called before codesign when the Free backend is
-/// active and the profile is already current (so `auto_fetch_profile` was
-/// skipped).
-pub fn ensure_keychain_ready() -> Result<()> {
+/// cert of `account` if the cache exists). Called before codesign when the
+/// Free backend is active and the profile is already current (so
+/// `auto_fetch_profile` was skipped).
+pub fn ensure_keychain_ready(account: &Account) -> Result<()> {
     let data = StrudelData::locate()?;
-    if data.cert_der.exists() && data.key_pem.exists() {
-        let cert = std::fs::read(&data.cert_der).context("reading cached cert")?;
-        let key = std::fs::read(&data.key_pem).context("reading cached key")?;
+    if account.cert_der().exists() && account.key_pem().exists() {
+        let cert = std::fs::read(account.cert_der()).context("reading cached cert")?;
+        let key = std::fs::read(account.key_pem()).context("reading cached key")?;
         kc::dev::import_dev_cert(&cert, &key, &data.keychain_db)
             .context("re-importing cached dev cert")?;
     }
@@ -244,9 +313,9 @@ pub fn ensure_keychain_ready() -> Result<()> {
 /// Development" name: revoked/older "Apple Development" certs may still sit in
 /// the login keychain, and signing by name would pick the wrong one (and
 /// codesign would refuse an ambiguous match).
-pub fn dev_cert_sha1() -> Result<Option<String>> {
-    let data = StrudelData::locate()?;
-    if !data.cert_der.exists() {
+pub fn dev_cert_sha1(account: &Account) -> Result<Option<String>> {
+    let cert_der = account.cert_der();
+    if !cert_der.exists() {
         return Ok(None);
     }
     let out = std::process::Command::new("openssl")
@@ -255,7 +324,7 @@ pub fn dev_cert_sha1() -> Result<Option<String>> {
             "-inform",
             "DER",
             "-in",
-            data.cert_der.to_str().unwrap(),
+            cert_der.to_str().unwrap(),
             "-noout",
             "-fingerprint",
             "-sha1",
@@ -312,6 +381,7 @@ fn ensure_capabilities(
         );
         report_enable_result(severity, caps, target.bundle_id, result)?;
     }
+
     Ok(())
 }
 
@@ -383,38 +453,29 @@ fn report_enable_result(
     }
 }
 
-fn get_apple_id(_data: &StrudelData) -> Result<AppleId> {
+pub(crate) fn get_apple_id() -> Result<AppleId> {
     AppleId::new().context("initializing Apple ID client")
 }
 
-fn pick_team(apple_id: &AppleId, session: &Session) -> Result<Team> {
+/// Team `team_id` of the session. An empty `team_id` picks the personal team,
+/// or the first team.
+fn pick_team(apple_id: &AppleId, session: &Session, team_id: &str) -> Result<Team> {
     let mut teams = apple_id
         .list_teams(session)
         .context("listing Apple Developer teams")?;
     if teams.is_empty() {
         bail!("No Apple Developer teams found for this Apple ID.");
     }
+    if !team_id.is_empty() {
+        let Some(pos) = teams.iter().position(|t| t.id == team_id) else {
+            bail!("Team {team_id} is not available to {}.", session.apple_id);
+        };
+        return Ok(teams.remove(pos));
+    }
     if let Some(pos) = teams.iter().position(|t| t.name.contains("Personal Team")) {
         return Ok(teams.remove(pos));
     }
     Ok(teams.remove(0))
-}
-
-fn load_session_or_err(data: &StrudelData) -> Result<Session> {
-    if !data.session_json.exists() {
-        bail!(
-            "Not signed in. Run `strudel login` to sign in with your Apple ID.\n\
-             Or set [ios] provisioning = \"app_store_connect\" to use App Store Connect."
-        );
-    }
-    let s = std::fs::read_to_string(&data.session_json).context("reading session file")?;
-    serde_json::from_str(&s)
-        .context("parsing session file (try `strudel login` to refresh the session)")
-}
-
-fn save_session(data: &StrudelData, session: &Session) -> Result<()> {
-    let s = serde_json::to_string_pretty(session).context("serializing session")?;
-    std::fs::write(&data.session_json, s).context("saving session")
 }
 
 #[cfg(test)]

@@ -57,8 +57,9 @@ impl IosBuilder {
         // rejected by the profile.
         let mut dev_fp = None;
         if matches!(ios_settings.provisioning, IosProvisioningBackend::Free) && !self.dry_run {
-            ensure_keychain_ready()?;
-            dev_fp = provisioning::dev_cert_sha1()?;
+            let account = provisioning::free_account(&self.cfg.team_id)?;
+            ensure_keychain_ready(&account)?;
+            dev_fp = provisioning::dev_cert_sha1(&account)?;
         }
 
         self.step("Signing device bundle...");

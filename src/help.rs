@@ -1338,7 +1338,9 @@ fn print_ios_free_provisioning() {
         </>
            Prompts for your Apple ID, password, and a 2FA code if your account has
            two-factor authentication enabled. The session token (never the password)
-           is saved to <green>~/.local/share/strudel/session.json</>.
+           is saved under <green>~/.local/share/strudel/accounts/<<dsid>>/</>.
+           Run it again to sign in with another Apple ID. Set `team_id` in the
+           `[apple]` section of strudel.toml to pick the account that owns the team.
 
         3. Register your device and build as usual:
         <blue>
@@ -1349,8 +1351,8 @@ fn print_ios_free_provisioning() {
         <blue>
         strudel login                        # interactive sign-in
         strudel login --apple-id you@ex.com  # pre-fill the email
-        strudel login clear                  # clear session and cached credentials
-        strudel login status                 # show just the Apple ID session
+        strudel login clear                  # clear one account (picker if several)
+        strudel login status                 # show every Apple ID session
         strudel status                       # show full config + session + project state
         </>
         The session token expires. If a `strudel run --device` run fails with an auth
@@ -1360,10 +1362,11 @@ fn print_ios_free_provisioning() {
 
         All data lives in <green>~/.local/share/strudel/</> (per-machine, not per-project):
 
-          session.json             GSA token + DSID (no password stored)
-          dev-cert.der             Cached DER-encoded developer certificate
-          dev-key.pem              Cached private key (generated fresh each cert rotation)
-          strudel-dev.keychain-db  Persistent keychain holding the signing identity
+          accounts/<<dsid>>/session.json   GSA token + DSID (no password stored)
+          accounts/<<dsid>>/teams.json     Teams of the account, saved at sign-in
+          accounts/<<dsid>>/dev-cert.der   Cached DER-encoded developer certificate
+          accounts/<<dsid>>/dev-key.pem    Cached private key (generated fresh each cert rotation)
+          strudel-dev.keychain-db          Persistent keychain holding the signing identity
 
         The keypair and certificate are regenerated on each profile refresh (every
         7 days). The keychain is created once and reused across rotations.

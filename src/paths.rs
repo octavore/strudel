@@ -122,12 +122,10 @@ impl Paths {
 /// (defaults to `~/.local/share/strudel/`). These files are global to the
 /// machine, not tied to any project directory.
 pub struct StrudelData {
-    /// `session.json`, persisted GSA token/DSID. Password is never stored.
-    pub session_json: PathBuf,
-    /// `dev-cert.der`, cached DER-encoded developer certificate.
-    pub cert_der: PathBuf,
-    /// `dev-key.pem`, cached private key PEM (permission 0600).
-    pub key_pem: PathBuf,
+    /// `accounts/`, one subdirectory per account signed in with `strudel
+    /// login`, named by DSID. Each holds the session, team cache, and dev
+    /// credentials of that account.
+    pub accounts_dir: PathBuf,
     /// `strudel-dev.keychain-db`, persistent keychain holding the dev
     /// identity.
     pub keychain_db: PathBuf,
@@ -138,15 +136,13 @@ impl StrudelData {
     pub fn locate() -> Result<Self> {
         let dirs = xdg::BaseDirectories::with_prefix("strudel");
         // place_data_file creates the parent directory.
-        let session_json = dirs
-            .place_data_file("session.json")
+        let keychain_db = dirs
+            .place_data_file("strudel-dev.keychain-db")
             .context("Failed to locate strudel data dir")?;
-        let dir = session_json.parent().unwrap().to_owned();
+        let dir = keychain_db.parent().unwrap().to_owned();
         Ok(StrudelData {
-            session_json,
-            cert_der: dir.join("dev-cert.der"),
-            key_pem: dir.join("dev-key.pem"),
-            keychain_db: dir.join("strudel-dev.keychain-db"),
+            accounts_dir: dir.join("accounts"),
+            keychain_db,
         })
     }
 }
