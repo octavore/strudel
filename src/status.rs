@@ -170,21 +170,78 @@ fn extensions_block(cfg: &ResolvedConfig) {
     }
 }
 
+/// List the macOS devices tracked in `.strudel/devices.toml`, with their
+/// portal registration. These are the devices of a macOS development
+/// profile. Nothing is detected locally.
+fn macos_devices_list(cfg: &ResolvedConfig, portal_errors: &mut Vec<String>) -> Result<()> {
+    let set = DeviceSet::load_for(&Paths::new(cfg).devices_toml, Platform::Macos)?;
+    let portal = AppStoreClient::from_config(cfg)
+        .map(|c| c.show_progress(false))
+        .and_then(|c| c.list_devices_on(Platform::Macos));
+    let portal: Option<Vec<PortalEntry>> = match portal {
+        Ok(devices) => Some(
+            devices
+                .into_iter()
+                .map(|d| PortalEntry {
+                    name: d.name,
+                    udid: d.udid,
+                })
+                .collect(),
+        ),
+        Err(e) => {
+            warn_portal_unavailable(&e, portal_errors);
+            None
+        },
+    };
+    if set.device.is_empty() {
+        cprintln!("<dim>none tracked. Run `strudel devices add`.</dim>");
+    }
+    for (i, d) in set.device.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        cprintln!("<bold>{}</bold> <cyan>[{}]</cyan>", d.name, d.udid);
+        cprintln!("  <dim>macOS, tracked</dim>");
+        print_registration(
+            portal
+                .as_ref()
+                .map(|p| p.iter().any(|pd| pd.udid == d.udid)),
+        );
+    }
+    if let Some(portal) = &portal {
+        print_untracked(portal, |udid| set.contains_udid(udid));
+    }
+    Ok(())
+}
+
 /// `strudel devices` (no subcommand): list devices tracked in
-/// `.strudel/devices.toml` for each selected iOS target. Sections are
-/// indented under the target id only when more than one target is listed.
-/// The underlying `devicectl` command is echoed only when `verbose` is set.
+/// `.strudel/devices.toml` for each selected target. iOS targets also list
+/// connected devices. Sections are indented under the target id only when
+/// more than one target is listed. The underlying `devicectl` command is
+/// echoed only when `verbose` is set.
 pub fn devices_list(config_path: &Path, target: Option<&str>, verbose: bool) -> Result<()> {
     let project = load_config(config_path)?;
-    let targets = project.select(target, Platform::Ios, true)?;
+    let targets: Vec<&ResolvedConfig> = match target {
+        Some(selector) => vec![project.resolve_target(selector)?],
+        None => project.targets.iter().collect(),
+    };
     let multi = targets.len() > 1;
+    let mut portal_errors: Vec<String> = Vec::new();
 
-    for cfg in targets {
+    for (i, cfg) in targets.into_iter().enumerate() {
         if multi {
+            if i > 0 {
+                println!();
+            }
             cprintln!("<bold,cyan>{}</bold,cyan>", cfg.target_id);
+            println!();
+        }
+        if cfg.target_platform.platform() == Platform::Macos {
+            macos_devices_list(cfg, &mut portal_errors)?;
+            continue;
         }
         let paths = Paths::new(cfg);
-        let set = DeviceSet::load(&paths.devices_toml)?;
+        let set = DeviceSet::load_for(&paths.devices_toml, Platform::Ios)?;
 
         let output = builder::OutputFlags {
             no_echo: !verbose,
@@ -198,17 +255,14 @@ pub fn devices_list(config_path: &Path, target: Option<&str>, verbose: bool) -> 
                 Vec::new()
             },
         };
-        let portal = match builder.portal_udids() {
-            Ok(udids) => Some(udids),
+        let portal = match builder.portal_devices() {
+            Ok(devices) => Some(devices),
             Err(e) => {
-                cprintln!(
-                    "<yellow>could not check portal registration: {}</yellow>",
-                    e
-                );
+                warn_portal_unavailable(&e, &mut portal_errors);
                 None
             },
         };
-        let registered = |udid: &str| portal.as_ref().map(|p| p.iter().any(|u| u == udid));
+        let registered = |udid: &str| portal.as_ref().map(|p| p.iter().any(|d| d.udid == udid));
 
         let mut first = true;
         let mut separate = || {
@@ -232,8 +286,29 @@ pub fn devices_list(config_path: &Path, target: Option<&str>, verbose: bool) -> 
         if devices.is_empty() && set.device.is_empty() {
             cprintln!("<dim>none. Run `strudel devices add`.</dim>");
         }
+        if let Some(portal) = &portal {
+            print_untracked(portal, |udid| {
+                set.contains_udid(udid) || devices.iter().any(|d| d.udid == udid)
+            });
+        }
+    }
+    for msg in &portal_errors {
+        println!();
+        cprintln!("<yellow>{}</yellow>", msg.trim_end());
     }
     Ok(())
+}
+
+/// Print a one-line portal warning for a target and record the full error
+/// text for printing once after all targets. Identical errors are recorded
+/// once.
+fn warn_portal_unavailable(e: &anyhow::Error, portal_errors: &mut Vec<String>) {
+    cprintln!("<yellow>could not check portal registration (see below)</yellow>");
+    println!();
+    let msg = e.to_string();
+    if !portal_errors.contains(&msg) {
+        portal_errors.push(msg);
+    }
 }
 
 fn global_config_section() -> Result<()> {

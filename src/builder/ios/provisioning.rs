@@ -64,7 +64,7 @@ impl IosBuilder {
     /// somewhere trackable: commit the copy, then point `provisioning_profile`
     /// at it directly for environments that can't run the interactive fetch.
     pub fn profile_fetch(&self, force: bool, out: Option<&Path>) -> Result<()> {
-        let device_set = DeviceSet::load(&self.paths.devices_toml)?;
+        let device_set = DeviceSet::load_for(&self.paths.devices_toml, Platform::Ios)?;
         let udids = device_set.udids();
         let mut fetched = Vec::new();
 
@@ -213,13 +213,14 @@ impl IosBuilder {
                     bundle_id: &target.bundle_id,
                     label: &target.label,
                     cache_path: &target.cache_path,
+                    team_id: &self.cfg.team_id,
                 },
                 caps,
                 &self.paths,
             );
         }
 
-        let device_set = DeviceSet::load(&self.paths.devices_toml)?;
+        let device_set = DeviceSet::load_for(&self.paths.devices_toml, Platform::Ios)?;
         if device_set.device.is_empty() {
             bail!(
                 "No devices are tracked in .strudel/devices.toml.\n\

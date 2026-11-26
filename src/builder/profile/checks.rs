@@ -13,7 +13,8 @@ pub struct ProfileExpectations<'a> {
     pub bundle_id: &'a str,
     /// Empty if no team is configured. Then the team is not checked.
     pub team_id: &'a str,
-    /// Device UDIDs the profile must list. Empty on macOS.
+    /// Device UDIDs the profile must list. Empty for a profile without
+    /// devices, such as Developer ID.
     pub required_udids: &'a [&'a str],
     /// Capabilities whose entitlement keys the profile must grant.
     pub capabilities: &'a [&'static CapabilityDef],

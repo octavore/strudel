@@ -194,13 +194,14 @@ impl MacosBuilder {
             .provisioning_profile
             .clone()
             .filter(|_| !self.cfg.manage_provisioning_profile);
-        let mut targets = vec![target(
+        let host = target(
             &self.cfg.app_name,
             &self.cfg.bundle_id,
             self.cfg.entitlements_json_path.clone(),
             &self.macos.capabilities,
             host_pinned,
-        )?];
+        )?;
+        let mut targets = vec![host];
         for ext in &self.cfg.extensions {
             let pinned = ext
                 .provisioning_profile

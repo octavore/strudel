@@ -10,6 +10,7 @@
 //! - [`validators`] signing/notarization credential preflight checks
 
 mod bundle;
+mod devices;
 mod notarize;
 mod provisioning;
 mod sign;

@@ -9,12 +9,19 @@
 //! strudel create, cache, and refresh the profile. A capability that may need
 //! a profile also opts its bundle ID in (see [`capabilities`]).
 //!
+//! The signing identity decides the profile type. A Developer ID identity gets
+//! a `MAC_APP_DIRECT` profile. An Apple Development or Mac Developer identity
+//! gets a `MAC_APP_DEVELOPMENT` profile for the devices in
+//! `.strudel/devices.toml`.
+//!
 //! - [`capabilities`] required capabilities, pinned-profile checks, and profile
 //!   opt-in, without network calls
+//! - [`kind`] profile type from the signing identity, and development devices
 //! - [`provision`] App Store Connect changes for profiles and capabilities
 //! - [`plan`] confirmation text for those changes
 
 mod capabilities;
+mod kind;
 mod plan;
 mod provision;
 
@@ -70,7 +77,7 @@ impl MacosBuilder {
     pub(crate) fn ensure_profiles(&mut self, force: bool) -> Result<()> {
         let targets = self.prepare_capabilities()?;
         let opt_ins = self.profile_opt_ins(&targets, self.interactive());
-        let profiles = self.managed_profiles(&targets, &opt_ins);
+        let profiles = self.apply_profile_kind(self.managed_profiles(&targets, &opt_ins))?;
         self.provision(force, &targets, &profiles)?;
         Ok(())
     }
@@ -93,6 +100,7 @@ impl MacosBuilder {
         } else {
             self.managed_profiles(&targets, &opt_ins)
         };
+        let profiles = self.apply_profile_kind(profiles)?;
         if profiles.is_empty() && enable_only_targets(&targets, &profiles).is_empty() {
             self.note(cformat!(
                 "<dim>No managed provisioning profiles for {}: `provisioning_profile` isn't set \
@@ -194,15 +202,15 @@ impl MacosBuilder {
             .collect()
     }
 
-    /// A Developer ID profile is issued against a Developer ID certificate, so
-    /// an ad-hoc build has nothing to bind one to. Catch that here rather than
-    /// let a profile authorizing no usable identity get embedded and fail at
-    /// launch.
+    /// A profile is issued against a certificate, so an ad-hoc build has
+    /// nothing to bind one to. Catch that here rather than let a profile
+    /// authorizing no usable identity get embedded and fail at launch.
     fn require_signing_identity(&self) -> Result<()> {
         if !self.is_signed() {
             bail!(
-                "`provisioning_profile = \"auto\"` needs a Developer ID signing identity, but \
-                 none is configured, so this build would be signed ad-hoc.\n\
+                "`provisioning_profile = \"auto\"` needs a signing identity (Developer ID \
+                 Application, Apple Development, or Mac Developer), but none is configured, so \
+                 this build would be signed ad-hoc.\n\
                  Set `apple.identity` in strudel.toml (or APPLE_SIGNING_IDENTITY), or remove \
                  `provisioning_profile` for an unsigned local build. See `strudel help signing`."
             );

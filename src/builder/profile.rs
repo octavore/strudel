@@ -41,6 +41,14 @@ pub enum CertKind {
 }
 
 impl CertKind {
+    /// Certificate name for progress lines.
+    pub fn description(self) -> &'static str {
+        match self {
+            CertKind::Development => "development",
+            CertKind::DeveloperIdApplication => "Developer ID Application",
+        }
+    }
+
     /// Resource IDs of every certificate of this kind in the account. Errors
     /// when the account has none, since a profile embedding no certificate
     /// authorizes no signature.
@@ -55,10 +63,90 @@ impl CertKind {
     }
 }
 
+/// Kind of macOS profile strudel creates. The signing identity name decides
+/// it, since a profile only authorizes signatures made with a certificate it
+/// embeds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MacosProfileKind {
+    /// Directly distributed app, signed with a Developer ID Application
+    /// identity.
+    DeveloperId,
+    /// App signed with an Apple Development or Mac Developer identity. The
+    /// profile lists devices.
+    Development,
+}
+
+impl MacosProfileKind {
+    const DEVELOPER_ID_PREFIX: &'static str = "Developer ID Application";
+    const DEVELOPMENT_PREFIXES: [&'static str; 2] = ["Apple Development", "Mac Developer"];
+
+    /// Kind for the signing identity `name`, such as `Apple Development: Jo
+    /// Doe (TEAMID)`. Any other name is an error.
+    pub fn from_identity_name(name: &str) -> Result<Self> {
+        if name.starts_with(Self::DEVELOPER_ID_PREFIX) {
+            return Ok(Self::DeveloperId);
+        }
+        if Self::DEVELOPMENT_PREFIXES
+            .iter()
+            .any(|p| name.starts_with(p))
+        {
+            return Ok(Self::Development);
+        }
+        bail!(
+            "Cannot choose a provisioning profile type for the signing identity {name:?}.\n\
+             Managed profiles need an identity whose name starts with \"Developer ID \
+             Application\" (MAC_APP_DIRECT), \"Apple Development\", or \"Mac Developer\" \
+             (MAC_APP_DEVELOPMENT)."
+        )
+    }
+
+    /// ASC `ProfileType`.
+    pub fn profile_type(self) -> &'static str {
+        match self {
+            Self::DeveloperId => "MAC_APP_DIRECT",
+            Self::Development => "MAC_APP_DEVELOPMENT",
+        }
+    }
+
+    /// Certificate type the profile is issued against.
+    pub fn cert_kind(self) -> CertKind {
+        match self {
+            Self::DeveloperId => CertKind::DeveloperIdApplication,
+            Self::Development => CertKind::Development,
+        }
+    }
+
+    /// Profile name for plan and progress text.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::DeveloperId => "Developer ID",
+            Self::Development => "Mac development",
+        }
+    }
+
+    /// Identity name prefixes that select this kind.
+    pub fn identity_prefixes(self) -> String {
+        match self {
+            Self::DeveloperId => format!("\"{}\"", Self::DEVELOPER_ID_PREFIX),
+            Self::Development => Self::DEVELOPMENT_PREFIXES
+                .iter()
+                .map(|p| format!("\"{p}\""))
+                .collect::<Vec<_>>()
+                .join(" or "),
+        }
+    }
+
+    /// Whether the profile lists devices.
+    pub fn needs_devices(self) -> bool {
+        self == Self::Development
+    }
+}
+
 /// One provisioning profile strudel manages, for the host app or for a single
 /// extension. Both platforms describe their profiles this way and share
 /// [`ProfileRequest::stale_reason`] and [`ProfileRequest::provision_for`]; the
 /// platform differences live entirely in these fields.
+#[derive(Clone)]
 pub struct ProfileRequest {
     pub bundle_id: String,
     /// App or extension name. Registers the bundle ID and labels progress
@@ -73,11 +161,14 @@ pub struct ProfileRequest {
     pub platform: Platform,
     /// ASC `ProfileType`, e.g. `"IOS_APP_DEVELOPMENT"` or `"MAC_APP_DIRECT"`.
     pub profile_type: &'static str,
+    /// Kind of macOS profile. `None` on iOS.
+    pub macos_kind: Option<MacosProfileKind>,
     /// Portal device resource IDs to embed. Empty for profile types with no
-    /// device relationship, which is every macOS type.
+    /// device relationship, such as Developer ID.
     pub device_ids: Vec<String>,
     /// Device UDIDs the cached profile must already cover to count as current.
-    /// Empty on macOS, whose profiles carry no `ProvisionedDevices` at all.
+    /// Empty for a Developer ID profile, which carries no
+    /// `ProvisionedDevices`.
     pub required_udids: Vec<String>,
     /// Capabilities whose entitlement keys the cached profile must grant to
     /// count as current. Set with [`ProfileRequest::with_capabilities`].
@@ -103,11 +194,30 @@ impl ProfileRequest {
             // "MAC_APP_DIRECT" is the ASC ProfileType for Developer ID
             // (direct, non-App-Store) distribution. A wrong value surfaces as
             // the API's own error rather than failing silently.
-            profile_type: "MAC_APP_DIRECT",
+            profile_type: MacosProfileKind::DeveloperId.profile_type(),
+            macos_kind: Some(MacosProfileKind::DeveloperId),
             device_ids: Vec::new(),
             required_udids: Vec::new(),
             required_capabilities: Vec::new(),
         }
+    }
+
+    /// Switch a macOS request to `kind`. A development profile must cover
+    /// `udids` to count as current. Set `device_ids` before
+    /// [`ProfileRequest::provision_for`].
+    pub fn with_macos_kind(mut self, kind: MacosProfileKind, udids: Vec<String>) -> Self {
+        self.name = match kind {
+            MacosProfileKind::DeveloperId => format!("[strudel] {} Developer ID", self.label),
+            MacosProfileKind::Development => format!("[strudel] {} Mac Development", self.label),
+        };
+        self.profile_type = kind.profile_type();
+        self.macos_kind = Some(kind);
+        self.required_udids = if kind.needs_devices() {
+            udids
+        } else {
+            Vec::new()
+        };
+        self
     }
 
     /// A development profile for an iOS bundle ID that must cover
@@ -127,6 +237,7 @@ impl ProfileRequest {
             name,
             platform: Platform::Ios,
             profile_type: "IOS_APP_DEVELOPMENT",
+            macos_kind: None,
             device_ids: Vec::new(),
             required_udids,
             required_capabilities: Vec::new(),
@@ -360,4 +471,53 @@ pub fn identity_authorized(identity: &str, profile: &plist::Value) -> Result<Opt
         }
     }
     Ok(Some(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request() -> ProfileRequest {
+        ProfileRequest::macos(
+            "com.example.app".into(),
+            "App".into(),
+            PathBuf::from("/tmp/p"),
+        )
+    }
+
+    #[test]
+    fn macos_request_defaults_to_developer_id() {
+        let r = request();
+        assert_eq!(r.profile_type, "MAC_APP_DIRECT");
+        assert_eq!(r.macos_kind, Some(MacosProfileKind::DeveloperId));
+        assert!(r.required_udids.is_empty());
+    }
+
+    #[test]
+    fn development_kind_sets_type_name_and_required_devices() {
+        let r = request().with_macos_kind(MacosProfileKind::Development, vec!["AAA".into()]);
+        assert_eq!(r.profile_type, "MAC_APP_DEVELOPMENT");
+        assert_eq!(r.name, "[strudel] App Mac Development");
+        assert_eq!(r.required_udids, ["AAA"]);
+    }
+
+    #[test]
+    fn developer_id_kind_drops_required_devices() {
+        let r = request().with_macos_kind(MacosProfileKind::DeveloperId, vec!["AAA".into()]);
+        assert_eq!(r.profile_type, "MAC_APP_DIRECT");
+        assert_eq!(r.name, "[strudel] App Developer ID");
+        assert!(r.required_udids.is_empty());
+    }
+
+    #[test]
+    fn development_kind_uses_development_certificates() {
+        assert_eq!(
+            MacosProfileKind::Development.cert_kind(),
+            CertKind::Development
+        );
+        assert_eq!(
+            MacosProfileKind::DeveloperId.cert_kind(),
+            CertKind::DeveloperIdApplication
+        );
+    }
 }

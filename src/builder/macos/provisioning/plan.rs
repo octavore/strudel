@@ -1,11 +1,13 @@
 //! Confirmation text for the App Store Connect changes on one macOS bundle
 //! ID.
 
+use clml::cformat;
+
 use super::ManagedBy;
 use super::capabilities::Target;
 use super::provision::{PortalState, StaleProfile};
 use crate::apple::capabilities::{CapabilityDef, Severity};
-use crate::builder::profile::IDENTIFIERS_URL;
+use crate::builder::profile::{IDENTIFIERS_URL, MacosProfileKind};
 
 /// Portal identifiers that must be assigned to a capability.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +31,10 @@ pub(super) struct ProvisioningPlan {
     /// ASC `ProfileType` of the profile to create. `None` if the plan only
     /// enables capabilities.
     pub profile_type: Option<&'static str>,
+    /// Kind of the profile to create.
+    pub profile_kind: Option<MacosProfileKind>,
+    /// UDIDs the profile must list. Empty unless the kind needs devices.
+    pub devices: Vec<String>,
     /// Entitlement keys the current profile lacks.
     pub missing_entitlements: Vec<&'static str>,
     /// Config key or file that lists the capabilities.
@@ -77,6 +83,10 @@ impl ProvisioningPlan {
             capabilities_to_enable,
             identifiers,
             profile_type: stale.map(|s| s.profile.request.profile_type),
+            profile_kind: stale.and_then(|s| s.profile.request.macos_kind),
+            devices: stale
+                .map(|s| s.profile.request.required_udids.clone())
+                .unwrap_or_default(),
             missing_entitlements,
             config_location: target
                 .map(|t| t.config_location.clone())
@@ -108,40 +118,70 @@ impl ProvisioningPlan {
 
     /// Text for the confirmation prompt.
     pub fn render(&self) -> String {
-        let mut lines = vec![format!("Bundle ID {}:", self.bundle_id)];
+        let mut lines = vec![cformat!("Bundle ID <bold>{}</bold>:", self.bundle_id)];
         if self.register_bundle_id {
-            lines.push("  - Register the bundle ID.".to_string());
+            lines.push(cformat!("  <green>-</green> Register the bundle ID."));
         }
         if !self.capabilities_to_enable.is_empty() {
             let names: Vec<&str> = self.capabilities_to_enable.iter().map(|c| c.name).collect();
-            lines.push(format!("  - Enable capabilities: {}.", names.join(", ")));
+            lines.push(cformat!(
+                "  <green>-</green> Enable capabilities: <cyan>{}</cyan>.",
+                names.join(", ")
+            ));
         }
         if let Some(profile_type) = self.profile_type {
-            if self.missing_entitlements.is_empty() {
-                lines.push(format!("  - Create a {profile_type} profile."));
-            } else {
-                lines.push(format!(
-                    "  - Create a {profile_type} profile. The current profile lacks {}.",
+            let kind = self.profile_kind.unwrap_or(MacosProfileKind::DeveloperId);
+            lines.push(cformat!(
+                "  <green>-</green> Create a {} provisioning profile \
+                 (<cyan>{profile_type}</cyan>) and cache it locally.",
+                kind.description()
+            ));
+            if kind.needs_devices() {
+                lines.push(cformat!(
+                    "    Devices, from .strudel/devices.toml: <cyan>{}</cyan>.",
+                    self.devices.join(", ")
+                ));
+            }
+            lines.push(cformat!(
+                "    <dim>The signing identity decides the type. A name starting with {} uses \
+                 {profile_type}.</dim>",
+                kind.identity_prefixes()
+            ));
+            if !self.missing_entitlements.is_empty() {
+                lines.push(cformat!(
+                    "    <yellow>The current profile lacks {}.</yellow>",
                     self.missing_entitlements.join(", ")
                 ));
             }
         }
-        if let Some(reason) = &self.opt_in_reason {
-            lines.push(format!("  Managed because {reason}."));
+        if !self.has_portal_changes() {
+            lines.push(cformat!(
+                "  <dim>The bundle ID is registered and has every required capability \
+                 enabled.</dim>"
+            ));
         }
-        lines.push(format!(
-            "  Capabilities are listed in {}.",
-            self.config_location
-        ));
+        if let Some(reason) = &self.opt_in_reason {
+            lines.push(cformat!(
+                "  <dim>The profile is managed because {reason}.</dim>"
+            ));
+        }
+        if !self.capabilities.is_empty() {
+            let names: Vec<&str> = self.capabilities.iter().map(|c| c.name).collect();
+            lines.push(cformat!(
+                "  <dim>Required capabilities, from {}: {}.</dim>",
+                self.config_location,
+                names.join(", ")
+            ));
+        }
         if !self.identifiers.is_empty() {
-            lines.push("Assign identifiers on the portal:".to_string());
+            lines.push(cformat!("<bold>Assign identifiers on the portal:</bold>"));
             lines.push(format!(
                 "  1. Open {IDENTIFIERS_URL} and select {}.",
                 self.bundle_id
             ));
             for (i, id) in self.identifiers.iter().enumerate() {
-                lines.push(format!(
-                    "  {}. Configure {} with {}.",
+                lines.push(cformat!(
+                    "  {}. Configure <cyan>{}</cyan> with {}.",
                     i + 2,
                     id.capability,
                     id.values.join(", ")
@@ -149,7 +189,7 @@ impl ProvisioningPlan {
             }
         }
         for note in self.verification_notes() {
-            lines.push(format!("Note: {note}"));
+            lines.push(cformat!("<yellow>Note:</yellow> {note}"));
         }
         lines.join("\n")
     }
@@ -198,7 +238,7 @@ mod tests {
     use super::*;
     use crate::apple::capabilities::{self, CapabilityType, RequiredCapabilities};
     use crate::builder::profile::checks::ProfileProblem;
-    use crate::builder::profile::{ProfileRequest, StaleReason};
+    use crate::builder::profile::{MacosProfileKind, ProfileRequest, StaleReason};
 
     fn cap(name: &str) -> &'static CapabilityDef {
         capabilities::by_name(name).unwrap()
@@ -234,6 +274,11 @@ mod tests {
             ),
             managed_by,
         }
+    }
+
+    /// Rendered plan without color codes.
+    fn plain(plan: &ProvisioningPlan) -> String {
+        anstream::adapter::strip_str(&plan.render()).to_string()
     }
 
     fn enable_plan(target: &Target, state: &PortalState) -> ProvisioningPlan {
@@ -287,7 +332,7 @@ mod tests {
                 },
             ]
         );
-        let text = plan.render();
+        let text = plain(&plan);
         assert!(text.contains("Register the bundle ID."));
         assert!(text.contains("Enable capabilities: App Groups, HealthKit, iCloud."));
         assert!(text.contains(&format!("1. Open {IDENTIFIERS_URL}")));
@@ -308,13 +353,13 @@ mod tests {
             plan.verification_notes(),
             ["strudel has not verified whether Push Notifications requires a profile on macOS."]
         );
-        assert!(plan.render().contains("Note: strudel has not verified"));
+        assert!(plain(&plan).contains("Note: strudel has not verified"));
     }
 
     #[test]
     fn plan_without_a_profile_renders_no_profile_line() {
         let t = target(&[cap("HealthKit")], None);
-        let text = enable_plan(&t, &state(true, &[])).render();
+        let text = plain(&enable_plan(&t, &state(true, &[])));
         assert!(!text.contains("profile."), "{text}");
         assert!(text.contains("Enable capabilities: HealthKit."));
     }
@@ -328,15 +373,104 @@ mod tests {
             profile: &profile,
             reason: Some(StaleReason::Missing),
         };
-        let text = ProvisioningPlan::new(&t.bundle_id, Some(&t), &state(false, &[]), Some(&stale))
-            .render();
+        let plan = ProvisioningPlan::new(&t.bundle_id, Some(&t), &state(false, &[]), Some(&stale));
+        let text = plain(&plan);
         assert!(text.contains("Register the bundle ID"), "{text}");
         assert!(text.contains("Enable capabilities: App Groups"), "{text}");
-        assert!(text.contains("Create a MAC_APP_DIRECT profile."), "{text}");
+        assert!(
+            text.contains(
+                "Create a Developer ID provisioning profile (MAC_APP_DIRECT) and cache it locally."
+            ),
+            "{text}"
+        );
         assert!(text.contains("group.x"), "{text}");
         assert!(text.contains("entitlements.json"), "{text}");
         assert!(
             text.contains("App Groups may need an embedded profile"),
+            "{text}"
+        );
+    }
+
+    fn development_plan(udids: &[&str]) -> ProvisioningPlan {
+        let t = target(&[cap("App Groups")], None);
+        let profile = ManagedProfile {
+            request: ProfileRequest::macos(
+                "com.example.app".into(),
+                "App".into(),
+                PathBuf::from("/tmp/p"),
+            )
+            .with_macos_kind(
+                MacosProfileKind::Development,
+                udids.iter().map(|u| u.to_string()).collect(),
+            ),
+            managed_by: ManagedBy::Config,
+        };
+        let stale = StaleProfile {
+            profile: &profile,
+            reason: Some(StaleReason::Missing),
+        };
+        ProvisioningPlan::new(&t.bundle_id, Some(&t), &state(true, &[]), Some(&stale))
+    }
+
+    #[test]
+    fn development_plan_lists_the_type_and_devices() {
+        let plan = development_plan(&["AAA-111", "BBB-222"]);
+        assert_eq!(plan.profile_type, Some("MAC_APP_DEVELOPMENT"));
+        assert_eq!(plan.devices, ["AAA-111", "BBB-222"]);
+        let text = plain(&plan);
+        assert!(
+            text.contains(
+                "Create a Mac development provisioning profile (MAC_APP_DEVELOPMENT) and cache \
+                 it locally."
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("Devices, from .strudel/devices.toml: AAA-111, BBB-222."),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "The signing identity decides the type. A name starting with \"Apple \
+                 Development\" or \"Mac Developer\" uses MAC_APP_DEVELOPMENT."
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("Developer ID"), "{text}");
+    }
+
+    #[test]
+    fn development_plan_renders_in_full() {
+        let text = plain(&development_plan(&["AAA-111"]));
+        assert_eq!(
+            text,
+            indoc::indoc! {"
+                Bundle ID com.example.app:
+                  - Enable capabilities: App Groups.
+                  - Create a Mac development provisioning profile (MAC_APP_DEVELOPMENT) and cache it locally.
+                    Devices, from .strudel/devices.toml: AAA-111.
+                    The signing identity decides the type. A name starting with \"Apple Development\" or \"Mac Developer\" uses MAC_APP_DEVELOPMENT.
+                  The profile is managed because `provisioning_profile = \"auto\"` is set.
+                  Required capabilities, from the entitlements file entitlements.json: App Groups.
+                Note: strudel has not verified whether App Groups requires a profile on macOS."
+            }
+        );
+    }
+
+    #[test]
+    fn developer_id_plan_lists_no_devices() {
+        let t = target(&[cap("App Groups")], None);
+        let profile = managed(ManagedBy::Config);
+        let stale = StaleProfile {
+            profile: &profile,
+            reason: Some(StaleReason::Missing),
+        };
+        let plan = ProvisioningPlan::new(&t.bundle_id, Some(&t), &state(true, &[]), Some(&stale));
+        assert!(plan.devices.is_empty());
+        let text = plain(&plan);
+        assert!(!text.contains("Devices, from"), "{text}");
+        assert!(
+            text.contains("A name starting with \"Developer ID Application\" uses MAC_APP_DIRECT."),
             "{text}"
         );
     }
@@ -357,7 +491,7 @@ mod tests {
             plan.missing_entitlements,
             ["com.apple.developer.networking.networkextension"]
         );
-        let text = plan.render();
+        let text = plain(&plan);
         assert!(text.contains("The current profile lacks"), "{text}");
         assert!(
             text.contains("`provisioning_profile = \"auto\"` is set"),

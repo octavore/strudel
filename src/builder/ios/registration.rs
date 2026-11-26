@@ -7,8 +7,8 @@ use serde::Deserialize;
 use crate::apple::appstore::AppStoreClient;
 use crate::apple::provisioning;
 use crate::builder::IosBuilder;
-use crate::config::IosProvisioningBackend;
-use crate::devices::DeviceSet;
+use crate::config::{IosProvisioningBackend, Platform};
+use crate::devices::{DeviceSet, PortalEntry, confirm_add, print_registration};
 use crate::paths::ensure_strudel_dir;
 
 #[derive(Deserialize)]
@@ -105,7 +105,7 @@ impl DeviceInfo {
     pub fn print(&self, tracked: bool, registered: Option<bool>) {
         cprintln!("<bold>{}</bold> <cyan>[{}]</cyan>", self.name, self.udid);
         if let Some(model) = &self.model {
-            cprintln!("<dim>{model}</dim>");
+            cprintln!("  <dim>{model}</dim>");
         }
 
         let connection = if self.is_connected() {
@@ -127,11 +127,11 @@ impl DeviceInfo {
             cformat!("<yellow>developer mode off</yellow>")
         };
         let tracked = if tracked { ", tracked" } else { "" };
-        cprintln!("{connection}, {pairing}, {dev_mode}<dim>{tracked}</dim>");
+        cprintln!("  {connection}, {pairing}, {dev_mode}<dim>{tracked}</dim>");
         print_registration(registered);
 
         if let Some(error) = &self.detail_error {
-            cprintln!("<dim>{error}</dim>");
+            cprintln!("  <dim>{error}</dim>");
         }
 
         if !self.is_connected() {
@@ -153,17 +153,6 @@ impl DeviceInfo {
     }
 }
 
-/// Print whether a device is registered on the current account's portal.
-fn print_registration(registered: Option<bool>) {
-    match registered {
-        Some(true) => cprintln!("<green>registered</green> <dim>on this account</dim>"),
-        Some(false) => cprintln!(
-            "<yellow>not registered</yellow> <dim>on this account, run `strudel devices add`</dim>"
-        ),
-        None => cprintln!("<dim>registration unknown</dim>"),
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DevicectlDeviceProperties {
@@ -172,9 +161,9 @@ struct DevicectlDeviceProperties {
 }
 
 impl IosBuilder {
-    /// Register connected iOS devices on the portal (if not already) and
-    /// record them in `.strudel/devices.toml`.
-    pub fn device_add(&self, device_selectors: &[String]) -> Result<()> {
+    /// Register connected iOS devices on the portal (if not already, and if
+    /// `register` is set) and record them in `.strudel/devices.toml`.
+    pub fn device_add(&self, device_selectors: &[String], register: bool) -> Result<()> {
         let connected = self.list_connected_devices()?;
 
         if connected.is_empty() {
@@ -238,13 +227,22 @@ impl IosBuilder {
 
         if self.dry_run {
             for (udid, name) in &to_register {
-                cprintln!("<dim>[dry-run]</dim> Would register {name} ({udid}) on portal");
+                if register {
+                    cprintln!("<dim>[dry-run]</dim> Would register {name} ({udid}) on portal");
+                }
                 cprintln!("<dim>[dry-run]</dim> Would add to .strudel/devices.toml");
             }
             return Ok(());
         }
+        let pairs: Vec<(&str, &str)> = to_register
+            .iter()
+            .map(|(udid, name)| (name.as_str(), udid.as_str()))
+            .collect();
+        confirm_add(&pairs, Platform::Ios, register)?;
 
-        self.register_on_portal(&to_register)?;
+        if register {
+            self.register_on_portal(&to_register)?;
+        }
 
         let mut device_set = DeviceSet::load(&self.paths.devices_toml)?;
         for (udid, name) in &to_register {
@@ -257,11 +255,38 @@ impl IosBuilder {
         for (udid, name) in &to_register {
             cprintln!("<green>✔</green> {name} ({udid})");
         }
+        let action = if register { "Registered" } else { "Tracked" };
         cprintln!(
-            "\n<green>Done!</green> Registered {} device(s). \
+            "\n<green>Done!</green> {action} {} device(s). \
              Run `strudel run --device` to build and install.",
             to_register.len()
         );
+        Ok(())
+    }
+
+    /// Register a device on the portal by UDID/name (if `register` is set)
+    /// and track it in `.strudel/devices.toml`. For a device that is not
+    /// connected.
+    pub fn device_add_manual(&self, name: &str, udid: &str, register: bool) -> Result<()> {
+        if self.dry_run {
+            if register {
+                cprintln!("<dim>[dry-run]</dim> Would register {name} ({udid}) on portal");
+            }
+            cprintln!("<dim>[dry-run]</dim> Would add to .strudel/devices.toml");
+            return Ok(());
+        }
+        confirm_add(&[(name, udid)], Platform::Ios, register)?;
+
+        if register {
+            self.register_on_portal(&[(udid.to_string(), name.to_string())])?;
+        }
+
+        let mut device_set = DeviceSet::load(&self.paths.devices_toml)?;
+        device_set.upsert_on(name.to_string(), udid.to_string(), Platform::Ios);
+        ensure_strudel_dir(&self.paths.strudel_dir)?;
+        device_set.save(&self.paths.devices_toml)?;
+
+        cprintln!("\n<green>✔</green> {name} ({udid})\n\n<green>Done!</green> Tracked 1 device.");
         Ok(())
     }
 
@@ -283,18 +308,25 @@ impl IosBuilder {
     /// Print a tracked device that `devicectl` does not list.
     pub fn print_tracked_offline(name: &str, udid: &str, registered: Option<bool>) {
         cprintln!("<bold>{name}</bold> <cyan>[{udid}]</cyan>");
-        cprintln!("<dim>not connected, tracked</dim>");
+        cprintln!("  <dim>not connected, tracked</dim>");
         print_registration(registered);
     }
 
-    /// UDIDs registered on the portal for the current account, per
+    /// Devices registered on the portal for the current account, per
     /// `[ios] provisioning`.
-    pub fn portal_udids(&self) -> Result<Vec<String>> {
+    pub fn portal_devices(&self) -> Result<Vec<PortalEntry>> {
         if matches!(self.ios.provisioning, IosProvisioningBackend::Free) {
-            return provisioning::registered_udids(&self.cfg);
+            return provisioning::registered_devices(&self.cfg);
         }
         let client = AppStoreClient::from_config(&self.cfg)?.show_progress(!self.echo_suppressed());
-        Ok(client.list_devices()?.into_iter().map(|d| d.udid).collect())
+        Ok(client
+            .list_devices()?
+            .into_iter()
+            .map(|d| PortalEntry {
+                name: d.name,
+                udid: d.udid,
+            })
+            .collect())
     }
 
     /// Register `(udid, name)` pairs on the portal (App Store Connect API or
@@ -355,7 +387,7 @@ impl IosBuilder {
     /// `.strudel/devices.toml`.
     pub(super) fn resolve_target_udids(&self, device_selectors: &[String]) -> Result<Vec<String>> {
         let ios_settings = &self.ios;
-        let device_set = DeviceSet::load(&self.paths.devices_toml)?;
+        let device_set = DeviceSet::load_for(&self.paths.devices_toml, Platform::Ios)?;
 
         if !device_selectors.is_empty() {
             let mut udids = Vec::new();

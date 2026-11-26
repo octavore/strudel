@@ -17,7 +17,7 @@ use crate::apple::appstore::AppStoreClient;
 use crate::apple::capabilities::CapabilityType;
 use crate::builder::MacosBuilder;
 use crate::builder::profile::{
-    CertKind, IDENTIFIERS_URL, ProfileRequest, StaleReason, enable_capabilities,
+    IDENTIFIERS_URL, MacosProfileKind, ProfileRequest, StaleReason, enable_capabilities,
 };
 use crate::config::Platform;
 
@@ -170,8 +170,11 @@ impl MacosBuilder {
     fn echo_dry_run(&self, profiles: &[ManagedProfile], enable_only: &[&Target]) {
         for p in profiles {
             self.echo(cformat!(
-                "<dim>[dry-run]</dim> Would ensure a Developer ID provisioning profile for {} \
-                 ({})",
+                "<dim>[dry-run]</dim> Would ensure a {} provisioning profile for {} ({})",
+                p.request
+                    .macos_kind
+                    .unwrap_or(MacosProfileKind::DeveloperId)
+                    .description(),
                 p.request.label,
                 p.request.bundle_id
             ));
@@ -275,13 +278,27 @@ impl MacosBuilder {
 
     /// Register bundle IDs, enable capabilities, and create profiles.
     fn execute(&self, client: &AppStoreClient, jobs: &[Job]) -> Result<()> {
-        let cert_ids = if jobs.iter().any(|j| j.profile.is_some()) {
-            self.step("Finding Developer ID Application certificates...");
-            // Listed once for the whole run rather than per profile: every
-            // macOS profile here is issued against the same certificates.
-            CertKind::DeveloperIdApplication.list(client)?
-        } else {
-            Vec::new()
+        // Every profile in a run has the same kind, since the signing
+        // identity decides it.
+        let kind = jobs
+            .iter()
+            .find_map(|j| j.profile)
+            .map(|p| p.macos_kind.unwrap_or(MacosProfileKind::DeveloperId));
+        let cert_ids = match kind {
+            Some(kind) => {
+                self.step(&format!(
+                    "Finding {} certificates...",
+                    kind.cert_kind().description()
+                ));
+                // Listed once for the whole run rather than per profile: every
+                // macOS profile here is issued against the same certificates.
+                kind.cert_kind().list(client)?
+            },
+            None => Vec::new(),
+        };
+        let device_ids = match kind {
+            Some(kind) if kind.needs_devices() => self.portal_device_ids(client)?,
+            _ => Vec::new(),
         };
 
         for job in jobs {
@@ -312,6 +329,10 @@ impl MacosBuilder {
                     "Provisioning profile for {} ({})...",
                     request.label, request.bundle_id
                 ));
+                let request = ProfileRequest {
+                    device_ids: device_ids.clone(),
+                    ..request.clone()
+                };
                 request.provision_for(client, &bundle_ref, &cert_ids, &self.paths.strudel_dir)?;
                 self.note(cformat!(
                     "<green>✔</green> Profile cached at {}",

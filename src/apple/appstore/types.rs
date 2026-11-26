@@ -58,7 +58,6 @@ pub struct Cert {
 
 pub struct PortalDevice {
     pub id: String,
-    #[allow(dead_code)]
     pub name: String,
     pub udid: String,
 }

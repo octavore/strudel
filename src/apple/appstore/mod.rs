@@ -7,3 +7,4 @@ mod profile;
 mod types;
 
 pub use client::AppStoreClient;
+pub use types::PortalDevice;
