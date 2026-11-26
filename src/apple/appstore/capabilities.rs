@@ -47,10 +47,18 @@ impl AppStoreClient {
         self.progress(cformat!(
             "<dim>Enabling capability {cap_type} on bundle ID...</dim>"
         ));
+        let mut attributes = json!({"capabilityType": cap_type});
+        if capability_type == CapabilityType::Icloud {
+            // The API rejects iCloud without a CloudKit version. Xcode 6 is
+            // the CloudKit variant.
+            attributes["settings"] = json!([
+                {"key": "ICLOUD_VERSION", "options": [{"key": "XCODE_6"}]}
+            ]);
+        }
         let body = json!({
             "data": {
                 "type": "bundleIdCapabilities",
-                "attributes": {"capabilityType": cap_type},
+                "attributes": attributes,
                 "relationships": {
                     "bundleId": {"data": {"type": "bundleIds", "id": bundle_id_resource_id}}
                 }

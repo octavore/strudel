@@ -300,7 +300,14 @@ pub const CAPABILITIES: &[CapabilityDef] = &[
     },
     CapabilityDef {
         name: "iCloud",
-        entitlement_keys: &["com.apple.developer.icloud-container-identifiers"],
+        entitlement_keys: &[
+            "com.apple.developer.icloud-services",
+            "com.apple.developer.icloud-container-environment",
+            "com.apple.developer.icloud-container-identifiers",
+            "com.apple.developer.icloud-container-development-container-identifiers",
+            "com.apple.developer.ubiquity-container-identifiers",
+            "com.apple.developer.ubiquity-kvstore-identifier",
+        ],
         capability_type: CapabilityType::Icloud,
         macos: Known::Unknown,
         requires_profile: Known::Unknown,

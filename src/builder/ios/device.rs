@@ -207,14 +207,20 @@ impl IosBuilder {
                     .and_then(|s| s.to_str())
                     .unwrap_or("appex")
             ));
-            self.codesign_with_profile(appex, appex_profile, identity, &ent_plist_path)?;
+            self.codesign_with_profile(appex, appex_profile, None, identity, &ent_plist_path)?;
         }
 
         let ent_plist_path = app_bundle
             .parent()
             .unwrap_or(Path::new("."))
             .join("ios-device-entitlements.plist");
-        self.codesign_with_profile(app_bundle, profile_path, identity, &ent_plist_path)?;
+        self.codesign_with_profile(
+            app_bundle,
+            profile_path,
+            self.cfg.entitlements_json_path.as_deref(),
+            identity,
+            &ent_plist_path,
+        )?;
 
         self.step("Verifying device signature...");
         let verify_status = std::process::Command::new("codesign")
@@ -236,13 +242,27 @@ impl IosBuilder {
         Ok(())
     }
 
+    /// Entitlements JSON of the app, if one is configured.
+    fn read_app_entitlements(&self, path: Option<&Path>) -> Result<Option<serde_json::Value>> {
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read entitlements JSON at {}", path.display()))?;
+        let value = serde_json::from_str(&raw)
+            .with_context(|| format!("Entitlements file is not valid JSON: {}", path.display()))?;
+        Ok(Some(value))
+    }
+
     /// Sign `bundle` with the entitlements of `profile_path`, written to
-    /// `ent_plist_path` first. Fails if the profile does not authorize
-    /// `identity`.
+    /// `ent_plist_path` first. Wildcard values in the profile are replaced
+    /// with values from `app_entitlements_path`. Fails if the profile does not
+    /// authorize `identity`.
     fn codesign_with_profile(
         &self,
         bundle: &Path,
         profile_path: &Path,
+        app_entitlements_path: Option<&Path>,
         identity: &str,
         ent_plist_path: &Path,
     ) -> Result<()> {
@@ -255,11 +275,16 @@ impl IosBuilder {
             "Run: strudel profile fetch --force",
         )?;
 
-        let entitlements = profile_plist
+        let mut entitlements = profile_plist
             .as_dictionary()
             .and_then(|d| d.get("Entitlements"))
+            .and_then(|v| v.as_dictionary())
+            .cloned()
             .context("Provisioning profile has no Entitlements key")?;
-        plist::to_file_xml(ent_plist_path, entitlements)
+        let app_entitlements = self.read_app_entitlements(app_entitlements_path)?;
+        resolve_wildcard_entitlements(&mut entitlements, app_entitlements.as_ref())
+            .with_context(|| format!("Cannot sign {}", bundle.display()))?;
+        plist::to_file_xml(ent_plist_path, &plist::Value::Dictionary(entitlements))
             .context("Failed to write entitlements plist")?;
 
         let status = std::process::Command::new("codesign")
@@ -322,6 +347,51 @@ impl IosBuilder {
     }
 }
 
+/// Entitlement that a profile grants as a list of environments. A signature
+/// carries one environment.
+const ICLOUD_ENVIRONMENT_KEY: &str = "com.apple.developer.icloud-container-environment";
+
+/// Profile entitlement that holds a grant instead of a value a signature can
+/// carry. This is `"*"`, or a list of environments for iCloud.
+fn is_unsignable_grant(key: &str, value: &plist::Value) -> bool {
+    value.as_string() == Some("*") || (key == ICLOUD_ENVIRONMENT_KEY && value.as_array().is_some())
+}
+
+/// Replace profile entitlements that hold a grant with the value from `app`.
+/// Fails and lists every key that `app` does not declare.
+fn resolve_wildcard_entitlements(
+    entitlements: &mut plist::Dictionary,
+    app: Option<&serde_json::Value>,
+) -> Result<()> {
+    let wildcards: Vec<String> = entitlements
+        .iter()
+        .filter(|(k, v)| is_unsignable_grant(k, v))
+        .map(|(k, _)| k.clone())
+        .collect();
+    let mut missing = Vec::new();
+    for key in wildcards {
+        let from_app = app
+            .and_then(|a| a.get(&key))
+            .and_then(|v| plist::to_value(v).ok());
+        match from_app {
+            Some(value) => {
+                entitlements.insert(key, value);
+            },
+            None => missing.push(key),
+        }
+    }
+    if !missing.is_empty() {
+        bail!(
+            "The provisioning profile grants these entitlements as a wildcard or a list, \
+             which cannot be signed: {}.\nDeclare each one in the entitlements JSON, for \
+             example \"com.apple.developer.icloud-services\": [\"CloudKit\"] or \
+             \"com.apple.developer.icloud-container-environment\": \"Development\".",
+            missing.join(", ")
+        );
+    }
+    Ok(())
+}
+
 /// Retry a `devicectl` operation for as long as it keeps failing because the
 /// device is locked, prompting the user to unlock it between attempts.
 fn retry_while_locked<T>(udid: &str, mut op: impl FnMut() -> Result<T>) -> Result<T> {
@@ -362,4 +432,69 @@ fn is_device_locked_error(err: &anyhow::Error) -> bool {
         || msg.contains("device is locked")
         || msg.contains("BSErrorCodeDescription = Locked")
         || msg.contains("could not be, unlocked")
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    const ICLOUD_SERVICES_KEY: &str = "com.apple.developer.icloud-services";
+
+    fn ents(pairs: &[(&str, plist::Value)]) -> plist::Dictionary {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect()
+    }
+
+    fn star() -> plist::Value {
+        plist::Value::String("*".into())
+    }
+
+    #[test]
+    fn wildcard_takes_the_app_value() {
+        let mut e = ents(&[(ICLOUD_SERVICES_KEY, star())]);
+        let app = json!({ ICLOUD_SERVICES_KEY: ["CloudKit", "CloudDocuments"] });
+        resolve_wildcard_entitlements(&mut e, Some(&app)).unwrap();
+        let got = e.get(ICLOUD_SERVICES_KEY).unwrap().as_array().unwrap();
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn undeclared_wildcards_fail_and_are_all_listed() {
+        let mut e = ents(&[
+            (ICLOUD_SERVICES_KEY, star()),
+            ("com.apple.developer.other", star()),
+        ]);
+        let err = resolve_wildcard_entitlements(&mut e, None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(ICLOUD_SERVICES_KEY), "{err}");
+        assert!(err.contains("com.apple.developer.other"), "{err}");
+    }
+
+    #[test]
+    fn environment_list_needs_a_declared_value() {
+        let list = plist::Value::Array(vec!["Production".into(), "Development".into()]);
+        let mut e = ents(&[(ICLOUD_ENVIRONMENT_KEY, list.clone())]);
+        let err = resolve_wildcard_entitlements(&mut e, None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(ICLOUD_ENVIRONMENT_KEY), "{err}");
+
+        let mut e = ents(&[(ICLOUD_ENVIRONMENT_KEY, list)]);
+        let app = json!({ ICLOUD_ENVIRONMENT_KEY: "Development" });
+        resolve_wildcard_entitlements(&mut e, Some(&app)).unwrap();
+        let got = e.get(ICLOUD_ENVIRONMENT_KEY).unwrap();
+        assert_eq!(got.as_string(), Some("Development"));
+    }
+
+    #[test]
+    fn plain_values_are_kept() {
+        let mut e = ents(&[("get-task-allow", plist::Value::Boolean(true))]);
+        resolve_wildcard_entitlements(&mut e, None).unwrap();
+        assert!(e.get("get-task-allow").is_some());
+    }
 }
