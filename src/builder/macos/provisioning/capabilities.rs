@@ -242,6 +242,7 @@ fn drop_ios_only(
 pub(super) mod tests {
     use std::path::{Path, PathBuf};
 
+    use super::super::provision::enable_only_targets;
     use super::*;
     use crate::apple::capabilities::{CapabilityType, FreeFeature, Known};
     use crate::builder::OutputFlags;
@@ -327,6 +328,29 @@ pub(super) mod tests {
             err.contains("A (b): Provisioning profile not found"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn pinned_target_makes_no_app_store_connect_calls() {
+        let (mut cfg, _dir) = signed_config(NETWORK_EXTENSIONS);
+        cfg.provisioning_profile = Some(PathBuf::from("/pinned.provisionprofile"));
+        let b = builder(cfg, false, true);
+        let targets = b.capability_targets().unwrap();
+        assert!(enable_only_targets(&targets, &[]).is_empty());
+
+        // A client would fail here. The API key file does not exist.
+        let skipped = b.provision(false, &targets, &[]).unwrap();
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn profile_fetch_runs_the_same_capability_step_as_build() {
+        let (mut cfg, _dir) = signed_config(NETWORK_EXTENSIONS);
+        cfg.provisioning_profile = Some(PathBuf::from("/missing/pinned.provisionprofile"));
+        let b = builder(cfg, false, true);
+        let build_err = b.ensure_profiles(false).unwrap_err().to_string();
+        let fetch_err = b.profile_fetch(false, None).unwrap_err().to_string();
+        assert_eq!(build_err, fetch_err);
     }
 
     #[test]

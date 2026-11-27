@@ -230,9 +230,7 @@ impl MacosBuilder {
         }
 
         cprintln!("This needs the following on App Store Connect:");
-        for job in jobs {
-            cprintln!("{}", job.plan.render());
-        }
+        cprintln!("{}", render_jobs(jobs));
         let confirmed = inquire::Confirm::new("Make these changes on App Store Connect?")
             .with_default(false)
             .prompt()
@@ -405,15 +403,20 @@ fn committed_profile_files(stale: &[StaleProfile]) -> String {
         .collect()
 }
 
+/// Plan of every job, as one confirmation text.
+fn render_jobs(jobs: &[Job]) -> String {
+    let plans: Vec<String> = jobs.iter().map(|j| j.plan.render()).collect();
+    plans.join("\n")
+}
+
 /// Warn that the changes in `jobs` were not made and the build continues
 /// without them. `advice` follows the warning.
 fn warn_skipped(jobs: &[Job], advice: &str) {
-    let plans: Vec<String> = jobs.iter().map(|j| j.plan.render()).collect();
     cprintln!(
         "<yellow>warning:</yellow> These changes were not made on App Store Connect. The build \
          continues without them, so signing may fail or the app may misbehave at runtime.\n{}\n\
          {advice}",
-        plans.join("\n")
+        render_jobs(jobs)
     );
 }
 
@@ -424,7 +427,25 @@ mod tests {
     use super::super::ManagedBy;
     use super::super::capabilities::tests::{APP_GROUPS, builder, signed_config};
     use super::*;
+    use crate::apple::capabilities::{self, RequiredCapabilities};
     use crate::config::fixtures::resolved_macos;
+
+    fn target(bundle_id: &str, cap_names: &[&str]) -> Target {
+        Target {
+            label: "App".into(),
+            bundle_id: bundle_id.into(),
+            required: RequiredCapabilities {
+                caps: cap_names
+                    .iter()
+                    .map(|n| capabilities::by_name(n).unwrap())
+                    .collect(),
+                entitlements: None,
+                unmatched_keys: Vec::new(),
+            },
+            config_location: String::new(),
+            pinned: None,
+        }
+    }
 
     fn managed(bundle_id: &str, managed_by: ManagedBy) -> ManagedProfile {
         ManagedProfile {
@@ -456,5 +477,43 @@ mod tests {
         assert_eq!(enable_only_targets(&targets, &[]).len(), 1);
         let profiles = [managed("b", ManagedBy::Config)];
         assert!(enable_only_targets(&targets, &profiles).is_empty());
+    }
+
+    #[test]
+    fn capabilities_and_profiles_share_one_confirmation() {
+        let host = target("com.example.app", &["App Groups"]);
+        let ext = target("com.example.app.ext", &["HealthKit"]);
+        let profile = managed("com.example.app", ManagedBy::Config);
+        let stale = StaleProfile {
+            profile: &profile,
+            reason: Some(StaleReason::Missing),
+        };
+        let state = PortalState {
+            bundle_ref: None,
+            enabled: HashSet::new(),
+        };
+        let jobs = [
+            Job {
+                bundle_id: &host.bundle_id,
+                label: &host.label,
+                profile: Some(&profile.request),
+                plan: ProvisioningPlan::new(&host.bundle_id, Some(&host), &state, Some(&stale)),
+                bundle_ref: None,
+            },
+            Job {
+                bundle_id: &ext.bundle_id,
+                label: &ext.label,
+                profile: None,
+                plan: ProvisioningPlan::new(&ext.bundle_id, Some(&ext), &state, None),
+                bundle_ref: None,
+            },
+        ];
+        let text = anstream::adapter::strip_str(&render_jobs(&jobs)).to_string();
+        assert!(
+            text.contains("Create a Developer ID provisioning profile"),
+            "{text}"
+        );
+        assert!(text.contains("Enable capabilities: App Groups"), "{text}");
+        assert!(text.contains("Enable capabilities: HealthKit"), "{text}");
     }
 }
