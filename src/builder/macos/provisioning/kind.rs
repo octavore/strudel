@@ -121,9 +121,7 @@ impl MacosBuilder {
         };
         let kind = MacosProfileKind::from_identity_name(&identity)?;
         self.note(cformat!(
-            "Signing identity <cyan>{identity}</cyan> starts with {}, so strudel creates \
-             <cyan>{}</cyan> profiles.",
-            kind.identity_prefixes(),
+            "<green>✔</green> Profile type: {} <dim>({identity})</dim>",
             kind.profile_type()
         ));
         let udids = if kind.needs_devices() {

@@ -88,9 +88,10 @@ impl MacosBuilder {
                 .collect()
         };
         if stale.is_empty() && enable_only.is_empty() {
-            if !profiles.is_empty() {
+            for p in profiles {
                 self.note(cformat!(
-                    "<dim>Managed provisioning profiles are current</dim>"
+                    "<green>✔</green> Profile is current: {}",
+                    p.request.cache_path.display()
                 ));
             }
             return Ok(HashSet::new());

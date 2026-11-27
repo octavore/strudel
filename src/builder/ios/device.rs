@@ -31,6 +31,7 @@ impl IosBuilder {
         // extension. Each extension is sandboxed on its own bundle ID, so the
         // host's profile does not cover it.
         let profile_targets = self.profile_targets();
+        self.step("Preparing provisioning profiles...");
         let mut profiles = Vec::with_capacity(profile_targets.len());
         for target in &profile_targets {
             profiles.push(self.resolve_profile(target, &target_udids)?);

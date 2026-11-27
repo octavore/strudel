@@ -125,6 +125,10 @@ impl IosBuilder {
             if !self.dry_run {
                 self.check_configured_profile(target, p, &udid_refs, &required)?;
             }
+            self.note(cformat!(
+                "<green>✔</green> Profile is pinned: {}",
+                p.display()
+            ));
             return Ok(p.clone());
         }
 
@@ -133,7 +137,7 @@ impl IosBuilder {
         let request = self.profile_request(target, &udid_refs, &required.caps);
         if !self.dry_run && request.stale_reason(&self.cfg.team_id, None).is_none() {
             self.note(cformat!(
-                "<green>✔</green> Using cached profile: {}",
+                "<green>✔</green> Profile is current: {}",
                 cached.display()
             ));
             return Ok(cached.clone());

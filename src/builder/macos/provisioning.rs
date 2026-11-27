@@ -72,7 +72,11 @@ impl MacosBuilder {
     /// profile into its bundle.
     pub(crate) fn ensure_profiles(&self, force: bool) -> Result<()> {
         let targets = self.prepare_capabilities()?;
-        let profiles = self.apply_profile_kind(self.managed_profiles(&targets))?;
+        let profiles = self.managed_profiles(&targets);
+        if !profiles.is_empty() {
+            self.step("Preparing provisioning profiles...");
+        }
+        let profiles = self.apply_profile_kind(profiles)?;
         self.provision(force, &targets, &profiles)?;
         Ok(())
     }

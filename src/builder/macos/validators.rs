@@ -233,8 +233,9 @@ impl MacosBuilder {
             .map(|d| d.to_xml_format())
             .unwrap_or_default();
         self.note(cformat!(
-            "<green>✔</green> Provisioning profile validated: {}",
-            field("Name").unwrap_or("(unnamed)")
+            "<green>✔</green> Profile validated: {} <dim>({})</dim>",
+            field("Name").unwrap_or("(unnamed)"),
+            profile_path.display()
         ));
         self.note(cformat!(
             "  <dim>uuid {}, team {teams}, expires {expires}</dim>",
