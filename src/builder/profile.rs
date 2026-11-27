@@ -398,10 +398,11 @@ pub fn application_identifier(entitlements: &plist::Dictionary) -> Option<&str> 
 /// "Signing & notarization" section. Shared by the iOS device and macOS
 /// signing pipelines.
 ///
-/// Skips the check (returns `Ok`) when the profile carries no
+/// Skips the check (returns `Ok(None)`) when the profile carries no
 /// `DeveloperCertificates` array, or when `identity`'s fingerprint can't be
 /// resolved from the keychain (e.g. an empty/ad-hoc identity) - those cases
-/// are reported by other, earlier checks.
+/// are reported by other, earlier checks. Returns `Ok(Some(true))` if the
+/// certificate is listed.
 ///
 /// `remedy` is appended to the error and should tell the caller's platform
 /// how to get a profile that actually authorizes `identity`: `strudel profile
@@ -411,9 +412,10 @@ pub fn check_identity_authorized(
     identity: &str,
     profile: &plist::Value,
     remedy: &str,
-) -> Result<()> {
-    if identity_authorized(identity, profile)? != Some(false) {
-        return Ok(());
+) -> Result<Option<bool>> {
+    let authorized = identity_authorized(identity, profile)?;
+    if authorized != Some(false) {
+        return Ok(authorized);
     }
     bail!(
         "Signing identity {identity:?} is not authorized by the provisioning profile: its \

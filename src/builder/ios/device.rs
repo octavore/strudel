@@ -49,10 +49,12 @@ impl IosBuilder {
 
         self.step("Embedding provisioning profile...");
         self.copy_file(profile_path, &app_bundle.join("embedded.mobileprovision"))?;
+        self.note_embedded_profile(&app_bundle, profile_path)?;
         let mut appexes = Vec::new();
         for (ext, ext_profile) in self.cfg.extensions.iter().zip(extension_profiles) {
             let appex = ios_appex_dir(&app_bundle, ext);
             self.copy_file(ext_profile, &appex.join("embedded.mobileprovision"))?;
+            self.note_embedded_profile(&appex, ext_profile)?;
             appexes.push((appex, ext_profile.as_path()));
         }
 
@@ -197,15 +199,12 @@ impl IosBuilder {
                 if let Some(file_name) = lib_path.file_name() {
                     let dylib = frameworks_dir.join(file_name);
                     let dylib_str = dylib.to_str().unwrap();
-                    let mut args = vec!["--force", "--sign", identity];
+                    let mut cmd =
+                        ShellCommand::new("codesign").args(["--force", "--sign", identity]);
                     if is_framework(lib_path) {
-                        args.push("--deep");
+                        cmd = cmd.arg("--deep");
                     }
-                    args.push(dylib_str);
-                    std::process::Command::new("codesign")
-                        .args(&args)
-                        .status()
-                        .context("Failed to run codesign")?;
+                    self.sh.run(cmd.arg(dylib_str))?;
                 }
             }
         }
@@ -235,20 +234,23 @@ impl IosBuilder {
         )?;
 
         self.step("Verifying device signature...");
-        let verify_status = std::process::Command::new("codesign")
-            .args(["--verify", "--deep", "--strict", "--verbose=2", bundle_str])
-            .status()
-            .context("Failed to run codesign --verify")?;
-        if !verify_status.success() {
+        if let Err(err) = self.sh.run(&[
+            "codesign",
+            "--verify",
+            "--deep",
+            "--strict",
+            "--verbose=2",
+            bundle_str,
+        ]) {
             // Show the identity actually embedded in the bundle for diagnosis.
-            let _ = std::process::Command::new("codesign")
-                .args(["-dvvv", bundle_str])
-                .status();
-            bail!(
+            let _ = self
+                .sh
+                .run_streamed_env(ShellCommand::new("codesign").args(["-dvvv", bundle_str]));
+            return Err(err.context(
                 "Signature verification failed - the app will be rejected at install time.\n\
                  The signing certificate may have expired since the bundle was built.\n\
-                 Check: security find-identity -v -p codesigning"
-            );
+                 Check: security find-identity -v -p codesigning",
+            ));
         }
 
         Ok(())
@@ -281,11 +283,17 @@ impl IosBuilder {
         let profile_plist = decode_profile(profile_path)?;
 
         self.step("Checking certificate is authorized by profile...");
-        check_identity_authorized(
+        let authorized = check_identity_authorized(
             identity,
             &profile_plist,
             "Run: strudel profile fetch --force",
         )?;
+        if authorized == Some(true) {
+            self.note(cformat!(
+                "<green>✔</green> Certificate is authorized by the profile of {}",
+                bundle_name(bundle)
+            ));
+        }
 
         let mut entitlements = profile_plist
             .as_dictionary()
@@ -299,16 +307,52 @@ impl IosBuilder {
         plist::to_file_xml(ent_plist_path, &plist::Value::Dictionary(entitlements))
             .context("Failed to write entitlements plist")?;
 
-        let status = std::process::Command::new("codesign")
-            .args(["--force", "--sign", identity, "--entitlements"])
-            .arg(ent_plist_path)
-            .arg("--generate-entitlement-der")
-            .arg(bundle)
-            .status()
-            .context("Failed to run codesign")?;
-        if !status.success() {
-            bail!("codesign failed for {}", bundle.display());
+        self.sh.run(
+            ShellCommand::new("codesign")
+                .args(["--force", "--sign", identity])
+                .arg_group(["--entitlements", ent_plist_path.to_str().unwrap()])
+                .arg("--generate-entitlement-der")
+                .arg(bundle.to_path_buf()),
+        )?;
+        Ok(())
+    }
+
+    /// Print the name and details of the profile embedded in `bundle`.
+    /// Skipped in dry-run, where the profile may not exist yet.
+    fn note_embedded_profile(&self, bundle: &Path, profile_path: &Path) -> Result<()> {
+        if self.dry_run {
+            return Ok(());
         }
+        let profile = decode_profile(profile_path)?;
+        let dict = profile
+            .as_dictionary()
+            .context("Provisioning profile is not a dictionary")?;
+        let field = |key: &str| dict.get(key).and_then(plist::Value::as_string);
+        let teams = dict
+            .get("TeamIdentifier")
+            .and_then(plist::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(plist::Value::as_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        let expires = dict
+            .get("ExpirationDate")
+            .and_then(plist::Value::as_date)
+            .map(|d| d.to_xml_format())
+            .unwrap_or_default();
+        self.note(cformat!(
+            "<green>✔</green> Embedded profile in {}: {} <dim>({})</dim>",
+            bundle_name(bundle),
+            field("Name").unwrap_or("(unnamed)"),
+            profile_path.display()
+        ));
+        self.note(cformat!(
+            "  <dim>uuid {}, team {teams}, expires {expires}</dim>",
+            field("UUID").unwrap_or("?")
+        ));
         Ok(())
     }
 
@@ -330,6 +374,10 @@ impl IosBuilder {
                      Use an \"Apple Development\" certificate instead."
                 );
             }
+            let hash = parse_identity_line(line).map_or("", |(hash, _)| hash);
+            self.note(cformat!(
+                "<green>✔</green> Signing identity found: {cert_name} <dim>({hash})</dim>"
+            ));
             return Ok(());
         }
 
@@ -357,6 +405,13 @@ impl IosBuilder {
             valid_stdout.trim()
         );
     }
+}
+
+/// File name of a bundle directory, for messages.
+fn bundle_name(bundle: &Path) -> std::borrow::Cow<'_, str> {
+    bundle
+        .file_name()
+        .map_or_else(|| bundle.to_string_lossy(), |n| n.to_string_lossy())
 }
 
 /// Entitlement that a profile grants as a list of environments. A signature
