@@ -433,7 +433,6 @@ pub struct ResolvedIosSection {
     pub assets_dir: Option<PathBuf>,
     pub app_icon_name: String,
     pub provisioning: IosProvisioningBackend,
-    pub apple_id: Option<String>,
     /// Capability display names to auto-enable on the bundle ID via the App
     /// Store Connect API, merged with any inferred from
     /// `entitlements_json_path`. See [`crate::apple::capabilities`].

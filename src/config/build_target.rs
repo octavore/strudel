@@ -25,6 +25,33 @@ pub struct BuildTarget {
     #[serde(default)]
     pub extensions: Vec<ExtensionSection>,
 
+    /// Path to a `.xcassets` directory to compile with `xcrun actool`. On
+    /// macOS it compiles into `Contents/Resources/Assets.car` and does not
+    /// hold the app icon. On iOS it is the full catalog and takes precedence
+    /// over `[build.icon]`.
+    pub assets_dir: Option<PathBuf>,
+
+    /// Provisioning profile to embed in the bundle: a path to an existing
+    /// profile, or `"auto"` to have strudel create and cache one for the app's
+    /// bundle ID. On iOS `"auto"` is a synonym for leaving this unset, since
+    /// iOS already manages its profile unless a path is pinned. The backend is
+    /// chosen by `[ios] provisioning`.
+    pub provisioning_profile: Option<ProvisioningProfileSetting>,
+
+    /// Capability display names (e.g. `"Push Notifications"`, `"HealthKit"`)
+    /// to auto-enable on the bundle ID via the App Store Connect API, in
+    /// addition to any inferred from `build.entitlements_json_path`. Only
+    /// capabilities strudel knows the ASC `CapabilityType` for can be listed
+    /// here. See `strudel help entitlements` for the supported set.
+    pub capabilities: Option<Vec<String>>,
+
+    /// iCloud container identifiers (e.g. `"iCloud.com.example.app"`) to link
+    /// to the bundle ID. Replaces the top-level `containers` value, and
+    /// `containers = []` opts out. Containers are created with `strudel
+    /// icloud-containers create` and linked with `strudel icloud-containers
+    /// link`, never during a build.
+    pub containers: Option<Vec<String>>,
+
     #[serde(flatten)]
     pub platform: TargetPlatform,
 }
@@ -69,12 +96,6 @@ pub struct BuildSection {
     /// Dynamic libraries and `.framework` bundles (e.g. Sparkle) to embed in
     /// `Contents/Frameworks` and sign.
     pub embed_libs: Option<Vec<PathBuf>>,
-    /// Provisioning profile to embed in the bundle: a path to an existing
-    /// profile, or `"auto"` to have strudel create and cache one for the app's
-    /// bundle ID. On iOS `"auto"` is a synonym for leaving this unset, since
-    /// iOS already manages its profile unless a path is pinned; the backend is
-    /// chosen by `[ios] provisioning`.
-    pub provisioning_profile: Option<ProvisioningProfileSetting>,
 
     /// Directory whose contents are merged into `Contents/Resources/`.
     pub resources_dir: Option<PathBuf>,
@@ -116,22 +137,6 @@ pub struct CopySection {
 pub enum TargetPlatform {
     Macos {
         dmg: Option<DmgSection>,
-        /// Path to a `.xcassets` directory to compile into
-        /// `Contents/Resources/Assets.car` with `xcrun actool`.
-        assets_dir: Option<PathBuf>,
-        /// Capability display names (e.g. `"Push Notifications"`,
-        /// `"HealthKit"`) to auto-enable on the bundle ID via the App Store
-        /// Connect API, in addition to any inferred from
-        /// `build.entitlements_json_path`. Only capabilities strudel knows
-        /// the ASC `CapabilityType` for can be listed here; see `strudel
-        /// help entitlements` for the supported set.
-        capabilities: Option<Vec<String>>,
-        /// iCloud container identifiers (e.g. `"iCloud.com.example.app"`) to
-        /// link to the bundle ID. Replaces the top-level `containers` value,
-        /// and `containers = []` opts out. Containers are created with
-        /// `strudel icloud-containers create` and linked with `strudel
-        /// icloud-containers link`, never during a build.
-        containers: Option<Vec<String>>,
     },
     Ios {
         #[serde(default)]

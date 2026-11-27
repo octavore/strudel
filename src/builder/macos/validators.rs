@@ -203,7 +203,7 @@ impl MacosBuilder {
                 )
             } else {
                 let setting = if bundle_id == self.cfg.bundle_id {
-                    "`build.provisioning_profile`".to_string()
+                    "`provisioning_profile`".to_string()
                 } else {
                     format!("`provisioning_profile` in the `[[extensions]]` entry for {bundle_id}")
                 };

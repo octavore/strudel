@@ -61,7 +61,7 @@ impl MacosBuilder {
                 // `Contents/Resources/Assets.car`, so having both is an error.
                 if let Some(assets_dir) = &self.macos.assets_dir {
                     bail!(
-                        "`[build.icon]` is an Icon Composer bundle ({}), but `[macos] assets_dir` is also set ({}), which is a conflict because they both compile into Contents/Resources/Assets.car. If possible, move the `.icon` bundle into the assets_dir catalog instead of setting both.",
+                        "`[build.icon]` is an Icon Composer bundle ({}), but `assets_dir` is also set ({}), which is a conflict because they both compile into Contents/Resources/Assets.car. If possible, move the `.icon` bundle into the assets_dir catalog instead of setting both.",
                         path.display(),
                         assets_dir.display()
                     );

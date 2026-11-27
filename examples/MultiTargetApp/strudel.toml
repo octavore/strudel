@@ -19,6 +19,7 @@
 # apple_id     = "you@example.com"   # pre-fills `strudel login`
 
 # Default iOS settings inherited by iOS targets.
+# provisioning defaults to "app_store_connect"; use "free" for a free Apple ID.
 [ios]
 simulator         = "iPhone 16"
 deployment_target = "18.0"

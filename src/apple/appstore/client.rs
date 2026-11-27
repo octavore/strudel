@@ -49,8 +49,9 @@ impl AppStoreClient {
         if cfg.target_platform.platform() == Platform::Ios {
             msg.push_str(indoc! {"
 
-                Alternatively, set [ios] provisioning = \"free\" in strudel.toml and run `strudel login`
-                to use a plain Apple ID without a paid developer account.
+                iOS targets use App Store Connect unless `ios.provisioning = \"free\"` is set in
+                strudel.toml. For a free Apple ID without a paid developer account, set it and run
+                `strudel login`.
              "});
         }
         let key_path = cfg.apple_api_key_path.as_ref().context(msg)?;

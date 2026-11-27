@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -53,11 +51,8 @@ pub struct IosSection {
     /// Default: `["iphone"]`.
     pub device_family: Option<Vec<IosDeviceFamily>>,
 
-    /// Path to a `.xcassets` directory to compile into the bundle with
-    /// `xcrun actool`. Optional; skipped when unset.
-    pub assets_dir: Option<PathBuf>,
-
-    /// Name of the app icon set inside `assets_dir`. Default: `"AppIcon"`.
+    /// Name of the app icon set inside the target's `assets_dir`. Default:
+    /// `"AppIcon"`.
     pub app_icon_name: Option<String>,
 
     /// Provisioning backend: `"free"` (Apple ID, 7-day profiles) or
@@ -65,23 +60,6 @@ pub struct IosSection {
     /// `"app_store_connect"` backend authenticates with the `[apple]` API key
     /// (`api_issuer`/`api_key`/`api_key_path`).
     pub provisioning: Option<IosProvisioningBackend>,
-
-    /// Apple ID email for `provisioning = "free"`. Pre-fills the login prompt.
-    pub apple_id: Option<String>,
-
-    /// Capability display names (e.g. `"Push Notifications"`, `"HealthKit"`)
-    /// to auto-enable on the bundle ID via the App Store Connect API, in
-    /// addition to any inferred from `build.entitlements_json_path`. Only
-    /// capabilities strudel knows the ASC `CapabilityType` for can be listed
-    /// here; see `strudel help entitlements` for the supported set.
-    pub capabilities: Option<Vec<String>>,
-
-    /// iCloud container identifiers (e.g. `"iCloud.com.example.app"`) to
-    /// link to the bundle ID. Replaces the top-level `containers` value, and
-    /// `containers = []` opts out. Containers are created with `strudel
-    /// icloud-containers create` and linked with `strudel icloud-containers
-    /// link`, never during a build.
-    pub containers: Option<Vec<String>>,
 }
 
 impl IosSection {
@@ -94,12 +72,8 @@ impl IosSection {
             device: self.device.or(shared.device),
             deployment_target: self.deployment_target.or(shared.deployment_target),
             device_family: self.device_family.or(shared.device_family),
-            assets_dir: self.assets_dir.or(shared.assets_dir),
             app_icon_name: self.app_icon_name.or(shared.app_icon_name),
             provisioning: self.provisioning.or(shared.provisioning),
-            apple_id: self.apple_id.or(shared.apple_id),
-            capabilities: self.capabilities.or(shared.capabilities),
-            containers: self.containers.or(shared.containers),
         }
     }
 }

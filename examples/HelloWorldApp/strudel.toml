@@ -3,6 +3,11 @@
 # This example shows a flat, single-target strudel.toml, which always builds for macOS.
 # For iOS or a macOS + iOS apps, see examples/MultiTargetApp/strudel.toml.
 
+# Provisioning profile embedded as Contents/embedded.provisionprofile.
+# Required for certain entitlements (e.g. push notifications, iCloud).
+# A top-level key must appear before any [table] header.
+# provisioning_profile   = "MyApp.provisionprofile"
+
 [app]
 name         = "HelloWorld"
 bundle_id    = "com.example.helloworld"
@@ -33,10 +38,6 @@ build_number = "1"
 # Resources copied into Contents/Resources/ during bundle assembly.
 # resources_dir = "Resources"               # directory; contents merged into Contents/Resources/
 # resources     = ["Assets/logo.png"]       # individual files copied by name
-
-# Provisioning profile embedded as Contents/embedded.provisionprofile.
-# Required for certain entitlements (e.g. push notifications, iCloud).
-# provisioning_profile   = "MyApp.provisionprofile"
 
 # Extra environment variables forwarded to `swift build` (e.g. for
 # pkg-config or library discovery). Values are passed through verbatim.

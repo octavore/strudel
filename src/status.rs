@@ -567,7 +567,7 @@ fn with_source(value: String, source: ValueSource, env_key: &str) -> String {
 }
 
 /// Print the provisioning profile for a macOS target, if any: either fetched
-/// automatically (`build.provisioning_profile = "auto"`, see
+/// automatically (`provisioning_profile = "auto"`, see
 /// `builder::macos::profile`) or pinned to an explicit path. Most macOS
 /// builds need neither - a profile is only required for a handful of
 /// entitlements (e.g. App Groups, Network Extensions).

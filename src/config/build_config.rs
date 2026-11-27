@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use indoc::formatdoc;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -13,6 +13,7 @@ use crate::config::build_target::{
 };
 use crate::config::extension::ExtensionSection;
 use crate::config::global::GlobalConfig;
+use crate::config::provisioning::ProvisioningProfileSetting;
 use crate::config::resolved::{
     ResolvedCopy, ResolvedDmg, ResolvedIosSection, ResolvedMacOsSection, ResolvedProject, Sourced,
     ValueSource,
@@ -69,6 +70,10 @@ pub struct SingleBuildConfig {
     /// `Contents/Resources/Assets.car` with `xcrun actool`.
     pub assets_dir: Option<PathBuf>,
 
+    /// Provisioning profile to embed: a path, or `"auto"` to have strudel
+    /// manage it. See `strudel help entitlements`.
+    pub provisioning_profile: Option<ProvisioningProfileSetting>,
+
     /// Capability display names to auto-enable on the bundle ID via the App
     /// Store Connect API. See `strudel help entitlements`.
     pub capabilities: Option<Vec<String>>,
@@ -122,6 +127,7 @@ impl BuildConfig {
                     extensions,
                     dmg,
                     assets_dir,
+                    provisioning_profile,
                     capabilities,
                     containers,
                     apple,
@@ -130,12 +136,11 @@ impl BuildConfig {
                     app,
                     build,
                     extensions,
-                    platform: TargetPlatform::Macos {
-                        dmg,
-                        assets_dir,
-                        capabilities,
-                        containers,
-                    },
+                    assets_dir,
+                    provisioning_profile,
+                    capabilities,
+                    containers,
+                    platform: TargetPlatform::Macos { dmg },
                 };
                 vec![resolve_target(
                     target, &apple, None, None, true, config_dir, global,
@@ -271,8 +276,15 @@ fn resolve_target(
         app,
         build,
         extensions,
+        assets_dir,
+        provisioning_profile,
+        capabilities,
+        containers,
         ..
     } = target;
+    let assets_dir = assets_dir.map(|p| resolve_to(config_dir, p));
+    let capabilities = validate_capability_names(capabilities.unwrap_or_default())?;
+    let containers = resolve_containers(containers, top_level_containers)?;
 
     let target_id = format!("{}/{}", platform.as_str(), app.name);
     let source_dir = resolve_path(config_dir, build.source_dir.unwrap_or(".".into()));
@@ -290,19 +302,14 @@ fn resolve_target(
 
     let target_name = build.target_name.unwrap_or_else(|| app.name.clone());
     let target_platform = match target.platform {
-        TargetPlatform::Macos {
-            dmg,
-            assets_dir,
-            capabilities,
-            containers,
-        } => ResolvedMacOsSection {
+        TargetPlatform::Macos { dmg } => ResolvedMacOsSection {
             dmg: match dmg {
                 Some(d) => d.resolve(config_dir)?,
                 None => Some(ResolvedDmg::default()),
             },
-            assets_dir: assets_dir.map(|p| resolve_to(config_dir, p)),
-            capabilities: validate_capability_names(capabilities.unwrap_or_default())?,
-            containers: resolve_containers(containers, top_level_containers)?,
+            assets_dir,
+            capabilities,
+            containers,
         }
         .into(),
         TargetPlatform::Ios { ios } => {
@@ -312,14 +319,13 @@ fn resolve_target(
                 device: ios.device,
                 deployment_target: ios.deployment_target.unwrap_or_else(|| "18.0".to_string()),
                 device_family: resolve_device_family(ios.device_family)?,
-                assets_dir: ios.assets_dir.map(|p| resolve_to(config_dir, p)),
+                assets_dir,
                 app_icon_name: ios.app_icon_name.unwrap_or_else(|| "AppIcon".to_string()),
-                provisioning: ios.provisioning.ok_or_else(|| {
-                    anyhow!("[ios] `provisioning` must be \"free\" or \"app_store_connect\"")
-                })?,
-                apple_id: ios.apple_id,
-                capabilities: validate_capability_names(ios.capabilities.unwrap_or_default())?,
-                containers: resolve_containers(ios.containers, top_level_containers)?,
+                provisioning: ios
+                    .provisioning
+                    .unwrap_or(IosProvisioningBackend::AppStoreConnect),
+                capabilities,
+                containers,
             }
         }
         .into(),
@@ -335,7 +341,7 @@ fn resolve_target(
     // macOS target spells it, and normalize it back to unset: which backend
     // supplies an iOS profile is `[ios] provisioning`, and an extension without
     // a pinned profile gets one from the same backend.
-    let mut host_profile = build.provisioning_profile;
+    let mut host_profile = provisioning_profile;
     if platform == Platform::Ios {
         host_profile = host_profile.filter(|p| !p.is_auto());
         if let Some(ext) = extensions
@@ -597,7 +603,7 @@ pub fn generate_initial_toml_with_ios(
         # api_key_path = "AuthKey_2X9R4HXF34.p8"
 
         [ios]
-        # Provisioning backend - required for device builds. Choose one:
+        # Provisioning backend for device builds. Default: "app_store_connect". Choose one:
         #   "app_store_connect"  paid account + App Store Connect API key; 1-year profiles
         #   "free"               any Apple ID; 7-day profiles, no paid account needed
         provisioning = "{provisioning}"
@@ -612,7 +618,7 @@ pub fn generate_initial_toml_with_ios(
 
         # ios.simulator          = "iPhone 16"
         # ios.deployment_target  = "18.0"
-        # ios.assets_dir         = "Sources/App/Assets.xcassets"
+        # assets_dir             = "Sources/App/Assets.xcassets"
     "#}
 }
 
@@ -757,6 +763,8 @@ mod tests {
     #[test]
     fn auto_provisioning_resolves_to_the_managed_cache_path() {
         let cfg = parse_build_config(indoc! { r#"
+            provisioning_profile = "auto"
+
             [app]
             name = "X"
             bundle_id = "com.example.x"
@@ -764,7 +772,6 @@ mod tests {
 
             [build]
             source_dir = "src"
-            provisioning_profile = "auto"
 
             [[extensions]]
             kind = "system_extension"
@@ -797,13 +804,12 @@ mod tests {
     #[test]
     fn an_explicit_profile_path_is_not_managed() {
         let cfg = parse_build_config(indoc! { r#"
+            provisioning_profile = "profiles/X.provisionprofile"
+
             [app]
             name = "X"
             bundle_id = "com.example.x"
             version = "1"
-
-            [build]
-            provisioning_profile = "profiles/X.provisionprofile"
         "#})
         .unwrap();
         let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
@@ -826,7 +832,7 @@ mod tests {
             app.bundle_id = "com.example.x"
             app.version = "1"
             ios.provisioning = "app_store_connect"
-            build.provisioning_profile = "auto"
+            provisioning_profile = "auto"
 
             [[target.extensions]]
             kind = "app_extension"
@@ -913,7 +919,7 @@ mod tests {
             app.bundle_id = "com.example.x"
             app.version = "1"
             ios.provisioning = "app_store_connect"
-            build.provisioning_profile = "profiles/X.mobileprovision"
+            provisioning_profile = "profiles/X.mobileprovision"
         "#})
         .unwrap();
         let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
@@ -1153,10 +1159,24 @@ mod tests {
     #[test]
     fn capabilities_reject_unknown_name_on_ios() {
         let cfg = capabilities_config(
-            "ios\"\nios.provisioning = \"app_store_connect\"\nios.capabilities = [\"Nope\"]",
+            "ios\"\nios.provisioning = \"app_store_connect\"\ncapabilities = [\"Nope\"]",
         );
         let err = resolve_capabilities(&cfg).unwrap_err();
         assert!(err.to_string().contains("Unknown capability"));
+    }
+
+    #[test]
+    fn ios_capabilities_keys_are_rejected() {
+        let per_target = capabilities_config(
+            "ios\"\nios.provisioning = \"app_store_connect\"\nios.capabilities = [\"HealthKit\"]",
+        );
+        assert!(parse_build_config(&per_target).is_err());
+
+        let shared = format!(
+            "[ios]\ncapabilities = [\"HealthKit\"]\n{}",
+            capabilities_config("ios\"\nios.provisioning = \"app_store_connect\"")
+        );
+        assert!(parse_build_config(&shared).is_err());
     }
 
     #[test]
@@ -1164,7 +1184,7 @@ mod tests {
         let macos = capabilities_config("macos\"\ncapabilities = [\"network EXTENSIONS\"]");
         resolve_capabilities(&macos).unwrap();
         let ios = capabilities_config(
-            "ios\"\nios.provisioning = \"app_store_connect\"\nios.capabilities = [\"healthkit\"]",
+            "ios\"\nios.provisioning = \"app_store_connect\"\ncapabilities = [\"healthkit\"]",
         );
         resolve_capabilities(&ios).unwrap();
     }
@@ -1225,27 +1245,28 @@ mod tests {
     }
 
     #[test]
-    fn ios_section_replaces_top_level_containers() {
-        let cfg = format!(
-            "containers = [\"iCloud.com.example.top\"]\n\
-             [ios]\ncontainers = [\"iCloud.com.example.shared\"]\n\
-             [[target]]\nplatform = \"macos\"\n{}\n[[target]]\nplatform = \"ios\"\n\
+    fn ios_containers_keys_are_rejected() {
+        let per_target = format!(
+            "[[target]]\nplatform = \"ios\"\nios.containers = [\"iCloud.com.example.ios\"]\n\
              ios.provisioning = \"app_store_connect\"\n{}",
-            app_lines("Mac"),
-            app_lines("Phone"),
+            app_lines("Phone")
         );
-        let got = resolved_containers(&cfg).unwrap();
-        assert_eq!(got[0].1, ids(&["iCloud.com.example.top"]));
-        assert_eq!(got[1].1, ids(&["iCloud.com.example.shared"]));
+        assert!(parse_build_config(&per_target).is_err());
+
+        let shared = format!(
+            "[ios]\ncontainers = [\"iCloud.com.example.ios\"]\n\
+             [[target]]\nplatform = \"ios\"\nios.provisioning = \"app_store_connect\"\n{}",
+            app_lines("Phone")
+        );
+        assert!(parse_build_config(&shared).is_err());
     }
 
     #[test]
-    fn per_target_containers_replace_the_levels_below() {
+    fn per_target_containers_replace_the_top_level_value() {
         let cfg = format!(
             "containers = [\"iCloud.com.example.top\"]\n\
-             [ios]\ncontainers = [\"iCloud.com.example.shared\"]\n\
              [[target]]\nplatform = \"macos\"\ncontainers = [\"iCloud.com.example.mac\"]\n{}\n\
-             [[target]]\nplatform = \"ios\"\nios.containers = [\"iCloud.com.example.ios\"]\n\
+             [[target]]\nplatform = \"ios\"\ncontainers = [\"iCloud.com.example.ios\"]\n\
              ios.provisioning = \"app_store_connect\"\n{}",
             app_lines("Mac"),
             app_lines("Phone"),
@@ -1260,7 +1281,7 @@ mod tests {
         let cfg = format!(
             "containers = [\"iCloud.com.example.top\"]\n\
              [[target]]\nplatform = \"macos\"\ncontainers = []\n{}\n\
-             [[target]]\nplatform = \"ios\"\nios.containers = []\n\
+             [[target]]\nplatform = \"ios\"\ncontainers = []\n\
              ios.provisioning = \"app_store_connect\"\n{}",
             app_lines("Mac"),
             app_lines("Phone"),
@@ -1298,7 +1319,7 @@ mod tests {
             assert!(err.to_string().contains("iCloud container"), "{bad}: {err}");
 
             let per_target = format!(
-                "[[target]]\nplatform = \"ios\"\nios.containers = [\"{bad}\"]\n\
+                "[[target]]\nplatform = \"ios\"\ncontainers = [\"{bad}\"]\n\
                  ios.provisioning = \"app_store_connect\"\n{}",
                 app_lines("Phone")
             );
@@ -1338,7 +1359,7 @@ mod tests {
             ios.simulator = "iPhone 15 Pro"
             ios.device = "00000000-0000-0000-0000-000000000000"
             ios.deployment_target = "17.0"
-            ios.assets_dir = "Sources/Assets.xcassets"
+            assets_dir = "Sources/Assets.xcassets"
             ios.app_icon_name = "MyIcon"
             ios.provisioning = "app_store_connect"
         "#})
@@ -1358,6 +1379,20 @@ mod tests {
             ios.assets_dir,
             Some(PathBuf::from("/cfg/Sources/Assets.xcassets"))
         );
+    }
+
+    #[test]
+    fn ios_assets_dir_key_is_rejected() {
+        let result = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "MyApp"
+            app.bundle_id = "com.example.myapp"
+            app.version = "1.0.0"
+            ios.assets_dir = "Sources/Assets.xcassets"
+            ios.provisioning = "app_store_connect"
+        "#});
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1681,6 +1716,47 @@ mod tests {
             assert_eq!(r.apple_api_key_path, None);
             assert_eq!(r.apple_id.value, "");
         });
+    }
+
+    #[test]
+    fn ios_provisioning_defaults_to_app_store_connect() {
+        let cfg = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "X"
+            app.bundle_id = "com.example.x"
+            app.version = "1"
+        "#})
+        .unwrap();
+        let r = cfg.resolve(Path::new("/cfg"), None).unwrap();
+        let ResolvedTargetPlatform::Ios(ios) = &r.target_platform else {
+            panic!("expected an iOS target");
+        };
+        assert_matches!(ios.provisioning, IosProvisioningBackend::AppStoreConnect);
+    }
+
+    #[test]
+    fn moved_provisioning_keys_are_rejected() {
+        let build_profile = parse_build_config(indoc! { r#"
+            [app]
+            name = "X"
+            bundle_id = "y"
+            version = "1"
+
+            [build]
+            provisioning_profile = "auto"
+        "#});
+        assert!(build_profile.is_err());
+
+        let ios_apple_id = parse_build_config(indoc! { r#"
+            [[target]]
+            platform = "ios"
+            app.name = "X"
+            app.bundle_id = "com.example.x"
+            app.version = "1"
+            ios.apple_id = "me@example.com"
+        "#});
+        assert!(ios_apple_id.is_err());
     }
 
     #[test]

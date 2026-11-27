@@ -31,10 +31,9 @@ fn add_capability_to_doc(
     capability: &str,
 ) -> Result<()> {
     if !doc.contains_key("target") {
-        return add_to_list(doc.as_table_mut(), "capabilities", &[], capability);
+        return add_to_list(doc.as_table_mut(), "capabilities", capability);
     }
 
-    let shared = shared_ios_capabilities(doc);
     let targets = doc
         .get_mut("target")
         .and_then(Item::as_array_of_tables_mut)
@@ -48,34 +47,7 @@ fn add_capability_to_doc(
             platform.as_str()
         );
     };
-    match platform {
-        Platform::Macos => add_to_list(target, "capabilities", &[], capability),
-        Platform::Ios => {
-            // The target list replaces the shared `[ios]` list, so a new list
-            // starts from the shared one.
-            if target.get("ios").is_none() {
-                target.insert("ios", Item::Table(Table::new()));
-            }
-            let ios = target
-                .get_mut("ios")
-                .and_then(Item::as_table_like_mut)
-                .context("`ios` is not a table")?;
-            add_to_list(ios, "capabilities", &shared, capability)
-        },
-    }
-}
-
-/// Capability names of the shared `[ios]` section. Empty if there are none.
-fn shared_ios_capabilities(doc: &DocumentMut) -> Vec<String> {
-    doc.get("ios")
-        .and_then(|ios| ios.get("capabilities"))
-        .and_then(Item::as_array)
-        .map(|list| {
-            list.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
+    add_to_list(target, "capabilities", capability)
 }
 
 fn is_target(target: &Table, platform: Platform, app_name: &str) -> bool {
@@ -87,14 +59,8 @@ fn is_target(target: &Table, platform: Platform, app_name: &str) -> bool {
     platform_matches && name == Some(app_name)
 }
 
-/// Add `capability` to the list at `key`. A missing list is created from
-/// `fallback` plus `capability`.
-fn add_to_list(
-    table: &mut dyn TableLike,
-    key: &str,
-    fallback: &[String],
-    capability: &str,
-) -> Result<()> {
+/// Add `capability` to the list at `key`. A missing list is created.
+fn add_to_list(table: &mut dyn TableLike, key: &str, capability: &str) -> Result<()> {
     if let Some(item) = table.get_mut(key) {
         let list = item
             .as_array_mut()
@@ -109,9 +75,6 @@ fn add_to_list(
         return Ok(());
     }
     let mut list = Array::new();
-    for name in fallback {
-        list.push(name.as_str());
-    }
     list.push(capability);
     table.insert(key, value(list));
     Ok(())
@@ -177,11 +140,8 @@ name = \"Two\"
     }
 
     #[test]
-    fn ios_target_list_starts_from_the_shared_list() {
+    fn ios_target_gets_a_target_list() {
         let text = "\
-[ios]
-capabilities = [\"HealthKit\"]
-
 [[target]]
 platform = \"ios\"
 [target.app]
@@ -189,11 +149,8 @@ name = \"App\"
 ";
         let got = edit(text, Platform::Ios, "App").unwrap();
         let doc: DocumentMut = got.parse().unwrap();
-        let list = doc["target"][0]["ios"]["capabilities"].as_array().unwrap();
-        let names: Vec<&str> = list.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(names, ["HealthKit", "iCloud"]);
-        let shared = doc["ios"]["capabilities"].as_array().unwrap();
-        assert_eq!(shared.len(), 1);
+        assert_eq!(doc["target"][0]["capabilities"][0].as_str(), Some("iCloud"));
+        assert!(doc["target"][0].get("ios").is_none());
     }
 
     #[test]

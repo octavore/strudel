@@ -109,7 +109,6 @@ pub fn resolved_ios() -> ResolvedConfig {
             assets_dir: None,
             app_icon_name: "AppIcon".into(),
             provisioning: IosProvisioningBackend::AppStoreConnect,
-            apple_id: None,
             capabilities: Vec::new(),
             containers: Vec::new(),
         }
