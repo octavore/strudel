@@ -207,9 +207,9 @@ fn print_targets() {
         Every target has an id of `<<platform>>/<<app.name>>`, e.g. `macos/MyApp` and
         `ios/MyApp`. Two targets on the same platform may not share an app name.
 
-        When multiple targets are eligible for a command, strudel runs them all and
-        prints a per-target header. To narrow to a single target, give any substring
-        of its id, eg:
+        <blue>strudel build</> requires a target when there are several, and lists the
+        ids if none is given. Other commands run every eligible target and print a
+        per-target header. To select a single target, give any substring of its id, eg:
         <blue>
         strudel build ios/MyApp    # the whole id
         strudel build mac          # a prefix of the platform

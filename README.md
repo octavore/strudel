@@ -659,7 +659,7 @@ app.build_number = "1"
 ios.deployment_target = "18.0"
 ```
 
-When multiple targets are eligible for a command, strudel runs them all and prints a per-target header. Narrow to one target by name, as described in
+With multiple targets, `strudel build` requires a target and fails with the list of ids if none is given. Other commands run every eligible target and print a per-target header. Select one target by name, as described in
 [Commands](#commands):
 
 ```sh

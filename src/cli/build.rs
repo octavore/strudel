@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::Result;
-use clml::cprintln;
 
 use crate::builder::{IosBuilder, MacosBuilder, OutputFlags};
 use crate::cli::helpers::{all_or_named, run_for_targets};
@@ -62,12 +61,18 @@ impl BuildCmd {
         if let Some(n) = &self.build_number {
             project.set_build_number(n);
         }
+        if self.target.is_none() && project.targets.len() > 1 {
+            let ids: Vec<&str> = project
+                .targets
+                .iter()
+                .map(|t| t.target_id.as_str())
+                .collect();
+            anyhow::bail!(
+                "Multiple targets; select one with `strudel build <target>`. Available: {}",
+                ids.join(", ")
+            );
+        }
         let targets = all_or_named(&project, self.target.as_deref())?;
-        let macos_target_ids: Vec<&str> = targets
-            .iter()
-            .filter(|t| matches!(t.target_platform, ResolvedTargetPlatform::Mac(_)))
-            .map(|t| t.target_id.as_str())
-            .collect();
         run_for_targets(targets, |cfg| match &cfg.target_platform {
             ResolvedTargetPlatform::Mac(_) => {
                 let mut builder = MacosBuilder::new(
@@ -91,15 +96,7 @@ impl BuildCmd {
             },
             ResolvedTargetPlatform::Ios(_) => {
                 if self.install {
-                    if macos_target_ids.is_empty() {
-                        anyhow::bail!("--install is only supported for macOS targets");
-                    }
-                    cprintln!(
-                        "<yellow>[warning]</yellow> --install is only supported for macOS targets; skipping {}. Build it separately: <blue>strudel build {}</blue>",
-                        cfg.target_id,
-                        cfg.target_id
-                    );
-                    return Ok(());
+                    anyhow::bail!("--install is only supported for macOS targets");
                 }
                 IosBuilder::new(cfg.clone(), self.output_flags(), self.debug)?.build()
             },
