@@ -198,6 +198,9 @@ fn print_targets() {
         - `[apple]` is always shared (top-level only).
         - `[ios]` at the top level supplies defaults for iOS targets; a per-target
           `ios.*` field wins over the matching top-level field, field by field.
+        - A top-level `containers` key is inherited by all targets. You can override this
+          with a per-target `containers` entry, with `[]` clearing the containers for that
+          target. See `strudel help entitlements`.
 
         ## Selecting targets at runtime
 
@@ -275,9 +278,8 @@ fn print_config() {
         archs                  = ["arm64", "x86_64"]       # default: host arch only
         target_name            = "MyApp"                   # Swift executableTarget; default: app.name
         embed_libs             = ["libFoo.dylib"]           # dylibs/.frameworks; see `strudel help dylibs`
-        provisioning_profile   = "MyApp.provisionprofile"  # required for some entitlements; "auto" on macOS, see `strudel help entitlements`
 
-        resources_dir          = "Resources"               # all files here copied into Contents/Resources/
+        resources_dir         = "Resources"               # all files here copied into Contents/Resources/
         resources              = ["Assets/logo.png"]       # individual files/folders to copy into Contents/Resources/
         </>
         Both resolve relative to the config file's directory unless absolute, same as
@@ -294,23 +296,42 @@ fn print_config() {
         dest_dir = "Contents/MacOS"
         sign     = true
         </>
-        ## assets_dir optional; top-level key (like [dmg]), not under [build]
-        # xcassets catalog compiled into Contents/Resources/Assets.car via actool.
-        # Deployment target is read from Package.swift's platforms entry; defaults to 14.0 if none.
+        ## assets_dir optional; key of the app or [[target]] (like [dmg]), not under [build]
+        # xcassets catalog compiled via actool. On macOS it compiles into
+        # Contents/Resources/Assets.car and does not contain the app icon. The macOS
+        # deployment target is read from Package.swift's platforms entry; defaults
+        # to 14.0 if none. On iOS it is the full catalog and takes precedence over
+        # [build.icon]. In the single-target form, a flat key must appear before any
+        # [table] header.
         <magenta>
         assets_dir = "Sources/App/Assets.xcassets"
         </>
-        ## capabilities optional; top-level key (like [dmg]), not under [build]
+        ## provisioning_profile optional; key of the app or [[target]] (like [dmg]), not under [build]
+        # Provisioning profile to embed: a path, or "auto" to have strudel manage it via API.
+        # Required for some entitlements. In the single-target form, a flat key must
+        # appear before any [table] header. See <blue>strudel help entitlements</>.
+        <magenta>
+        provisioning_profile = "MyApp.provisionprofile"
+        </>
+        ## capabilities optional; key of the app or [[target]] (like [dmg]), not under [build]
         # Capability display names to enable on the bundle ID through the App Store
-        # Connect API. A flat key must appear before any [table] header.
+        # Connect API. In the single-target form, a flat key must appear before any
+        # [table] header.
         # See <blue>strudel help entitlements</>.
         <magenta>
         capabilities = ["Push Notifications", "App Groups"]
         </>
+        ## containers optional; top-level key, inherited by every target
+        # iCloud container identifiers to link to the bundle ID with `strudel
+        # icloud-containers link`. Builds never create or link containers, they must be
+        # managed explicitly. See <blue>strudel help entitlements</>.
+        <magenta>
+        containers = ["iCloud.com.example.app"]
+        </>
         ## [build.icon] optional; no icon if unset
         # Either a png or icns file copied in unmodified (set icon.path), or
         # generate an icon from a png or svg at build time (icon.src). For iOS
-        # targets, ios.assets_dir takes precedence if both are set.
+        # targets, assets_dir takes precedence if both are set.
         <magenta>
         icon.src        = "art.png"
         icon.scale      = 1.2               # optional
@@ -363,14 +384,12 @@ fn print_config() {
         device            = "My iPhone"  # name or UDID; auto-detected if unset
         deployment_target = "18.0"       # iOS deployment target
         device_family     = ["iphone"]   # default; add "ipad" for a universal app
-        assets_dir        = "Sources/App/Assets.xcassets"  # xcassets for actool; takes precedence over [build.icon]
-        app_icon_name     = "AppIcon"    # icon set name inside assets_dir
+        app_icon_name     = "AppIcon"    # icon set name inside the target's assets_dir
 
-        # Provisioning backend, required for device builds. Choose one:
-        #   "app_store_connect"  paid account + App Store Connect API key; 1-year profiles
+        # Provisioning backend, used for device builds. Choose one:
+        #   "app_store_connect"  paid account + App Store Connect API key; 1-year profiles (default)
         #   "free"               any Apple ID, no paid account; 7-day profiles, max 3 devices
         provisioning = "app_store_connect"  # or "free"
-        apple_id     = "you@example.com"    # pre-fills the login prompt (free path only)
         </>
         See <blue>strudel help ios-device</> and <blue>strudel help ios-free-provisioning</>.
 
@@ -590,7 +609,6 @@ fn print_entitlements() {
         Some entitlements require a provisioning profile (e.g. push notifications, iCloud,
         HealthKit). To embed one:
 
-          [build]
           provisioning_profile = "MyApp.provisionprofile"
 
         The profile is copied into Contents/embedded.provisionprofile inside the bundle.
@@ -604,7 +622,6 @@ fn print_entitlements() {
         and Network Extensions, are checked against an embedded profile even outside the
         Mac App Store. strudel can create and refresh a Developer ID profile for these:
         <magenta>
-          [build]
           provisioning_profile = "auto"
 
           [[extensions]]
@@ -629,7 +646,6 @@ fn print_entitlements() {
         "auto" fails in CI. Run <blue>strudel profile fetch --out profiles</> locally, commit the
         copied files, and point provisioning_profile at them:
         <magenta>
-          [build]
           provisioning_profile = "profiles/com.example.app.provisionprofile"
         </>
         ## Capabilities
@@ -639,21 +655,21 @@ fn print_entitlements() {
         API. This needs an Admin role API key.
 
         strudel enables a capability if its entitlement key is in the entitlements file.
-        To enable one that has no entitlement key, list its name. On macOS, use a
-        top-level key. A flat key must appear before any [table] header, or TOML reads it
-        as part of that table:
+        To enable one that has no entitlement key, list its name. In the single-target
+        form, use a top-level key. A flat key must appear before any [table] header, or
+        TOML reads it as part of that table:
         <magenta>
           capabilities = ["Push Notifications", "App Groups"]
-
-          [build]
           provisioning_profile = "auto"
         </>
-        On iOS, use the `[ios]` table:
+        With multiple targets, set `capabilities` in each [[target]], on macOS and iOS
+        alike. There is no top-level default:
         <magenta>
-          [ios]
+          [[target]]
+          platform     = "ios"
           capabilities = ["Push Notifications", "HealthKit"]
         </>
-        Names are case-insensitive. An unknown name fails when the config loads.
+        Names are case-insensitive. An unknown name fails when the config is loaded.
 
         iOS: capabilities are enabled during profile fetch, after the bundle ID is found
         or created. Each change is printed and strudel does not ask first.
@@ -676,6 +692,59 @@ fn print_entitlements() {
 
         App Groups, iCloud, Apple Pay, and Wallet also need identifiers assigned in the
         portal. strudel enables the capability and lists the steps in the confirmation.
+
+        ## iCloud containers
+
+        List iCloud container identifiers in `containers`, then link them to the
+        bundle ID with `strudel icloud-containers link`:
+        <magenta>
+          containers = ["iCloud.com.example.app"]
+        </>
+        Identifiers must start with `iCloud.` and are checked when the config loads.
+        Top-level `containers` applies to every target. `containers` in a `[[target]]`
+        replaces it, and `containers = []` opts out. `capabilities` has no such
+        inheritance.
+
+        Builds never create or link containers. Containers cannot be deleted, so they
+        are explicitly created only with `create`. App IDs are linked only with `link`.
+
+        Manage containers with:
+        <blue>
+        strudel icloud-containers create [--team <<id>>] iCloud.com.example.app
+        strudel icloud-containers list [--team <<id>>]
+        strudel icloud-containers link [--team <<id>>] [--target <<id>>]
+        </>
+        <yellow>WARNING: iCloud containers cannot be deleted.</> An iCloud container
+        identifier is reserved permanently by the team and is unique across all developer
+        accounts. It can be hidden and unlinked from App IDs, but never removed.
+
+        `create` takes identifiers as arguments, needs at least one, and does not read
+        `containers` from strudel.toml. The usual identifier is `iCloud.` followed by
+        the bundle ID, such as `iCloud.com.example.app` for bundle ID `com.example.app`.
+        It skips identifiers that already exist, lists the missing ones with the
+        warning, and asks `[y/N]`. It requires a terminal. `list` is read-only.
+
+        `link` links the `containers` of each selected target to its App ID, and keeps
+        the containers the App ID has. If a configured container does not exist, it
+        stops and prints the `create` command to run. If the iCloud capability is off
+        for the App ID, it offers to enable it. If `capabilities` in strudel.toml does
+        not list iCloud, it offers to add it. Both offers need a terminal.
+
+        `--team` is the team id. Without it, the commands use `team_id` from the
+        `[apple]` section of strudel.toml. Without either, they fail. The team id picks
+        the signed-in Apple ID that owns the team.
+
+        Requirements:
+          - An Apple ID session from `strudel login`, for the account that owns the
+            team. An App Store Connect API key cannot manage containers. Paid teams
+            use the session only for these commands. Builds never read it.
+          - A paid Apple Developer Program team. Free and personal teams cannot use
+            containers.
+
+        Apple does not document the container endpoints. strudel uses the ones Xcode
+        uses. Listing is verified. The create and associate requests are not, and
+        associating is not verified for macOS App IDs. Apple can change them without
+        notice. If a build fails because a profile lacks the container, run `link`.
 
         Pinned profiles: if `provisioning_profile` is a path, strudel makes no App Store
         Connect calls for that bundle ID and checks the file instead. These checks fail
@@ -730,7 +799,6 @@ fn print_entitlements() {
 
         To manage the profile manually instead, set:
         <magenta>
-          [build]
           provisioning_profile = "path/to/MyApp.mobileprovision"
         </>
         When provisioning_profile is set strudel uses that file as-is and does not overwrite
@@ -951,7 +1019,7 @@ fn print_ios_device() {
                                7-day profiles; max 3 devices and 10 App IDs per team.
                                Run `strudel login` first, then the normal device workflow.
 
-        Set the backend in strudel.toml (required):
+        Set the backend in strudel.toml. The default is "app_store_connect":
         <magenta>
           [ios]
           provisioning = "app_store_connect"  # or "free"
@@ -1010,7 +1078,6 @@ fn print_ios_device() {
         </>
         To opt out of auto-management and use your own profile, set in strudel.toml:
         <magenta>
-          [build]
           provisioning_profile = "path/to/MyApp.mobileprovision"
         </>
         ## Credentials required (App Store Connect path only)
@@ -1028,7 +1095,7 @@ fn print_ios_device() {
         is fine for notarization but will fail with "insufficient permissions" on
         `strudel devices add`, `strudel run --device`, and `strudel profile fetch`. Either use
         an Admin key or register the device and create the profile manually and set
-        build.provisioning_profile.
+        provisioning_profile.
 
         ## .strudel/devices.toml
 

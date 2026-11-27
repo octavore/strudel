@@ -173,19 +173,20 @@ iOS support is experimental. See [iOS device builds](#ios-device-builds).
 strudel [OPTIONS] <COMMAND>
 
 Commands:
-  init       Scaffold a strudel.toml in the given directory
-  login      Sign in with an Apple ID for free iOS provisioning (7-day profiles)
-  build      Assemble the app bundle. Signed on macOS by default; add --unsigned to skip
-  run        Build and launch locally (macOS: sign + open; iOS: simulator or device)
-  release    Full distributable: build, sign, notarize, and package DMG (macOS only)
-  devices    Manage tracked iOS devices; bare command lists them
-  profile    Show provisioning-profile status; `profile fetch` fetches/refreshes it
-  clean      Remove the strudel output directory and run `swift package clean`
-  config     Show/bump the project version, or edit the global config
-  icon       Render each target's app icon to a PNG, to preview it without a full build
-  skill      Install a skill file that points an AI coding agent at strudel docs or tooling
-  status     Show overall status: toolchain, config, session, and per-target state
-  help       Show documentation for a topic (run `strudel help` to list topics)
+  init               Scaffold a strudel.toml in the given directory
+  login              Sign in with an Apple ID for free iOS provisioning (7-day profiles)
+  build              Assemble the app bundle. Signed on macOS by default; add --unsigned to skip
+  run                Build and launch locally (macOS: sign + open; iOS: simulator or device)
+  release            Full distributable: build, sign, notarize, and package DMG (macOS only)
+  devices            Manage tracked iOS devices; bare command lists them
+  profile            Show provisioning-profile status; `profile fetch` fetches/refreshes it
+  icloud-containers  Create, list, and link iCloud containers
+  clean              Remove the strudel output directory and run `swift package clean`
+  config             Show/bump the project version, or edit the global config
+  icon               Render each target's app icon to a PNG, to preview it without a full build
+  skill              Install a skill file that points an AI coding agent at strudel docs or tooling
+  status             Show overall status: toolchain, config, session, and per-target state
+  help               Show documentation for a topic (run `strudel help` to list topics)
 
 Options:
       --config <CONFIG>  Path to config file [default: strudel.toml]
@@ -345,7 +346,7 @@ The sections below describe a single target. In a multi-target config they nest 
 | [`[[build.copy]]`](#buildcopy-optional)         | no       | Files copied to arbitrary locations in the bundle, optionally signed |
 | [`[ios]`](#ios-optional-experimental)           | no       | Simulator, device, and provisioning settings for iOS                 |
 | [`[[extensions]]`](#extensions-optional)        | no       | Embedded `.appex`, `.systemextension`, and `.xpc` bundles            |
-| [`assets_dir`](#assets_dir-optional-macos)      | no       | `.xcassets` catalog compiled into `Contents/Resources/Assets.car`    |
+| [`assets_dir`](#assets_dir-optional)            | no       | `.xcassets` catalog compiled with `actool`                           |
 | [`[dmg]`](#dmg-optional)                        | no       | Finder window layout of the release DMG                              |
 | [`[apple]`](#apple-optional)                    | no       | Signing, notarization, and provisioning identifiers                  |
 
@@ -378,7 +379,6 @@ The relationship between version and build_number is that a version ([`CFBundleS
 | `embed_libs`             | string[] | *(none)*            | Dynamic C FFI libraries to embed in `Contents/Frameworks` and sign. Paths relative to config file                                                                                                                |
 | `resources_dir`          | string   | *(none)*            | Directory whose contents are copied in full into `Contents/Resources/`                                                                                                                                           |
 | `resources`              | string[] | *(none)*            | Individual files or folders to copy into `Contents/Resources/` by filename                                                                                                                                       |
-| `provisioning_profile`   | string   | *(none)*            | Provisioning profile embedded as `Contents/embedded.provisionprofile`; required for some entitlements. `"auto"` lets strudel manage it on macOS, see [macOS provisioning profiles](#macos-provisioning-profiles) |
 
 #### `[build.icon]` (optional)
 
@@ -406,7 +406,7 @@ src  = "art.png"
 icns = true
 ```
 
-`[build.icon]` also applies to iOS targets (`icns` is ignored there). The icon is wrapped in a minimal `.appiconset`/`.xcassets` and compiled with `xcrun actool --include-all-app-icons`, which derives every required size/idiom from that one image. If `path` points to an Icon Composer `.icon` bundle instead of a raster image, it's handed to `actool` directly. If `ios.assets_dir` (below) is also set, it takes precedence over `[build.icon]` for that target.
+`[build.icon]` also applies to iOS targets (`icns` is ignored there). The icon is wrapped in a minimal `.appiconset`/`.xcassets` and compiled with `xcrun actool --include-all-app-icons`, which derives every required size/idiom from that one image. If `path` points to an Icon Composer `.icon` bundle instead of a raster image, it's handed to `actool` directly. If `assets_dir` (below) is also set on an iOS target, it takes precedence over `[build.icon]` for that target.
 
 ### `[build.build_env]` (optional)
 
@@ -439,25 +439,22 @@ Set `sign = true` for any Mach-O executable or nested bundle, since nested code 
 
 ### `[ios]` (optional, experimental)
 
-For iOS apps, this contains settings for `strudel run --sim` and `strudel run --device`. iOS support is experimental. All fields are optional except `provisioning`, which is required for device builds.
+For iOS apps, this contains settings for `strudel run --sim` and `strudel run --device`. iOS support is experimental. All fields are optional. The `app_store_connect` provisioning backend needs an App Store Connect API key under `[apple]`. For a free Apple ID, set `provisioning = "free"` and run `strudel login`.
 
-| Key                 | Type   | Default                        | Description                                                                                                                         |
-| ------------------- | ------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `provisioning`      | string | *(required for device builds)* | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles)                                    |
-| `apple_id`          | string | *(none)*                       | Apple ID email; pre-fills the login prompt for the `"free"` path                                                                    |
-| `simulator`         | string | `"iPhone 16"`                  | Simulator name for `strudel run --sim`; override with `--sim <name>`                                                                |
-| `device`            | string | *(auto)*                       | Device name or UDID for `strudel run --device`; auto-detected if unset                                                              |
-| `deployment_target` | string | `"18.0"`                       | iOS deployment target, e.g. `"17.0"`                                                                                                |
-| `assets_dir`        | string | *(none)*                       | `.xcassets` directory compiled into the bundle with `xcrun actool`. Takes precedence over `[build.icon]` if both are set            |
-| `device_family`     | array  | `["iphone"]`                   | `"iphone"` and/or `"ipad"`; add `"ipad"` for a universal app                                                                        |
-| `app_icon_name`     | string | `"AppIcon"`                    | Icon set name inside `assets_dir`                                                                                                   |
-| `capabilities`      | array  | `[]`                           | Capability names to enable on the bundle ID, in addition to those found in the entitlements file. See [Capabilities](#capabilities) |
+| Key                 | Type   | Default               | Description                                                                                      |
+| ------------------- | ------ | --------------------- | ------------------------------------------------------------------------------------------------ |
+| `provisioning`      | string | `"app_store_connect"` | `"app_store_connect"` (paid account, 1-year profiles) or `"free"` (any Apple ID, 7-day profiles) |
+| `simulator`         | string | `"iPhone 16"`         | Simulator name for `strudel run --sim`; override with `--sim <name>`                             |
+| `device`            | string | *(auto)*              | Device name or UDID for `strudel run --device`; auto-detected if unset                           |
+| `deployment_target` | string | `"18.0"`              | iOS deployment target, e.g. `"17.0"`                                                             |
+| `device_family`     | array  | `["iphone"]`          | `"iphone"` and/or `"ipad"`; add `"ipad"` for a universal app                                     |
+| `app_icon_name`     | string | `"AppIcon"`           | Icon set name inside the target's [`assets_dir`](#assets_dir-optional)                           |
 
 > [!NOTE]
 > The flat, single-target form (a top-level `[app]`, as shown above) is always macOS, so `[ios]` only applies inside an iOS `[[target]]` block, or as a top-level fallback for iOS targets. See [Multiple targets](#multiple-targets).
 
 > [!TIP]
-> strudel can auto-manage device registration and development provisioning profiles via the App Store Connect API. The usual flow is `strudel devices add` once, then `strudel run --device` to build, install, and launch. See [iOS device builds](#ios-device-builds) for the full workflow, or set `provisioning_profile` in `[build]` to manage the profile yourself.
+> strudel can auto-manage device registration and development provisioning profiles via the App Store Connect API. The usual flow is `strudel devices add` once, then `strudel run --device` to build, install, and launch. See [iOS device builds](#ios-device-builds) for the full workflow, or set `provisioning_profile` on the target to manage the profile yourself.
 
 ### `[[extensions]]` (optional)
 
@@ -478,7 +475,7 @@ An array of zero or more extensions embedded in the host app. Each entry produce
 | `name`                   | string | value of `target_name` | Display name (`CFBundleName` / `CFBundleDisplayName`) and bundle directory name                              |
 | `entitlements_json_path` | string | *(required)*           | JSON entitlements; each extension is signed with its own, separate from the host. Optional for `xpc_service` |
 | `info_json_path`         | string | *(none)*               | Extra `Info.plist` keys merged with strudel's auto-injected ones                                             |
-| `provisioning_profile`   | string | *(none)*               | Profile for this extension's bundle ID; a path or `"auto"` (macOS), like `[build]`                           |
+| `provisioning_profile`   | string | *(none)*               | Profile for this extension's bundle ID; a path or `"auto"` (macOS), like the target's                        |
 
 `[[extensions]]` are not built for iOS targets yet.
 
@@ -503,9 +500,12 @@ An array of zero or more extensions embedded in the host app. Each entry produce
 | `system_extension_type` | string | *(required)* | `"network_extension"` or `"endpoint_security"`                     |
 | `principal_class`       | string | *(none)*     | `NSExtensionPrincipalClass`; rarely needed                         |
 
-### `assets_dir` (optional, macOS)
+### `assets_dir` (optional)
 
-A top-level key (like `[dmg]`, not nested under `[build]`) pointing at a `.xcassets` directory to compile into `Contents/Resources/Assets.car` via `xcrun actool`. Useful for image sets, color sets, and other asset-catalog content used from Swift via `NSImage(named:)`/`Color(...)`. Unlike `ios.assets_dir`, this does not contain the app icon, which is provided by `[build.icon]`.
+A key of the app or `[[target]]` (like `[dmg]`, not nested under `[build]`) pointing at a `.xcassets` directory to compile with `xcrun actool`. In the single-target form, a flat key must appear before any `[table]` header.
+
+- **macOS:** compiles into `Contents/Resources/Assets.car`. Useful for image sets, color sets, and other asset-catalog content used from Swift via `NSImage(named:)`/`Color(...)`. It does not contain the app icon, which is provided by `[build.icon]`.
+- **iOS:** compiles into the bundle as the full catalog and takes precedence over `[build.icon]`. `ios.app_icon_name` selects the icon set inside it.
 
 ```toml
 assets_dir = "Sources/App/Assets.xcassets"
@@ -513,9 +513,17 @@ assets_dir = "Sources/App/Assets.xcassets"
 
 strudel reads `actool`'s `--minimum-deployment-target` from `Package.swift`'s `platforms: [.macOS(.vXX)]` entry (via `swift package dump-package`). If the manifest declares no macOS platform minimum, it falls back to `14.0`.
 
-### `capabilities` (optional, macOS)
+### `provisioning_profile` (optional)
 
-A top-level key (like `[dmg]`, not nested under `[build]`) listing capability names to enable on the bundle ID. A flat key must appear before any `[table]` header, or TOML reads it as part of that table. See [Capabilities](#capabilities).
+A key of the app or `[[target]]` (like `[dmg]`, not nested under `[build]`) naming a provisioning profile to embed. It is a path, or `"auto"` to have strudel manage the profile. Some entitlements need one. In the single-target form, a flat key must appear before any `[table]` header. See [macOS provisioning profiles](#macos-provisioning-profiles) and [iOS device builds](#ios-device-builds).
+
+```toml
+provisioning_profile = "auto"
+```
+
+### `capabilities` (optional)
+
+A key of the app or `[[target]]` (like `[dmg]`, not nested under `[build]`) listing capability names to enable on the bundle ID. In the single-target form, a flat key must appear before any `[table]` header, or TOML reads it as part of that table. See [Capabilities](#capabilities).
 
 ```toml
 capabilities = ["Push Notifications", "App Groups"]
@@ -525,18 +533,18 @@ capabilities = ["Push Notifications", "App Groups"]
 
 Controls the Finder window layout of the DMG produced by `strudel release`. By default (no `[dmg]` section), strudel generates a styled drag-to-install window with the app icon on the left and an Applications symlink on the right. Add the section to override individual fields or opt out entirely with `plain = true`.
 
-| Key              | Type    | Default   | Description                                                                                                             |
-| ---------------- | ------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `plain`          | bool    | `false`   | Skip the styled window; produce a plain compressed DMG instead                                                          |
+| Key              | Type    | Default   | Description                                                                                                                               |
+| ---------------- | ------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `plain`          | bool    | `false`   | Skip the styled window; produce a plain compressed DMG instead                                                                            |
 | `background`     | string  | *(unset)* | `#rrggbb` hex color, or a path to a PNG/JPEG background image (relative to config file); when absent, Finder's default background is used |
-| `window_width`   | integer | `660`     | Finder window width in pixels                                                                                           |
-| `window_height`  | integer | `400`     | Finder window height in pixels                                                                                          |
-| `icon_size`      | integer | `128`     | Icon size in pixels                                                                                                     |
-| `app_x`          | integer | `192`     | Horizontal position of the `.app` icon                                                                                  |
-| `app_y`          | integer | `192`     | Vertical position of the `.app` icon                                                                                    |
-| `applications_x` | integer | `468`     | Horizontal position of the Applications symlink                                                                         |
-| `applications_y` | integer | `192`     | Vertical position of the Applications symlink                                                                           |
-| `icon_text_size` | float   | `12.0`    | Icon label point size                                                                                                   |
+| `window_width`   | integer | `660`     | Finder window width in pixels                                                                                                             |
+| `window_height`  | integer | `400`     | Finder window height in pixels                                                                                                            |
+| `icon_size`      | integer | `128`     | Icon size in pixels                                                                                                                       |
+| `app_x`          | integer | `192`     | Horizontal position of the `.app` icon                                                                                                    |
+| `app_y`          | integer | `192`     | Vertical position of the `.app` icon                                                                                                      |
+| `applications_x` | integer | `468`     | Horizontal position of the Applications symlink                                                                                           |
+| `applications_y` | integer | `192`     | Vertical position of the Applications symlink                                                                                             |
+| `icon_text_size` | float   | `12.0`    | Icon label point size                                                                                                                     |
 
 Example (custom background and larger icons):
 
@@ -620,6 +628,7 @@ A single `strudel.toml` can declare multiple build targets using `[[target]]` bl
 - `platform` is required on every `[[target]]`, either `macos` or `ios`.
 - `[apple]` is always shared (top-level only).
 - A top-level `[ios]` supplies defaults for iOS targets; a per-target `ios.*` field wins over the matching top-level field, field by field (not whole-section replacement).
+- A top-level `containers` list of iCloud container identifiers is inherited by every target. `containers` in a `[[target]]` replaces it, and `containers = []` opts out. See [iCloud containers](#icloud-containers).
 
 ```toml
 # Shared across all targets (top-level only):
@@ -674,7 +683,7 @@ scale      = 1.2           # optional: enlarge/shrink the artwork within the ico
 background = "#fefefe"   # optional: icon fill color, hex; default white
 ```
 
-On iOS, the same `[build.icon]` produces a flat opaque square instead (iOS applies its own corner mask at render time, so a squircle would double up), and `icns` is ignored there. `ios.assets_dir`, if set, takes precedence over `[build.icon]` for that target, letting you supply a hand-authored `.xcassets` catalog instead.
+On iOS, the same `[build.icon]` produces a flat opaque square instead (iOS applies its own corner mask at render time, so a squircle would double up), and `icns` is ignored there. `assets_dir`, if set on an iOS target, takes precedence over `[build.icon]`, letting you supply a hand-authored `.xcassets` catalog instead.
 
 Also on iOS, `path`/`src` are wrapped in a minimal `.appiconset`/`.xcassets` and compiled with `xcrun actool --include-all-app-icons`, which derives every required size/idiom from the one image; if `path` points at an Icon Composer `.icon` bundle, it's handed to `actool` directly.
 
@@ -716,7 +725,7 @@ strudel profile fetch --force          # recreate the profile even if current
 strudel profile fetch --out profiles   # also copy the profile into ./profiles
 ```
 
-To opt out of auto-management and supply your own profile, set `provisioning_profile` under `[build]`; strudel then uses that file as-is and checks it locally. See [Capabilities](#capabilities) for the checks and `strudel help ios-device` for the full workflow.
+To opt out of auto-management and supply your own profile, set `provisioning_profile` on the target; strudel then uses that file as-is and checks it locally. See [Capabilities](#capabilities) for the checks and `strudel help ios-device` for the full workflow.
 
 ### iOS extensions
 
@@ -765,16 +774,17 @@ Some entitlements need the matching capability enabled on the bundle ID in the A
 
 strudel enables a capability if its entitlement key is in the entitlements file: `build.entitlements_json_path`, or the file of an `[[extensions]]` entry, which is checked against its own bundle ID. To enable one that has no entitlement key, list its name. Names are case-insensitive, and an unknown name fails when the config loads.
 
-On macOS, use a top-level key. It must appear before any `[table]` header:
+In the single-target form, use a top-level key. It must appear before any `[table]` header:
 
 ```toml
 capabilities = ["Push Notifications", "App Groups"]
 ```
 
-On iOS, use the `[ios]` table:
+With multiple targets, set `capabilities` in each `[[target]]`, on macOS and iOS alike. There is no top-level default:
 
 ```toml
-[ios]
+[[target]]
+platform     = "ios"
 capabilities = ["Push Notifications", "HealthKit"]
 ```
 
@@ -786,6 +796,34 @@ capabilities = ["Push Notifications", "HealthKit"]
 - **macOS**: strudel plans capabilities and profiles together. It lists every change for each bundle ID and asks once before it calls App Store Connect. A build whose managed profiles are all current and grant the required entitlements makes no calls. `strudel profile fetch` runs the same step as `strudel build`.
 
 On macOS, a signed build also manages the profile of a bundle ID if one of its capabilities may need an embedded profile. This works like `provisioning_profile = "auto"` for that bundle ID only. Network Extensions is verified to need a profile, so it opts in immediately. Capabilities that are not verified opt in only from an interactive terminal, since strudel creates the profile after a prompt. An explicit `provisioning_profile` is never replaced.
+
+#### iCloud containers
+
+List container identifiers in `containers`, then link them to the bundle ID with `strudel icloud-containers link`. Identifiers must start with `iCloud.`.
+
+```toml
+containers = ["iCloud.com.example.app"]
+```
+
+The top-level `containers` key applies to every target. `containers` in a `[[target]]` replaces it, and `containers = []` opts out.
+
+Builds never create or link containers. Manage containers with:
+
+```sh
+strudel icloud-containers create [--team <id>] iCloud.com.example.app
+strudel icloud-containers list [--team <id>]
+strudel icloud-containers link [--team <id>] [--target <id>]
+```
+
+**iCloud containers cannot be deleted.** A created identifier stays reserved on the team permanently and is unique across all developer accounts. It can be hidden and unlinked from App IDs, but never removed. `create` does not read `containers` from `strudel.toml`, lists the missing identifiers, and asks for confirmation. It requires a terminal. The usual identifier is `iCloud.` followed by the bundle ID, such as `iCloud.com.example.app` for bundle ID `com.example.app`.
+
+`link` links the `containers` of each selected target to its App ID. If a configured container does not exist, it stops and prints the `create` command. If the iCloud capability is off for the App ID, it offers to enable it. If `capabilities` does not list iCloud, it offers to add it to `strudel.toml`. Both offers need a terminal.
+
+Without `--team`, the commands use `team_id` from the `[apple]` section of `strudel.toml`, and fail if it is unset. The team id picks the signed-in Apple ID that owns the team. Run `strudel login` once per Apple ID.
+
+- Containers need an Apple ID session from `strudel login`. An App Store Connect API key cannot manage them. Paid teams use the session only for these commands, and builds never read it.
+- Containers need a paid Apple Developer Program team. Free and personal teams cannot use them.
+- Apple does not document these endpoints. Listing is verified. The create and associate requests are not, and association is not verified for macOS App IDs.
 
 #### Pinned profiles
 
@@ -831,10 +869,9 @@ When a bundle embeds a provisioning profile, strudel copies `com.apple.applicati
 
 #### macOS provisioning profiles
 
-Most Developer ID apps need no provisioning profile. A few capabilities, such as App Groups and Network Extensions, are checked against an embedded profile even outside the Mac App Store. For these, set `provisioning_profile = "auto"` under `[build]` or on an `[[extensions]]` entry:
+Most Developer ID apps need no provisioning profile. A few capabilities, such as App Groups and Network Extensions, are checked against an embedded profile even outside the Mac App Store. For these, set `provisioning_profile = "auto"` on the app (or `[[target]]`) or on an `[[extensions]]` entry:
 
 ```toml
-[build]
 provisioning_profile = "auto"
 ```
 
@@ -849,7 +886,6 @@ strudel profile fetch --out profiles
 ```
 
 ```toml
-[build]
 provisioning_profile = "profiles/com.example.app.provisionprofile"
 ```
 
@@ -1153,10 +1189,11 @@ The Swift target setup is the same as for [App Extensions](#app-extensions): a s
 #### Config
 
 ```toml
+provisioning_profile = "auto"
+
 [build]
 entitlements_json_path = "entitlements.json"   # needs com.apple.developer.system-extension.install
 info_json_path         = "info.json"           # needs NSSystemExtensionUsageDescription
-provisioning_profile   = "auto"
 
 [[extensions]]
 kind                   = "system_extension"
