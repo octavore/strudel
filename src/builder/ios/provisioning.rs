@@ -26,7 +26,7 @@ pub(super) struct ProfileTarget {
     /// Profile pinned by an explicit `provisioning_profile` path.
     pub pinned: Option<PathBuf>,
     pub entitlements_json_path: Option<PathBuf>,
-    /// `[ios] capabilities` names. Only the host has these.
+    /// `capabilities` names of the target. Only the host has these.
     pub capability_names: Vec<String>,
 }
 
@@ -317,7 +317,7 @@ impl IosBuilder {
     }
 
     /// Capabilities to enable on the bundle ID of `target`, from entitlement
-    /// keys found in its entitlements JSON and `[ios] capabilities` names.
+    /// keys found in its entitlements JSON and `capabilities` names.
     /// Prints a warning for entitlement keys that match no capability.
     fn required_capabilities(&self, target: &ProfileTarget) -> Result<RequiredCapabilities> {
         let required = capabilities::required(

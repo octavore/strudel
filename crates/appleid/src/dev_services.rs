@@ -75,8 +75,8 @@ struct ListCloudContainersBody {
     sort: &'static str,
 }
 
-/// Request body of `cloudContainer/addCloudContainer`. Unverified. See
-/// [`DevServicesClient::create_cloud_container`].
+/// Request body of `cloudContainer/addCloudContainer`. Verified by use on a
+/// paid team. See [`DevServicesClient::create_cloud_container`].
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AddCloudContainerBody {
@@ -94,8 +94,8 @@ struct ListAppContainersBody {
     app_id_id: String,
 }
 
-/// Request body of `ios/identifiers/addContainersForAppId`. Unverified. See
-/// [`DevServicesClient::associate_cloud_containers`].
+/// Request body of `ios/identifiers/addContainersForAppId`. Verified by use on
+/// a paid team. See [`DevServicesClient::associate_cloud_containers`].
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AssociateContainersBody {
@@ -111,8 +111,8 @@ struct ListCloudContainersResponse {
     cloud_container_list: Vec<CloudContainerEntry>,
 }
 
-/// Container entry fields come from other clients. A read-only probe only saw
-/// an empty list, so the shape is unverified.
+/// Container entry. Verified by use on a paid team. A missing field reads as an
+/// empty string.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CloudContainerEntry {
@@ -491,12 +491,9 @@ impl<'a> DevServicesClient<'a> {
     /// Create an iCloud container on the team. The container cannot be
     /// deleted afterwards.
     ///
-    /// Known limitation: the action and request shape are unverified. No
-    /// write probe was run. The action name comes from Xcode's URI strings and
-    /// the body fields (`teamId`, `name`, `identifier`) from other clients
-    /// that use the portal host. The response is assumed to
-    /// hold a `cloudContainer` dict. A wrong shape is reported by
-    /// [`check_result_code`] or as a parse error.
+    /// Verified by use on a paid team. The response holds a `cloudContainer`
+    /// dict. A wrong shape is reported by [`check_result_code`] or as a parse
+    /// error.
     pub fn create_cloud_container(
         &self,
         team_id: &str,
@@ -522,13 +519,10 @@ impl<'a> DevServicesClient<'a> {
     /// Returns true if the associate action was sent. It is skipped if every
     /// container is already associated.
     ///
-    /// Known limitation: the action and request shape are unverified. No write
-    /// probe was run. The path `ios/identifiers/addContainersForAppId` comes
-    /// from Xcode's URI strings and the body fields from other clients. It is
-    /// unknown whether Apple replaces or appends, so the union of current and
-    /// requested ids is sent. It is also unknown whether the iCloud
-    /// capability must be enabled first, and whether macOS App IDs accept
-    /// this action.
+    /// Verified by use on a paid team. Known limitations: it is not recorded
+    /// whether Apple replaces or appends, so the union of current and
+    /// requested ids is sent. It is also not recorded whether macOS App IDs
+    /// accept this action.
     pub fn associate_cloud_containers(
         &self,
         team_id: &str,

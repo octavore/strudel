@@ -8,8 +8,7 @@
 //! Container commands use the Apple ID session of the account that owns the
 //! team, because an App Store Connect API key cannot manage containers.
 //!
-//! Known limitation: Apple's create and associate actions are undocumented and
-//! their request shapes are unverified. See
+//! Known limitation: Apple's create and associate actions are undocumented. See
 //! `appleid::AppleId::create_cloud_container`.
 
 use std::io::IsTerminal;

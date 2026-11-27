@@ -156,8 +156,7 @@ pub struct CapabilityDef {
     /// Experimental. Apple does not document this scheme.
     pub free_feature: Known<FreeFeature>,
     /// Apple documentation URL or test that verified the entry. Required if
-    /// any field is `Verified`. Not read by build logic.
-    #[allow(dead_code)]
+    /// any field is `Verified`. Shown by `strudel help entitlements`.
     pub source: Option<&'static str>,
 }
 
@@ -576,7 +575,7 @@ pub fn by_entitlement_key(key: &str) -> Option<&'static CapabilityDef> {
 }
 
 /// Look up a capability by its display name (case-insensitive), as it would
-/// be written in `[ios] capabilities` in strudel.toml.
+/// be written in `capabilities` in strudel.toml.
 pub fn by_name(name: &str) -> Option<&'static CapabilityDef> {
     CAPABILITIES
         .iter()

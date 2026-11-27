@@ -579,6 +579,15 @@ fn capabilities_table() -> String {
         .join("\n")
 }
 
+/// Source of each capability that has one, for `strudel help entitlements`.
+fn capability_sources() -> String {
+    CAPABILITIES
+        .iter()
+        .filter_map(|c| c.source.map(|source| format!("  {}  {source}", c.name)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn print_entitlements() {
     print_help(&cformatdoc! {
         r#"
@@ -773,6 +782,9 @@ fn print_entitlements() {
         strudel has not verified which capabilities App Store Connect accepts for a macOS
         bundle ID. It tries each one and prints a warning if one is rejected.
 
+        Sources of verified entries:
+        {}
+
         Only capabilities listed above have a known App Store Connect API `CapabilityType`.
         Anything else, such as DriverKit or Matter, must be enabled by hand at
         <green>https://developer.apple.com/account/resources/identifiers/list</>.
@@ -819,7 +831,8 @@ fn print_entitlements() {
 
         See: <blue>strudel help extensions</>
     "#,
-        capabilities_table()
+        capabilities_table(),
+        capability_sources()
     });
 }
 
