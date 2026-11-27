@@ -242,6 +242,7 @@ strudel run --sim                     # iOS: launch in the Simulator (default)
 strudel run --sim "iPhone 16 Pro"     # iOS: override the simulator name
 strudel run --device                  # iOS: launch on a connected device
 strudel run --device "iPhone 15"      # iOS: target a specific tracked device
+strudel run --device --console        # iOS: stream the app console until it exits (single device)
 strudel run --debug                   # build with the debug configuration instead of release
 strudel run --build-number 42         # override app.build_number for this build
 strudel run --dry-run                 # print commands without executing them

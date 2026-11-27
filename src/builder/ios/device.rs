@@ -18,14 +18,21 @@ impl IosBuilder {
     ///
     /// Requires devices to be registered via `strudel devices add`. Auto-
     /// fetches and caches a development provisioning profile via the App Store
-    /// Connect API when one is not already current.
-    pub fn device(&self, device_selectors: &[String]) -> Result<()> {
+    /// Connect API when one is not already current. With `console`, attach to
+    /// the app console after launch and stream it until the app exits.
+    pub fn device(&self, device_selectors: &[String], console: bool) -> Result<()> {
         let ios_settings = &self.ios;
 
         let app_bundle = self.compile_and_assemble(IosTarget::Device)?;
 
         // Resolve target devices (returns UDIDs).
         let target_udids = self.resolve_target_udids(device_selectors)?;
+        if console && target_udids.len() > 1 {
+            bail!(
+                "--console supports a single device; {} devices selected",
+                target_udids.len()
+            );
+        }
 
         // Resolve the provisioning profile of the host (first) and of each
         // extension. Each extension is sandboxed on its own bundle ID, so the
@@ -91,13 +98,9 @@ impl IosBuilder {
             })?;
 
             self.step("Launching app...");
-            // Attach to the console and stream logs live when running on a
-            // single device. With multiple target devices we'd need to
-            // stream several consoles concurrently to one terminal, so fall
-            // back to a plain, non-blocking launch there instead.
-            if target_udids.len() == 1 {
-                // Printed under --no-echo too: the console stream below still
-                // runs until Ctrl+C.
+            if console {
+                // Printed under --no-echo too. The console stream below runs
+                // until the app exits or Ctrl+C.
                 if !self.quiet() {
                     cprintln!("<dim>Streaming logs. Press Ctrl+C to stop.</dim>");
                 }

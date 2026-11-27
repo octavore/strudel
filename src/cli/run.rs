@@ -29,6 +29,12 @@ pub(crate) struct RunCmd {
     #[arg(long = "device", num_args = 0..=1, default_missing_value = "")]
     device: Vec<String>,
 
+    /// iOS device only: attach to the app console after launch and stream
+    /// its stdout and stderr until the app exits or you press Ctrl+C.
+    /// Requires a single device.
+    #[arg(long, requires = "device")]
+    console: bool,
+
     /// Print commands without executing them
     #[arg(long)]
     dry_run: bool,
@@ -102,7 +108,7 @@ impl RunCmd {
                         .filter(|s| !s.is_empty())
                         .cloned()
                         .collect();
-                    builder.device(&selectors)
+                    builder.device(&selectors, self.console)
                 } else {
                     let sim_name = self.sim.as_deref().filter(|s| !s.is_empty());
                     builder.sim(sim_name)
