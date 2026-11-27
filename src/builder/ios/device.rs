@@ -134,6 +134,13 @@ impl IosBuilder {
             })?;
         }
 
+        if self.dry_run {
+            self.note(cformat!(
+                "\n<dim>[dry-run]</dim> Would install and launch the app on {} device(s).",
+                target_udids.len()
+            ));
+            return Ok(());
+        }
         self.note(cformat!(
             "\n<green>Done!</green> App installed and launched on {} device(s).",
             target_udids.len()
