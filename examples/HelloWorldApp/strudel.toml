@@ -46,7 +46,7 @@ build_number = "1"
 # Apple developer identifiers, used for signing, notarization, and
 # provisioning-profile management. Can also be set via env vars
 # (APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID, APPLE_API_ISSUER, APPLE_API_KEY,
-# APPLE_API_KEY_PATH).
+# APPLE_API_KEY_PATH, APPLE_ID).
 # [apple]
 # identity         = "Developer ID Application: Your Name (XXXXXXXXXX)"
 # team_id          = "XXXXXXXXXX"

@@ -28,6 +28,7 @@ pub const FULL: &str = indoc::indoc! {r#"
   api_issuer = "issuer-uuid"
   api_key = "KEYID123"
   api_key_path = "AuthKey.p8"
+  apple_id = "project@example.com"
   notarize_timeout = 1200
 
   [dmg]
@@ -91,6 +92,7 @@ fn resolved(target_platform: ResolvedTargetPlatform) -> ResolvedConfig {
         apple_api_issuer: Sourced::default(),
         apple_api_key: Sourced::default(),
         apple_api_key_path: None,
+        apple_id: Sourced::default(),
         apple_certificate: String::new().into(),
         apple_certificate_password: String::new().into(),
     }
@@ -163,6 +165,7 @@ pub fn global_config() -> GlobalConfig {
         notarize_api_issuer: Some("global-issuer".into()),
         notarize_api_key: Some("global-key".into()),
         notarize_api_key_path: Some(PathBuf::from("/global/AuthKey.p8")),
+        apple_id: Some("global@example.com".into()),
     }
 }
 
@@ -171,10 +174,11 @@ pub fn global_config() -> GlobalConfig {
 /// `APPLE_*` exports would decide the result.
 ///
 /// [`env_or_global`]: crate::config::utils::env_or_global
-pub const APPLE_ENV_UNSET: [(&str, Option<&str>); 5] = [
+pub const APPLE_ENV_UNSET: [(&str, Option<&str>); 6] = [
     ("APPLE_SIGNING_IDENTITY", None),
     ("APPLE_TEAM_ID", None),
     ("APPLE_API_ISSUER", None),
     ("APPLE_API_KEY", None),
     ("APPLE_API_KEY_PATH", None),
+    ("APPLE_ID", None),
 ];

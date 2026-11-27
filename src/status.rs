@@ -748,7 +748,7 @@ fn ios_provisioning_block(cfg: &ResolvedConfig, ios: &ResolvedIosSection, accoun
         IosProvisioningBackend::AppStoreConnect => "app_store_connect",
     };
     field2("provisioning", backend.to_string());
-    field2("apple id", opt(&ios.apple_id));
+    field2("apple id", if_empty(&cfg.apple_id, "(unset)"));
 
     // Free profiles are tied to whichever Apple ID requested them; only that
     // check makes sense for the free backend, and only when signed in.

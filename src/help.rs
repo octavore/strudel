@@ -336,6 +336,7 @@ fn print_config() {
         api_issuer       = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         api_key          = "2X9R4HXF34"
         api_key_path     = "AuthKey_2X9R4HXF34.p8"
+        apple_id         = "you@example.com"   # pre-fills `strudel login`
         notarize_timeout = 600   # seconds to wait for notarytool; default: 600
         </>
         Precedence: env var > strudel.toml > ~/.config/strudel/config.toml.
@@ -1208,6 +1209,7 @@ fn print_global_config() {
         api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         api_key      = "2X9R4HXF34"
         api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
+        apple_id     = "you@example.com"
         </>
         Only <magenta>[apple]</> is supported here. <magenta>[app]</>, <magenta>[build]</>, <magenta>[ios]</>, <magenta>[dmg]</>, and
         <magenta>[[extensions]]</> are project-specific and belong only in strudel.toml.
@@ -1330,7 +1332,9 @@ fn print_ios_free_provisioning() {
         <magenta>
            [ios]
            provisioning = "free"
-           apple_id     = "you@example.com"   # optional; pre-fills login prompt
+
+           [apple]
+           apple_id = "you@example.com"   # optional; pre-fills login prompt
         </>
         2. Sign in with your Apple ID:
         <blue>

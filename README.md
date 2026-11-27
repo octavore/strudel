@@ -570,6 +570,7 @@ Each identifier is resolved in priority order: **env var > `strudel.toml` > [glo
 | `api_issuer`       | string  | `APPLE_API_ISSUER`       | App Store Connect issuer UUID (team accounts only)                     |
 | `api_key`          | string  | `APPLE_API_KEY`          | App Store Connect key ID                                               |
 | `api_key_path`     | string  | `APPLE_API_KEY_PATH`     | Path to the `AuthKey_XXXXXXYYYY.p8` file                               |
+| `apple_id`         | string  | `APPLE_ID`               | Apple ID email; pre-fills the `strudel login` prompt                   |
 | `notarize_timeout` | integer | -                        | Seconds to wait for notarization (`notarytool --timeout`); default 600 |
 
 > [!WARNING]
@@ -605,6 +606,7 @@ team_id      = "XXXXXXXXXX"
 api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 api_key      = "2X9R4HXF34"
 api_key_path = "/Users/you/.private_keys/AuthKey_2X9R4HXF34.p8"
+apple_id     = "you@example.com"
 ```
 
 Store your credentials here once and each project's `strudel.toml` stays free of machine-specific paths, making it safe to commit. A project `strudel.toml` can still override any global value by setting the same key; the env var overrides both.

@@ -14,6 +14,7 @@ pub struct GlobalConfig {
     pub notarize_api_issuer: Option<String>,
     pub notarize_api_key: Option<String>,
     pub notarize_api_key_path: Option<PathBuf>,
+    pub apple_id: Option<String>,
 }
 
 fn base_dirs() -> xdg::BaseDirectories {
@@ -53,6 +54,7 @@ impl GlobalConfig {
             notarize_api_issuer: file.apple.api_issuer,
             notarize_api_key: file.apple.api_key,
             notarize_api_key_path: file.apple.api_key_path.map(|p| resolve_to(dir, p)),
+            apple_id: file.apple.apple_id,
         })
     }
 }
@@ -69,6 +71,7 @@ pub const GLOBAL_CONFIG_TEMPLATE: &str = indoc::indoc! {r#"
     # api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     # api_key      = "YYYYYYYY"
     # api_key_path = "/Users/you/.private_keys/AuthKey_YYYYYYYY.p8"
+    # apple_id     = "you@example.com"
 "#};
 
 /// The on-disk `~/.config/strudel/config.toml`. Private; callers use
@@ -88,6 +91,7 @@ struct GlobalAppleSection {
     api_issuer: Option<String>,
     api_key: Option<String>,
     api_key_path: Option<PathBuf>,
+    apple_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -115,6 +119,7 @@ mod tests {
         assert!(g.notarize_api_issuer.is_none());
         assert!(g.notarize_api_key.is_none());
         assert!(g.notarize_api_key_path.is_none());
+        assert!(g.apple_id.is_none());
     }
 
     #[test]
@@ -126,8 +131,10 @@ mod tests {
             api_issuer   = "iss-uuid"
             api_key      = "KEY123"
             api_key_path = "/abs/AuthKey.p8"
+            apple_id     = "me@example.com"
         "#});
         let g = GlobalConfig::load_from(&path).unwrap();
+        assert_eq!(g.apple_id.as_deref(), Some("me@example.com"));
         assert_eq!(
             g.signing_identity.as_deref(),
             Some("Developer ID Application: Me (ABC123)")

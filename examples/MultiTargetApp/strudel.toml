@@ -16,6 +16,7 @@
 # api_issuer   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 # api_key      = "2X9R4HXF34"
 # api_key_path = "AuthKey_2X9R4HXF34.p8"
+# apple_id     = "you@example.com"   # pre-fills `strudel login`
 
 # Default iOS settings inherited by iOS targets.
 [ios]

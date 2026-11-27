@@ -439,6 +439,7 @@ fn resolve_target(
             .or_else(|| apple.api_key_path.clone())
             .map(|p| resolve_to(config_dir, p))
             .or_else(|| global.notarize_api_key_path.clone()),
+        apple_id: env_or_global(apple.apple_id.clone(), global.apple_id.clone(), "APPLE_ID"),
         apple_certificate,
         apple_certificate_password,
         notarize_timeout: apple.notarize_timeout.unwrap_or(600),
@@ -493,9 +494,9 @@ fn resolve_target(
 /// notarization, and provisioning-profile management (the App Store Connect
 /// API key authenticates all three). Each may also come from the matching
 /// env var (`APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`, `APPLE_API_ISSUER`,
-/// `APPLE_API_KEY`, `APPLE_API_KEY_PATH`); the env var takes precedence when
-/// both are set. Secrets (`APPLE_CERTIFICATE*`) are read from the
-/// environment only.
+/// `APPLE_API_KEY`, `APPLE_API_KEY_PATH`, `APPLE_ID`); the env var takes
+/// precedence when both are set. Secrets (`APPLE_CERTIFICATE*`) are read from
+/// the environment only.
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct AppleSection {
@@ -504,6 +505,7 @@ pub struct AppleSection {
     pub api_issuer: Option<String>,
     pub api_key: Option<String>,
     pub api_key_path: Option<PathBuf>,
+    pub apple_id: Option<String>,
     pub notarize_timeout: Option<u64>,
 }
 
@@ -1579,6 +1581,7 @@ mod tests {
                 ("APPLE_API_ISSUER", Some("env-issuer")),
                 ("APPLE_API_KEY", Some("env-key")),
                 ("APPLE_API_KEY_PATH", Some("/env/AuthKey.p8")),
+                ("APPLE_ID", Some("env@example.com")),
             ],
             || {
                 let cfg = parse_build_config(FULL).unwrap();
@@ -1591,6 +1594,7 @@ mod tests {
                 assert_eq!(r.apple_api_issuer.value, "env-issuer");
                 assert_eq!(r.apple_api_key.value, "env-key");
                 assert_eq!(r.apple_api_key_path, Some(PathBuf::from("/env/AuthKey.p8")));
+                assert_eq!(r.apple_id.value, "env@example.com");
             },
         );
     }
@@ -1633,6 +1637,7 @@ mod tests {
             assert_eq!(r.team_id.value, "TEAM123456");
             assert_eq!(r.apple_api_issuer.value, "issuer-uuid");
             assert_eq!(r.apple_api_key.value, "KEYID123");
+            assert_eq!(r.apple_id.value, "project@example.com");
             // A project-relative key path anchors on the config dir, and must not
             // be shadowed by the global config's absolute path.
             assert_eq!(r.apple_api_key_path, Some(PathBuf::from("/cfg/AuthKey.p8")));
@@ -1651,6 +1656,7 @@ mod tests {
             assert_eq!(r.team_id.value, "global-team");
             assert_eq!(r.apple_api_issuer.value, "global-issuer");
             assert_eq!(r.apple_api_key.value, "global-key");
+            assert_eq!(r.apple_id.value, "global@example.com");
             // The global path was made absolute at load time, so it is used
             // as-is rather than joined onto the project's config dir.
             assert_eq!(
@@ -1673,6 +1679,7 @@ mod tests {
             assert_eq!(r.apple_api_issuer.value, "");
             assert_eq!(r.apple_api_key.value, "");
             assert_eq!(r.apple_api_key_path, None);
+            assert_eq!(r.apple_id.value, "");
         });
     }
 

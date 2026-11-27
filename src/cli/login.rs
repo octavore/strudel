@@ -4,8 +4,7 @@ use anyhow::Result;
 use clap::Subcommand;
 
 use crate::apple::provisioning;
-use crate::config::{self, ResolvedTargetPlatform};
-use crate::status;
+use crate::{config, status};
 
 #[derive(clap::Args)]
 pub(crate) struct LoginCmd {
@@ -31,15 +30,15 @@ impl LoginCmd {
     pub(crate) fn execute(self, config: &Path) -> Result<()> {
         match self.command {
             None => {
-                // If no --apple-id flag, try reading it from [ios] apple_id in
-                // strudel.toml (best-effort; not required for login to work).
+                // If no --apple-id flag, try reading `[apple] apple_id` from
+                // the project or global config (best-effort; not required for
+                // login to work).
                 let apple_id_email = match self.apple_id.as_deref() {
                     Some(id) => Some(id.to_string()),
                     None => config::load_config(config).ok().and_then(|p| {
-                        p.targets.into_iter().find_map(|t| match t.target_platform {
-                            ResolvedTargetPlatform::Ios(ref ios) => ios.apple_id.clone(),
-                            _ => None,
-                        })
+                        p.targets
+                            .into_iter()
+                            .find_map(|t| (!t.apple_id.is_empty()).then(|| t.apple_id.to_string()))
                     }),
                 };
                 provisioning::login(apple_id_email)

@@ -286,6 +286,8 @@ pub struct ResolvedConfig {
     pub apple_api_issuer: Sourced,
     pub apple_api_key: Sourced,
     pub apple_api_key_path: Option<PathBuf>,
+    /// Apple ID email that pre-fills the `strudel login` prompt.
+    pub apple_id: Sourced,
 
     // Secrets (read from the environment only, never from strudel.toml).
     pub apple_certificate: SecretString,
