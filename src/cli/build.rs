@@ -65,10 +65,15 @@ impl BuildCmd {
             let ids: Vec<&str> = project
                 .targets
                 .iter()
+                .filter(|t| {
+                    !self.install || matches!(t.target_platform, ResolvedTargetPlatform::Mac(_))
+                })
                 .map(|t| t.target_id.as_str())
                 .collect();
+            let qualifier = if self.install { " macOS" } else { "" };
             anyhow::bail!(
-                "Multiple targets; select one with `strudel build <target>`. Available: {}",
+                "Multiple targets; select one with `strudel build <target>`. Available{} targets: {}",
+                qualifier,
                 ids.join(", ")
             );
         }
@@ -96,7 +101,10 @@ impl BuildCmd {
             },
             ResolvedTargetPlatform::Ios(_) => {
                 if self.install {
-                    anyhow::bail!("--install is only supported for macOS targets");
+                    anyhow::bail!(
+                        "--install is only supported for macOS targets; {} is an iOS target",
+                        cfg.target_id
+                    );
                 }
                 IosBuilder::new(cfg.clone(), self.output_flags(), self.debug)?.build()
             },
