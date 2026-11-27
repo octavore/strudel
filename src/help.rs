@@ -679,12 +679,9 @@ fn print_entitlements() {
         managed profiles are all current and grant the required entitlements makes no
         calls. <blue>strudel profile fetch</> runs the same step as <blue>strudel build</>.
 
-        On macOS, a signed build also manages the profile of a bundle ID if one of its
-        capabilities may need an embedded profile. This works like
-        `provisioning_profile = "auto"` for that bundle ID only. Network Extensions is
-        verified to need a profile, so it opts in immediately. A capability marked `?`
-        below opts in only from an interactive terminal, since strudel creates the profile
-        after a prompt. An explicit `provisioning_profile` is never replaced.
+        On macOS, a profile is embedded only if `provisioning_profile` is set. A bundle ID
+        with a capability that may need a profile and no `provisioning_profile` gets a
+        warning. Set it to a profile path, or to "auto" to let strudel manage the profile.
 
         Each `[[extensions]]` entry is checked against its own bundle ID and entitlements
         file. A capability such as Network Extensions is often listed only in the

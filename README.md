@@ -795,7 +795,7 @@ capabilities = ["Push Notifications", "HealthKit"]
 - **iOS** (`app_store_connect` backend): capabilities are enabled during profile fetch, after the bundle ID is found or created. strudel prints each change and does not ask first.
 - **macOS**: strudel plans capabilities and profiles together. It lists every change for each bundle ID and asks once before it calls App Store Connect. A build whose managed profiles are all current and grant the required entitlements makes no calls. `strudel profile fetch` runs the same step as `strudel build`.
 
-On macOS, a signed build also manages the profile of a bundle ID if one of its capabilities may need an embedded profile. This works like `provisioning_profile = "auto"` for that bundle ID only. Network Extensions is verified to need a profile, so it opts in immediately. Capabilities that are not verified opt in only from an interactive terminal, since strudel creates the profile after a prompt. An explicit `provisioning_profile` is never replaced.
+On macOS, a profile is embedded only if `provisioning_profile` is set. A bundle ID with a capability that may need a profile and no `provisioning_profile` gets a warning. Set it to a profile path, or to `"auto"` to let strudel manage the profile.
 
 #### iCloud containers
 

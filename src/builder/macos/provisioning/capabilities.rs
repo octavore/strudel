@@ -1,20 +1,18 @@
-//! Capability discovery and profile opt-in for macOS builds. Nothing here
-//! calls App Store Connect.
+//! Capability discovery for macOS builds. Nothing here calls App Store
+//! Connect.
 //!
 //! Required capabilities come from the entitlements files and the
-//! `capabilities` config key. A signed build with a capability that may need a
-//! provisioning profile also opts its bundle ID into strudel-managed
-//! provisioning (see [`super`]). A bundle ID with a pinned profile is
-//! only checked locally.
+//! `capabilities` config key. A bundle ID with a capability that may need a
+//! provisioning profile and no `provisioning_profile` gets a warning. A bundle
+//! ID with a pinned profile is only checked locally.
 
-use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clml::cprintln;
 
-use crate::apple::capabilities::{self, CapabilityDef, RequiredCapabilities, Severity};
+use crate::apple::capabilities::{self, CapabilityDef, RequiredCapabilities};
 use crate::builder::MacosBuilder;
 use crate::builder::profile::{
     Finding, PinnedExpectations, ProfileExpectations, check_pinned_profile, report_pinned_findings,
@@ -55,12 +53,12 @@ impl MacosBuilder {
     /// Capabilities come from the top-level `capabilities` key and the
     /// entitlements files (the host's `build.entitlements_json_path` and each
     /// extension's own). Warns if an ad-hoc build has capabilities that may
-    /// need a profile. Checks each pinned profile and fails on an error
-    /// finding. Called by `ensure_profiles` and `profile_fetch`, so both act
-    /// on the same bundle IDs.
+    /// need a profile and has none configured. Checks each pinned profile and
+    /// fails on an error finding. Called by `ensure_profiles` and
+    /// `profile_fetch`, so both act on the same bundle IDs.
     pub(super) fn prepare_capabilities(&self) -> Result<Vec<Target>> {
         let targets = self.capability_targets()?;
-        self.warn_if_unsigned(&targets);
+        self.warn_if_no_profile(&targets);
         self.check_pinned_profiles(&targets)?;
         Ok(targets)
     }
@@ -82,31 +80,6 @@ impl MacosBuilder {
             && !self.cfg.apple_api_issuer.is_empty()
     }
 
-    /// Bundle IDs that a capability opts into strudel-managed provisioning.
-    ///
-    /// Requires a signed build, API credentials, and a capability that may
-    /// need a profile. A bundle ID with a pinned profile or
-    /// `provisioning_profile = "auto"` is not opted in. A capability verified
-    /// to need a profile opts in immediately. Other capabilities opt in only
-    /// if `interactive`, since the profile can only be created after a prompt.
-    pub(super) fn profile_opt_ins(&self, targets: &[Target], interactive: bool) -> HashSet<String> {
-        if !self.is_signed() || !self.has_api_credentials() {
-            return HashSet::new();
-        }
-        targets
-            .iter()
-            .filter(|t| t.pinned.is_none() && !self.has_auto_profile(&t.bundle_id))
-            .filter(|t| {
-                let caps = t.profile_capabilities();
-                let strict = caps
-                    .iter()
-                    .any(|c| c.requires_profile.severity() == Severity::Error);
-                !caps.is_empty() && (strict || interactive)
-            })
-            .map(|t| t.bundle_id.clone())
-            .collect()
-    }
-
     /// `bundle_id` is configured with `provisioning_profile = "auto"`.
     fn has_auto_profile(&self, bundle_id: &str) -> bool {
         if self.cfg.bundle_id == bundle_id {
@@ -118,13 +91,12 @@ impl MacosBuilder {
             .any(|e| e.bundle_id == bundle_id && e.manage_provisioning_profile)
     }
 
-    /// Warn that an ad-hoc build has capabilities that may need a profile.
-    fn warn_if_unsigned(&self, targets: &[Target]) {
-        if self.is_signed() {
-            return;
-        }
+    /// Warn about capabilities that may need a profile on a bundle ID with no
+    /// `provisioning_profile`.
+    fn warn_if_no_profile(&self, targets: &[Target]) {
         let lines: String = targets
             .iter()
+            .filter(|t| t.pinned.is_none() && !self.has_auto_profile(&t.bundle_id))
             .filter_map(|t| {
                 let caps = t.profile_capabilities();
                 (!caps.is_empty()).then(|| {
@@ -141,10 +113,10 @@ impl MacosBuilder {
             return;
         }
         cprintln!(
-            "<yellow>warning:</yellow> This build is signed ad-hoc, so no provisioning profile \
-             is created. The app may fail at launch without one for these capabilities. Set \
-             `apple.identity` in strudel.toml (or APPLE_SIGNING_IDENTITY) to sign with a \
-             Developer ID identity:{lines}"
+            "<yellow>warning:</yellow> `provisioning_profile` is not set, so no provisioning \
+             profile is embedded. The app may fail at launch without one for these \
+             capabilities. Set `provisioning_profile` to a profile path, or to \"auto\" to let \
+             strudel manage it:{lines}"
         );
     }
 
@@ -277,7 +249,6 @@ pub(super) mod tests {
     use crate::config::fixtures::resolved_macos;
 
     pub const APP_GROUPS: &str = r#"{"com.apple.security.application-groups": ["group.x"]}"#;
-    const HOTSPOT: &str = r#"{"com.apple.developer.networking.HotspotConfiguration": true}"#;
     pub const NETWORK_EXTENSIONS: &str =
         r#"{"com.apple.developer.networking.networkextension": ["packet-tunnel-provider"]}"#;
 
@@ -329,70 +300,13 @@ pub(super) mod tests {
         MacosBuilder::new(cfg, output, false, false, None, false, ci).unwrap()
     }
 
-    fn opt_ins(b: &MacosBuilder, interactive: bool) -> HashSet<String> {
-        let targets = b.prepare_capabilities().unwrap();
-        b.profile_opt_ins(&targets, interactive)
-    }
-
     #[test]
-    fn adhoc_build_with_app_groups_does_not_opt_in() {
-        let (mut cfg, _dir) = config(APP_GROUPS);
-        set_credentials(&mut cfg);
-        let b = builder(cfg, true, false);
-        assert!(opt_ins(&b, true).is_empty());
-    }
-
-    #[test]
-    fn signed_build_with_only_ios_capability_does_not_opt_in() {
-        let (cfg, _dir) = signed_config(HOTSPOT);
-        let b = builder(cfg, true, false);
-        assert!(opt_ins(&b, true).is_empty());
-    }
-
-    #[test]
-    fn signed_build_with_app_groups_opts_in() {
+    fn capability_without_provisioning_profile_embeds_none() {
         let (cfg, _dir) = signed_config(APP_GROUPS);
         let b = builder(cfg, true, false);
-        assert_eq!(opt_ins(&b, true), HashSet::from(["b".to_string()]));
-    }
-
-    #[test]
-    fn unverified_capability_needs_an_interactive_terminal_to_opt_in() {
-        let (cfg, _dir) = signed_config(APP_GROUPS);
-        let b = builder(cfg, true, false);
-        assert!(opt_ins(&b, false).is_empty());
-    }
-
-    #[test]
-    fn verified_capability_opts_in_without_a_terminal() {
-        let (cfg, _dir) = signed_config(NETWORK_EXTENSIONS);
-        let b = builder(cfg, true, true);
-        assert_eq!(opt_ins(&b, false).len(), 1);
-    }
-
-    #[test]
-    fn missing_api_credentials_do_not_opt_in() {
-        let (mut cfg, _dir) = config(NETWORK_EXTENSIONS);
-        sign(&mut cfg);
-        let b = builder(cfg, false, false);
-        assert!(opt_ins(&b, true).is_empty());
-    }
-
-    #[test]
-    fn explicit_provisioning_profile_is_never_opted_in() {
-        let (mut cfg, _dir) = signed_config(APP_GROUPS);
-        cfg.provisioning_profile = Some(PathBuf::from("/pinned.provisionprofile"));
-        let b = builder(cfg, true, false);
-        assert!(opt_ins(&b, true).is_empty());
-    }
-
-    #[test]
-    fn explicit_auto_is_not_opted_in_by_a_capability() {
-        let (mut cfg, _dir) = signed_config(APP_GROUPS);
-        cfg.provisioning_profile = Some(PathBuf::from("/x/.strudel/b.provisionprofile"));
-        cfg.manage_provisioning_profile = true;
-        let b = builder(cfg, true, false);
-        assert!(opt_ins(&b, true).is_empty());
+        b.ensure_profiles(false).unwrap();
+        assert!(b.cfg.provisioning_profile.is_none());
+        assert!(!b.cfg.manage_provisioning_profile);
     }
 
     #[test]

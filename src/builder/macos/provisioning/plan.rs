@@ -91,7 +91,7 @@ impl ProvisioningPlan {
             config_location: target
                 .map(|t| t.config_location.clone())
                 .unwrap_or_else(|| "strudel.toml".to_string()),
-            opt_in_reason: stale.and_then(|s| opt_in_reason(s.profile.managed_by, target)),
+            opt_in_reason: stale.and_then(|s| opt_in_reason(s.profile.managed_by)),
         }
     }
 
@@ -196,16 +196,8 @@ impl ProvisioningPlan {
 }
 
 /// Why strudel manages a profile, for the confirmation prompt.
-fn opt_in_reason(managed_by: ManagedBy, target: Option<&Target>) -> Option<String> {
+fn opt_in_reason(managed_by: ManagedBy) -> Option<String> {
     match managed_by {
-        ManagedBy::Capability => {
-            let caps = target.map(Target::profile_capabilities).unwrap_or_default();
-            let names: Vec<&str> = caps.iter().map(|c| c.name).collect();
-            Some(format!(
-                "{} may need an embedded profile on macOS",
-                names.join(", ")
-            ))
-        },
         ManagedBy::Config => Some("`provisioning_profile = \"auto\"` is set".to_string()),
         ManagedBy::Requested => None,
     }
@@ -365,10 +357,10 @@ mod tests {
     }
 
     #[test]
-    fn capability_managed_profile_plan_lists_every_change() {
+    fn managed_profile_plan_lists_every_change() {
         let ents = serde_json::json!({ "com.apple.security.application-groups": ["group.x"] });
         let t = target(&[cap("App Groups")], Some(ents));
-        let profile = managed(ManagedBy::Capability);
+        let profile = managed(ManagedBy::Config);
         let stale = StaleProfile {
             profile: &profile,
             reason: Some(StaleReason::Missing),
@@ -386,7 +378,9 @@ mod tests {
         assert!(text.contains("group.x"), "{text}");
         assert!(text.contains("entitlements.json"), "{text}");
         assert!(
-            text.contains("App Groups may need an embedded profile"),
+            text.contains(
+                "The profile is managed because `provisioning_profile = \"auto\"` is set."
+            ),
             "{text}"
         );
     }

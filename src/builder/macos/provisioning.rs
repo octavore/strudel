@@ -6,16 +6,16 @@
 //! are the exception and are checked against an embedded profile even outside
 //! the Mac App Store, App Groups and Network Extensions being the two most
 //! commonly hit. Those projects set `provisioning_profile = "auto"` and let
-//! strudel create, cache, and refresh the profile. A capability that may need
-//! a profile also opts its bundle ID in (see [`capabilities`]).
+//! strudel create, cache, and refresh the profile. A bundle ID with no
+//! `provisioning_profile` embeds none.
 //!
 //! The signing identity decides the profile type. A Developer ID identity gets
 //! a `MAC_APP_DIRECT` profile. An Apple Development or Mac Developer identity
 //! gets a `MAC_APP_DEVELOPMENT` profile for the devices in
 //! `.strudel/devices.toml`.
 //!
-//! - [`capabilities`] required capabilities, pinned-profile checks, and profile
-//!   opt-in, without network calls
+//! - [`capabilities`] required capabilities and pinned-profile checks, without
+//!   network calls
 //! - [`kind`] profile type from the signing identity, and development devices
 //! - [`provision`] App Store Connect changes for profiles and capabilities
 //! - [`plan`] confirmation text for those changes
@@ -25,7 +25,6 @@ mod kind;
 mod plan;
 mod provision;
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
@@ -45,9 +44,6 @@ enum ManagedBy {
     /// `strudel profile fetch --out` for a bundle ID with no profile
     /// configured. Failures are errors.
     Requested,
-    /// Capability that may need a profile. Failures are warnings. The config
-    /// points at the profile only after it exists.
-    Capability,
 }
 
 /// Profile strudel creates or refreshes for one bundle ID.
@@ -58,8 +54,8 @@ struct ManagedProfile {
 
 impl MacosBuilder {
     /// Create or refresh the Developer ID provisioning profile for every
-    /// bundle ID configured with `provisioning_profile = "auto"` or opted in
-    /// by a capability. Profiles are cached at
+    /// bundle ID configured with `provisioning_profile = "auto"`. Profiles are
+    /// cached at
     /// `.strudel/<bundle_id>.provisionprofile`. Extensions are also
     /// supported, using their own bundle IDs.
     ///
@@ -67,38 +63,35 @@ impl MacosBuilder {
     /// share one confirmation. A pinned profile is checked locally and makes
     /// no App Store Connect calls.
     ///
-    /// No-op, with no App Store Connect calls at all, when nothing opts in or
-    /// when every managed profile on disk is already current and grants the
+    /// No-op, with no App Store Connect calls at all, when nothing is managed
+    /// or when every managed profile on disk is already current and grants the
     /// required entitlements. `force` recreates every managed profile
     /// regardless, for `strudel profile fetch --force`.
     ///
     /// Must run before the bundle is assembled, which is what copies each
     /// profile into its bundle.
-    pub(crate) fn ensure_profiles(&mut self, force: bool) -> Result<()> {
+    pub(crate) fn ensure_profiles(&self, force: bool) -> Result<()> {
         let targets = self.prepare_capabilities()?;
-        let opt_ins = self.profile_opt_ins(&targets, self.interactive());
-        let profiles = self.apply_profile_kind(self.managed_profiles(&targets, &opt_ins))?;
+        let profiles = self.apply_profile_kind(self.managed_profiles(&targets))?;
         self.provision(force, &targets, &profiles)?;
         Ok(())
     }
 
     /// Fetches Developer ID provisioning profiles for a macOS target. With no
     /// `out`, only covers bundle IDs configured with
-    /// `provisioning_profile = "auto"` or opted in by a capability. With
-    /// `out`, fetches for every bundle ID (host and extensions) that isn't
-    /// already pinned to an explicit profile path, and copies each fetched
-    /// profile into that directory. `force` recreates profiles even when the
-    /// cached copies are current.
+    /// `provisioning_profile = "auto"`. With `out`, fetches for every bundle
+    /// ID (host and extensions) that isn't already pinned to an explicit
+    /// profile path, and copies each fetched profile into that directory.
+    /// `force` recreates profiles even when the cached copies are current.
     ///
     /// Runs the same capability step as a build, so both act on the same
     /// bundle IDs.
-    pub fn profile_fetch(&mut self, force: bool, out: Option<&Path>) -> Result<()> {
+    pub fn profile_fetch(&self, force: bool, out: Option<&Path>) -> Result<()> {
         let targets = self.prepare_capabilities()?;
-        let opt_ins = self.profile_opt_ins(&targets, self.interactive());
         let profiles = if out.is_some() {
-            self.all_profiles(&targets, &opt_ins)
+            self.all_profiles(&targets)
         } else {
-            self.managed_profiles(&targets, &opt_ins)
+            self.managed_profiles(&targets)
         };
         let profiles = self.apply_profile_kind(profiles)?;
         if profiles.is_empty() && enable_only_targets(&targets, &profiles).is_empty() {
@@ -124,19 +117,10 @@ impl MacosBuilder {
     }
 
     /// Profile of every bundle ID configured with
-    /// `provisioning_profile = "auto"` or in `opt_ins`, host first.
-    fn managed_profiles(
-        &self,
-        targets: &[Target],
-        opt_ins: &HashSet<String>,
-    ) -> Vec<ManagedProfile> {
-        let managed_by = |bundle_id: &str, configured: Option<&Path>, manage: bool| match configured
-        {
+    /// `provisioning_profile = "auto"`, host first.
+    fn managed_profiles(&self, targets: &[Target]) -> Vec<ManagedProfile> {
+        let managed_by = |_: &str, configured: Option<&Path>, manage: bool| match configured {
             Some(path) if manage => Some((path.to_path_buf(), ManagedBy::Config)),
-            None if opt_ins.contains(bundle_id) => Some((
-                managed_profile_path(&self.cfg.source_dir, bundle_id),
-                ManagedBy::Capability,
-            )),
             _ => None,
         };
         self.profiles_where(targets, managed_by)
@@ -148,14 +132,12 @@ impl MacosBuilder {
     /// `strudel profile fetch --out`, an ad hoc fetch whose result is meant to
     /// be committed and pinned via an explicit `provisioning_profile` path
     /// rather than left on `"auto"`.
-    fn all_profiles(&self, targets: &[Target], opt_ins: &HashSet<String>) -> Vec<ManagedProfile> {
+    fn all_profiles(&self, targets: &[Target]) -> Vec<ManagedProfile> {
         let managed_by = |bundle_id: &str, configured: Option<&Path>, manage: bool| {
             let managed_by = if manage {
                 ManagedBy::Config
             } else if configured.is_some() {
                 return None;
-            } else if opt_ins.contains(bundle_id) {
-                ManagedBy::Capability
             } else {
                 ManagedBy::Requested
             };
@@ -238,7 +220,7 @@ fn profile_request(
 mod tests {
     use std::path::PathBuf;
 
-    use super::capabilities::tests::{NETWORK_EXTENSIONS, builder, signed_config};
+    use super::capabilities::tests::builder;
     use super::*;
     use crate::config::fixtures::resolved_macos;
     use crate::config::{ExtensionKind, ResolvedExtension};
@@ -273,7 +255,7 @@ mod tests {
     #[test]
     fn managed_profiles_empty_when_not_auto() {
         let b = builder(resolved_macos(), true, false);
-        assert!(b.managed_profiles(&[], &HashSet::new()).is_empty());
+        assert!(b.managed_profiles(&[]).is_empty());
     }
 
     #[test]
@@ -295,14 +277,9 @@ mod tests {
             extension("b.ext3", None, false),
         ];
         let b = builder(cfg, true, false);
-        let opt_ins = HashSet::from(["b.ext2".to_string(), "b.ext3".to_string()]);
         assert_eq!(
-            summary(&b.managed_profiles(&[], &opt_ins)),
-            [
-                ("b", ManagedBy::Config),
-                ("b.ext1", ManagedBy::Config),
-                ("b.ext3", ManagedBy::Capability),
-            ]
+            summary(&b.managed_profiles(&[])),
+            [("b", ManagedBy::Config), ("b.ext1", ManagedBy::Config)]
         );
     }
 
@@ -324,12 +301,11 @@ mod tests {
             ),
         ];
         let b = builder(cfg, true, false);
-        let opt_ins = HashSet::from(["b.auto".to_string()]);
         assert_eq!(
-            summary(&b.all_profiles(&[], &opt_ins)),
+            summary(&b.all_profiles(&[])),
             [
                 ("b", ManagedBy::Requested),
-                ("b.auto", ManagedBy::Capability),
+                ("b.auto", ManagedBy::Requested),
                 ("b.managed", ManagedBy::Config),
             ]
         );
@@ -341,21 +317,6 @@ mod tests {
         cfg.provisioning_profile = Some(PathBuf::from("/pinned.provisionprofile"));
         cfg.manage_provisioning_profile = false;
         let b = builder(cfg, true, false);
-        assert!(b.all_profiles(&[], &HashSet::new()).is_empty());
-    }
-
-    #[test]
-    fn profile_fetch_opts_in_the_same_bundle_ids_as_build() {
-        let (cfg, _dir) = signed_config(NETWORK_EXTENSIONS);
-        let mut build = builder(cfg.clone(), true, true);
-        build.ensure_profiles(false).unwrap();
-        let mut fetch = builder(cfg, true, true);
-        fetch.profile_fetch(false, None).unwrap();
-        assert!(build.cfg.provisioning_profile.is_some());
-        assert!(build.cfg.manage_provisioning_profile);
-        assert_eq!(
-            build.cfg.provisioning_profile,
-            fetch.cfg.provisioning_profile
-        );
+        assert!(b.all_profiles(&[]).is_empty());
     }
 }

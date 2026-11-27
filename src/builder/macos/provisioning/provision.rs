@@ -10,9 +10,9 @@ use std::collections::HashSet;
 use anyhow::{Context, Result, bail};
 use clml::{cformat, cprintln};
 
+use super::ManagedProfile;
 use super::capabilities::Target;
 use super::plan::ProvisioningPlan;
-use super::{ManagedBy, ManagedProfile};
 use crate::apple::appstore::AppStoreClient;
 use crate::apple::capabilities::CapabilityType;
 use crate::builder::MacosBuilder;
@@ -67,27 +67,8 @@ impl MacosBuilder {
     /// Create or refresh `profiles` and enable the capabilities of `targets`,
     /// prompting for one confirmation before changing App Store Connect.
     ///
-    /// The profile path of a [`ManagedBy::Capability`] profile is written to
-    /// the config if the profile is usable afterward, so the bundle step
-    /// embeds it. Returns the bundle IDs whose stale profile was not created.
+    /// Returns the bundle IDs whose stale profile was not created.
     pub(super) fn provision(
-        &mut self,
-        force: bool,
-        targets: &[Target],
-        profiles: &[ManagedProfile],
-    ) -> Result<HashSet<String>> {
-        let skipped = self.provision_changes(force, targets, profiles)?;
-        for p in profiles {
-            if p.managed_by == ManagedBy::Capability && !skipped.contains(&p.request.bundle_id) {
-                self.adopt_profile(&p.request);
-            }
-        }
-        Ok(skipped)
-    }
-
-    /// Make the changes for [`MacosBuilder::provision`]. Returns the bundle
-    /// IDs whose stale profile was not created.
-    fn provision_changes(
         &self,
         force: bool,
         targets: &[Target],
@@ -115,10 +96,9 @@ impl MacosBuilder {
             return Ok(HashSet::new());
         }
 
-        // Profiles opted in by a capability warn instead of failing.
-        let strict = stale
-            .iter()
-            .any(|s| s.profile.managed_by != ManagedBy::Capability);
+        // Failing to create a profile is an error. Failing to enable
+        // capabilities alone only warns.
+        let strict = !stale.is_empty();
         if !strict && !self.has_api_credentials() {
             let unchecked: Vec<&Target> = targets
                 .iter()
@@ -361,23 +341,6 @@ impl MacosBuilder {
             );
         }
     }
-
-    /// Point the config at the cache path of `request`, so the bundle step
-    /// embeds the profile.
-    fn adopt_profile(&mut self, request: &ProfileRequest) {
-        let cfg = &mut self.core.cfg;
-        if cfg.bundle_id == request.bundle_id {
-            cfg.provisioning_profile = Some(request.cache_path.clone());
-            cfg.manage_provisioning_profile = true;
-        } else if let Some(ext) = cfg
-            .extensions
-            .iter_mut()
-            .find(|e| e.bundle_id == request.bundle_id)
-        {
-            ext.provisioning_profile = Some(request.cache_path.clone());
-            ext.manage_provisioning_profile = true;
-        }
-    }
 }
 
 /// Targets that only need capabilities enabled. They have no managed profile
@@ -457,6 +420,7 @@ fn warn_skipped(jobs: &[Job], advice: &str) {
 mod tests {
     use std::path::PathBuf;
 
+    use super::super::ManagedBy;
     use super::super::capabilities::tests::{APP_GROUPS, builder, signed_config};
     use super::*;
     use crate::config::fixtures::resolved_macos;
@@ -476,34 +440,11 @@ mod tests {
     fn auto_profile_bails_in_ci() {
         let mut cfg = resolved_macos();
         cfg.sign_identity = "Developer ID Application: Me (TEAM)".into();
-        let mut b = builder(cfg, false, true);
+        let b = builder(cfg, false, true);
         let err = b
             .provision(true, &[], &[managed("b", ManagedBy::Config)])
             .expect_err("CI must not attempt an interactive fetch");
         assert!(err.to_string().contains("unavailable in CI"));
-    }
-
-    #[test]
-    fn capability_profile_without_credentials_is_skipped_with_a_warning() {
-        let mut cfg = resolved_macos();
-        cfg.sign_identity = "Developer ID Application: Me (TEAM)".into();
-        let mut b = builder(cfg, false, true);
-        let skipped = b
-            .provision(true, &[], &[managed("b", ManagedBy::Capability)])
-            .unwrap();
-        assert_eq!(skipped, HashSet::from(["b".to_string()]));
-        assert!(b.cfg.provisioning_profile.is_none());
-        assert!(!b.cfg.manage_provisioning_profile);
-    }
-
-    #[test]
-    fn dry_run_adopts_capability_profiles() {
-        let mut b = builder(resolved_macos(), true, false);
-        let profile = managed("b", ManagedBy::Capability);
-        b.provision(false, &[], std::slice::from_ref(&profile))
-            .unwrap();
-        assert_eq!(b.cfg.provisioning_profile, Some(profile.request.cache_path));
-        assert!(b.cfg.manage_provisioning_profile);
     }
 
     #[test]
@@ -512,7 +453,7 @@ mod tests {
         let b = builder(cfg, false, true);
         let targets = b.prepare_capabilities().unwrap();
         assert_eq!(enable_only_targets(&targets, &[]).len(), 1);
-        let profiles = [managed("b", ManagedBy::Capability)];
+        let profiles = [managed("b", ManagedBy::Config)];
         assert!(enable_only_targets(&targets, &profiles).is_empty());
     }
 }
