@@ -1,19 +1,7 @@
 use anyhow::Result;
 use clml::cprintln;
 
-use crate::config::{Platform, ResolvedConfig, ResolvedProject};
-
-// Run the given function for each config selected by the target/platform
-// criteria
-pub(crate) fn for_each_selected(
-    project: &ResolvedProject,
-    target: Option<&str>,
-    platform: Platform,
-    allow_all: bool,
-    f: impl FnMut(&ResolvedConfig) -> Result<()>,
-) -> Result<()> {
-    run_for_targets(project.select(target, platform, allow_all)?, f)
-}
+use crate::config::{ResolvedConfig, ResolvedProject};
 
 // Resolve targets for a platform-agnostic command (build/run/release/clean):
 // every target, or the single one named by the target positional/flag.

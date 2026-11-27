@@ -16,3 +16,5 @@ mod provisioning;
 mod sign;
 mod steps;
 mod validators;
+
+pub(crate) use devices::current_mac;

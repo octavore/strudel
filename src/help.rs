@@ -222,7 +222,8 @@ fn print_targets() {
 
         `build`, `run`, and `release` take the selector as a positional argument and
         dispatch per target based on its own platform (macOS or iOS). Other commands
-        (`devices`, `profile`, `status`, `clean`) take `--target` instead.
+        (`devices`, `profile`, `status`, `clean`) take `--target` instead. `devices add`
+        and `devices register` take `--platform ios|macos`.
 
         `strudel run` with no selector, `--sim`, or `--device` is an exception: it
         only runs macOS targets, since launching iOS needs `--sim` or `--device` to

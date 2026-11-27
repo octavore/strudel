@@ -38,7 +38,7 @@ fn require_devices(set: &DeviceSet) -> Result<Vec<String>> {
              A development profile lists the devices it can run on. Add this Mac with:\n  \
              strudel devices add\n\
              Add another Mac with:\n  \
-             strudel devices add --udid <udid> --name <name>"
+             strudel devices add --udid <udid> --name <name> --platform macos"
         );
     }
     Ok(set.udids().into_iter().map(str::to_string).collect())
@@ -58,7 +58,8 @@ pub(super) fn match_portal_devices(
                 bail!(
                     "Device {} ({}) is in .strudel/devices.toml but is not registered as a \
                      macOS device on the App Store Connect portal.\n\
-                     Run `strudel devices add --udid {} --name {:?}` to register it.",
+                     Run `strudel devices add --udid {} --name {:?} --platform macos` to \
+                     register it.",
                     tracked.name,
                     tracked.udid,
                     tracked.udid,

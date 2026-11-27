@@ -145,7 +145,7 @@ pub enum TargetPlatform {
 }
 
 /// The target platform for a build target.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Platform {
     Macos,

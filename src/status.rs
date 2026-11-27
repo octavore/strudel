@@ -25,7 +25,9 @@ use crate::config::{
     GlobalConfig, IosProvisioningBackend, Platform, ResolvedConfig, ResolvedIosSection,
     ResolvedTargetPlatform, ValueSource, load_config,
 };
-use crate::devices::{DeviceSet, PortalEntry, print_registration, print_untracked};
+use crate::devices::{
+    DeviceSet, PortalEntry, print_device_header, print_registration, print_untracked,
+};
 use crate::paths::{Paths, StrudelData};
 
 /// `strudel status`: print the environment, global config, Apple ID session,
@@ -172,8 +174,16 @@ fn extensions_block(cfg: &ResolvedConfig) {
 
 /// List the macOS devices tracked in `.strudel/devices.toml`, with their
 /// portal registration. These are the devices of a macOS development
-/// profile. Nothing is detected locally.
-fn macos_devices_list(cfg: &ResolvedConfig, portal_errors: &mut Vec<String>) -> Result<()> {
+/// profile. Nothing is detected locally. If `all` is set, also list portal
+/// devices that are not tracked.
+fn macos_devices_list(
+    cfg: &ResolvedConfig,
+    all: bool,
+    portal_errors: &mut Vec<String>,
+) -> Result<()> {
+    let pad = DEVICE_PAD;
+    let account = account_label(cfg);
+    let current = builder::current_mac().ok();
     let set = DeviceSet::load_for(&Paths::new(cfg).devices_toml, Platform::Macos)?;
     let portal = AppStoreClient::from_config(cfg)
         .map(|c| c.show_progress(false))
@@ -189,107 +199,168 @@ fn macos_devices_list(cfg: &ResolvedConfig, portal_errors: &mut Vec<String>) -> 
                 .collect(),
         ),
         Err(e) => {
-            warn_portal_unavailable(&e, portal_errors);
+            warn_portal_unavailable(&e, pad, portal_errors);
             None
         },
     };
     if set.device.is_empty() {
-        cprintln!("<dim>none tracked. Run `strudel devices add`.</dim>");
+        cprintln!("{pad}<dim>None tracked. Run `strudel devices add`.</dim>");
     }
     for (i, d) in set.device.iter().enumerate() {
         if i > 0 {
             println!();
         }
-        cprintln!("<bold>{}</bold> <cyan>[{}]</cyan>", d.name, d.udid);
-        cprintln!("  <dim>macOS, tracked</dim>");
+        match current.as_ref().filter(|c| c.udid == d.udid) {
+            Some(c) => {
+                let kind = format!("{} (this device)", c.kind.as_deref().unwrap_or("Mac"));
+                print_device_header(&c.name, Some(&kind), &d.udid, pad);
+            },
+            None => print_device_header(&d.name, Some("Mac"), &d.udid, pad),
+        }
         print_registration(
             portal
                 .as_ref()
                 .map(|p| p.iter().any(|pd| pd.udid == d.udid)),
+            true,
+            &account,
+            pad,
         );
     }
-    if let Some(portal) = &portal {
-        print_untracked(portal, |udid| set.contains_udid(udid));
+    if let (true, Some(portal)) = (all, &portal) {
+        print_untracked(portal, Platform::Macos, pad, |udid| set.contains_udid(udid));
     }
     Ok(())
 }
 
-/// `strudel devices` (no subcommand): list devices tracked in
-/// `.strudel/devices.toml` for each selected target. iOS targets also list
-/// connected devices. Sections are indented under the target id only when
-/// more than one target is listed. The underlying `devicectl` command is
-/// echoed only when `verbose` is set.
-pub fn devices_list(config_path: &Path, target: Option<&str>, verbose: bool) -> Result<()> {
+/// List the iOS devices tracked in `.strudel/devices.toml`, with their portal
+/// registration. If `all` is set, also list connected devices and portal
+/// devices that are not tracked.
+fn ios_devices_list(
+    cfg: &ResolvedConfig,
+    all: bool,
+    verbose: bool,
+    portal_errors: &mut Vec<String>,
+) -> Result<()> {
+    let pad = DEVICE_PAD;
+    let account = account_label(cfg);
+    let paths = Paths::new(cfg);
+    let set = DeviceSet::load_for(&paths.devices_toml, Platform::Ios)?;
+
+    let output = builder::OutputFlags {
+        no_echo: !verbose,
+        ..Default::default()
+    };
+    let builder = builder::IosBuilder::new(cfg.clone(), output, false)?;
+    let devices = match builder.list_devices_detailed() {
+        Ok(devices) => devices,
+        Err(e) => {
+            cprintln!("{pad}<yellow>Could not list devices: {}</yellow>", e);
+            Vec::new()
+        },
+    };
+    let portal = match builder.portal_devices() {
+        Ok(devices) => Some(devices),
+        Err(e) => {
+            warn_portal_unavailable(&e, pad, portal_errors);
+            None
+        },
+    };
+    let registered = |udid: &str| portal.as_ref().map(|p| p.iter().any(|d| d.udid == udid));
+
+    let mut first = true;
+    let mut separate = || {
+        if !first {
+            println!();
+        }
+        first = false;
+    };
+    for d in devices.iter().filter(|d| set.contains_udid(&d.udid)) {
+        separate();
+        d.print(true, registered(&d.udid), &account, pad);
+    }
+    for d in set
+        .device
+        .iter()
+        .filter(|t| !devices.iter().any(|d| d.udid == t.udid))
+    {
+        separate();
+        builder::IosBuilder::print_tracked_offline(
+            &d.name,
+            &d.udid,
+            registered(&d.udid),
+            &account,
+            pad,
+        );
+    }
+    if all {
+        for d in devices.iter().filter(|d| !set.contains_udid(&d.udid)) {
+            separate();
+            d.print(false, registered(&d.udid), &account, pad);
+        }
+    }
+    if set.device.is_empty() && (devices.is_empty() || !all) {
+        cprintln!("{pad}<dim>None. Run `strudel devices add`.</dim>");
+    }
+    if let (true, Some(portal)) = (all, &portal) {
+        print_untracked(portal, Platform::Ios, pad, |udid| {
+            set.contains_udid(udid) || devices.iter().any(|d| d.udid == udid)
+        });
+    }
+    Ok(())
+}
+
+/// Identifier of the portal account that `cfg` registers devices on. This is
+/// the Apple ID for free provisioning and the team ID otherwise.
+fn account_label(cfg: &ResolvedConfig) -> String {
+    let (kind, id) = if is_free_provisioning_target(cfg) {
+        ("Apple ID", &cfg.apple_id)
+    } else {
+        ("team", &cfg.team_id)
+    };
+    if id.is_empty() {
+        "this account".to_string()
+    } else {
+        format!("{kind} {id}")
+    }
+}
+
+/// Indent of device entries under a platform header.
+const DEVICE_PAD: &str = "  ";
+
+/// `strudel devices` (no subcommand): list devices by platform. Each
+/// platform lists the devices tracked in `.strudel/devices.toml`. If `all` is
+/// set, connected iOS devices and portal devices that are not tracked are
+/// listed too. The first selected target of a platform supplies the portal
+/// account. The underlying `devicectl` command is echoed only when `verbose`
+/// is set.
+pub fn devices_list(
+    config_path: &Path,
+    target: Option<&str>,
+    all: bool,
+    verbose: bool,
+) -> Result<()> {
     let project = load_config(config_path)?;
     let targets: Vec<&ResolvedConfig> = match target {
         Some(selector) => vec![project.resolve_target(selector)?],
         None => project.targets.iter().collect(),
     };
-    let multi = targets.len() > 1;
+    let mut platforms: Vec<(Platform, &ResolvedConfig)> = Vec::new();
+    for cfg in targets {
+        let platform = cfg.target_platform.platform();
+        if !platforms.iter().any(|(p, _)| *p == platform) {
+            platforms.push((platform, cfg));
+        }
+    }
     let mut portal_errors: Vec<String> = Vec::new();
 
-    for (i, cfg) in targets.into_iter().enumerate() {
-        if multi {
-            if i > 0 {
-                println!();
-            }
-            cprintln!("<bold,cyan>{}</bold,cyan>", cfg.target_id);
+    for (i, (platform, cfg)) in platforms.into_iter().enumerate() {
+        if i > 0 {
             println!();
         }
-        if cfg.target_platform.platform() == Platform::Macos {
-            macos_devices_list(cfg, &mut portal_errors)?;
-            continue;
-        }
-        let paths = Paths::new(cfg);
-        let set = DeviceSet::load_for(&paths.devices_toml, Platform::Ios)?;
-
-        let output = builder::OutputFlags {
-            no_echo: !verbose,
-            ..Default::default()
-        };
-        let builder = builder::IosBuilder::new(cfg.clone(), output, false)?;
-        let devices = match builder.list_devices_detailed() {
-            Ok(devices) => devices,
-            Err(e) => {
-                cprintln!("<yellow>could not list devices: {}</yellow>", e);
-                Vec::new()
-            },
-        };
-        let portal = match builder.portal_devices() {
-            Ok(devices) => Some(devices),
-            Err(e) => {
-                warn_portal_unavailable(&e, &mut portal_errors);
-                None
-            },
-        };
-        let registered = |udid: &str| portal.as_ref().map(|p| p.iter().any(|d| d.udid == udid));
-
-        let mut first = true;
-        let mut separate = || {
-            if !first {
-                println!();
-            }
-            first = false;
-        };
-        for d in &devices {
-            separate();
-            d.print(set.contains_udid(&d.udid), registered(&d.udid));
-        }
-        for d in set
-            .device
-            .iter()
-            .filter(|t| !devices.iter().any(|d| d.udid == t.udid))
-        {
-            separate();
-            builder::IosBuilder::print_tracked_offline(&d.name, &d.udid, registered(&d.udid));
-        }
-        if devices.is_empty() && set.device.is_empty() {
-            cprintln!("<dim>none. Run `strudel devices add`.</dim>");
-        }
-        if let Some(portal) = &portal {
-            print_untracked(portal, |udid| {
-                set.contains_udid(udid) || devices.iter().any(|d| d.udid == udid)
-            });
+        cprintln!("<green>[{}]</green>", platform.as_str());
+        match platform {
+            Platform::Macos => macos_devices_list(cfg, all, &mut portal_errors)?,
+            Platform::Ios => ios_devices_list(cfg, all, verbose, &mut portal_errors)?,
         }
     }
     for msg in &portal_errors {
@@ -302,8 +373,8 @@ pub fn devices_list(config_path: &Path, target: Option<&str>, verbose: bool) -> 
 /// Print a one-line portal warning for a target and record the full error
 /// text for printing once after all targets. Identical errors are recorded
 /// once.
-fn warn_portal_unavailable(e: &anyhow::Error, portal_errors: &mut Vec<String>) {
-    cprintln!("<yellow>could not check portal registration (see below)</yellow>");
+fn warn_portal_unavailable(e: &anyhow::Error, pad: &str, portal_errors: &mut Vec<String>) {
+    cprintln!("{pad}<yellow>Could not check portal registration (see below)</yellow>");
     println!();
     let msg = e.to_string();
     if !portal_errors.contains(&msg) {

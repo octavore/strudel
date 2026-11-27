@@ -25,8 +25,24 @@ fn parse_hardware_udid(json: &str) -> Result<String> {
         .context("`system_profiler` output has no provisioning UDID")
 }
 
-/// Name and UDID of this Mac.
-fn current_mac() -> Result<(String, String)> {
+/// Name, hardware type, and UDID of this Mac.
+pub(crate) struct CurrentMac {
+    pub name: String,
+    /// Hardware type such as "MacBook Pro".
+    pub kind: Option<String>,
+    pub udid: String,
+}
+
+/// Hardware type in `system_profiler SPHardwareDataType -json` output.
+fn parse_hardware_kind(json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    value["SPHardwareDataType"][0]["machine_name"]
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Name, hardware type, and UDID of this Mac.
+pub(crate) fn current_mac() -> Result<CurrentMac> {
     let output = Command::new("system_profiler")
         .args(["SPHardwareDataType", "-json"])
         .output()
@@ -34,7 +50,9 @@ fn current_mac() -> Result<(String, String)> {
     if !output.status.success() {
         bail!("`system_profiler SPHardwareDataType` failed");
     }
-    let udid = parse_hardware_udid(&String::from_utf8_lossy(&output.stdout))?;
+    let json = String::from_utf8_lossy(&output.stdout);
+    let udid = parse_hardware_udid(&json)?;
+    let kind = parse_hardware_kind(&json);
     let name = Command::new("scutil")
         .arg("--ComputerName")
         .output()
@@ -43,16 +61,34 @@ fn current_mac() -> Result<(String, String)> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "This Mac".to_string());
-    Ok((name, udid))
+    Ok(CurrentMac { name, kind, udid })
 }
 
 impl MacosBuilder {
     /// Register this Mac on the portal and track it in
     /// `.strudel/devices.toml`.
     pub fn device_add_current(&self, register: bool) -> Result<()> {
-        let (name, udid) = current_mac()?;
+        let CurrentMac { name, udid, .. } = current_mac()?;
         cprintln!("Detected this Mac: <bold>{name}</bold> <cyan>[{udid}]</cyan>");
         self.device_add_manual(&name, &udid, register)
+    }
+
+    /// Register a device on the portal as a macOS device, without tracking it
+    /// in `.strudel/devices.toml`. For a Mac that is not this one, such as a
+    /// teammate's.
+    pub fn device_register(&self, name: &str, udid: &str) -> Result<()> {
+        if self.dry_run {
+            cprintln!("<dim>[dry-run]</dim> Would register {name} ({udid}) as a macOS device");
+            return Ok(());
+        }
+        let client = AppStoreClient::from_config(&self.cfg)?.show_progress(!self.echo_suppressed());
+        self.step(&format!("Registering {name} ({udid}) on portal..."));
+        if client.ensure_device_registered(name, udid, Platform::Macos)? {
+            cprintln!("\n<green>Done!</green> Registered {name} ({udid}) on the portal.");
+        } else {
+            cprintln!("<dim>Already registered on portal:</dim> {name} ({udid})");
+        }
+        Ok(())
     }
 
     /// Register a device on the portal as a macOS device (if `register` is

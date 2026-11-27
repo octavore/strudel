@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use clml::cprintln;
+use clml::{cformat, cprintln};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Platform;
@@ -15,30 +15,57 @@ pub struct PortalEntry {
 }
 
 /// Print a heading and the portal devices in `portal` that `is_known` does
-/// not accept. Prints nothing if every device is known.
-pub fn print_untracked(portal: &[PortalEntry], is_known: impl Fn(&str) -> bool) {
+/// not accept. Prints nothing if every device is known. Each line starts with
+/// `pad`. The hint to track a device selects `platform`.
+pub fn print_untracked(
+    portal: &[PortalEntry],
+    platform: Platform,
+    pad: &str,
+    is_known: impl Fn(&str) -> bool,
+) {
     let untracked: Vec<&PortalEntry> = portal.iter().filter(|d| !is_known(&d.udid)).collect();
     if untracked.is_empty() {
         return;
     }
     println!();
     cprintln!(
-        "<bold>Registered on the portal, not tracked:</bold> <dim>(track one with `strudel \
-         devices add --udid <<udid>> --name <<name>>`)</dim>"
+        "{pad}<dim>Registered, untracked (track with `strudel devices add --udid <<udid>> \
+         --platform {}`)</dim>",
+        platform.as_str()
     );
     for d in untracked {
-        cprintln!("  {} <cyan>[{}]</cyan>", d.name, d.udid);
+        cprintln!("{pad}  <dim>{}</dim>", d.name);
+        cprintln!("{pad}    <dim>UDID: {}</dim>", d.udid);
     }
 }
 
-/// Print whether a device is registered on the current account's portal.
-pub fn print_registration(registered: Option<bool>) {
+/// Print a device's name with its dimmed `kind`, and its UDID on the next
+/// line. Each line starts with `pad`.
+pub fn print_device_header(name: &str, kind: Option<&str>, udid: &str, pad: &str) {
+    match kind {
+        Some(kind) => cprintln!("{pad}<bold>{name}</bold> <dim>{kind}</dim>"),
+        None => cprintln!("{pad}<bold>{name}</bold>"),
+    }
+    cprintln!("{pad}  <dim>UDID:</dim> <cyan>{udid}</cyan>");
+}
+
+/// Print whether a device is registered on the portal of `account`, such as
+/// "team ABC123", and whether it is `tracked`. The line starts with `pad` and
+/// a further indent.
+pub fn print_registration(registered: Option<bool>, tracked: bool, account: &str, pad: &str) {
+    let tracked = if tracked {
+        cformat!("<green>tracked</green>")
+    } else {
+        cformat!("<yellow>untracked</yellow>")
+    };
     match registered {
-        Some(true) => cprintln!("  <green>registered</green> <dim>on this account</dim>"),
+        Some(true) => {
+            cprintln!("{pad}  <green>Registered</green> <dim>on {account},</dim> {tracked}")
+        },
         Some(false) => cprintln!(
-            "  <yellow>not registered</yellow> <dim>on this account, run `strudel devices add`</dim>"
+            "{pad}  <yellow>Not registered</yellow> <dim>on {account},</dim> {tracked} <dim>(run `strudel devices add`)</dim>"
         ),
-        None => cprintln!("  <dim>registration unknown</dim>"),
+        None => cprintln!("{pad}  <dim>Registration unknown,</dim> {tracked}"),
     }
 }
 

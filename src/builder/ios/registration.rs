@@ -8,7 +8,9 @@ use crate::apple::appstore::AppStoreClient;
 use crate::apple::provisioning;
 use crate::builder::IosBuilder;
 use crate::config::{IosProvisioningBackend, Platform};
-use crate::devices::{DeviceSet, PortalEntry, confirm_add, print_registration};
+use crate::devices::{
+    DeviceSet, PortalEntry, confirm_add, print_device_header, print_registration,
+};
 use crate::paths::ensure_strudel_dir;
 
 #[derive(Deserialize)]
@@ -102,16 +104,13 @@ impl DeviceInfo {
     /// Print the device's name, state, and the next step to make it usable.
     /// `registered` is whether the device is on the current account's portal,
     /// or `None` when that could not be checked.
-    pub fn print(&self, tracked: bool, registered: Option<bool>) {
-        cprintln!("<bold>{}</bold> <cyan>[{}]</cyan>", self.name, self.udid);
-        if let Some(model) = &self.model {
-            cprintln!("  <dim>{model}</dim>");
-        }
+    pub fn print(&self, tracked: bool, registered: Option<bool>, account: &str, pad: &str) {
+        print_device_header(&self.name, self.model.as_deref(), &self.udid, pad);
 
         let connection = if self.is_connected() {
-            cformat!("<green>connected</green>")
+            cformat!("<green>Connected</green>")
         } else {
-            cformat!("<dim>not connected</dim>")
+            cformat!("<dim>Not connected</dim>")
         };
         let pairing = if self.is_paired() {
             cformat!("<green>paired</green>")
@@ -126,12 +125,11 @@ impl DeviceInfo {
         } else {
             cformat!("<yellow>developer mode off</yellow>")
         };
-        let tracked = if tracked { ", tracked" } else { "" };
-        cprintln!("  {connection}, {pairing}, {dev_mode}<dim>{tracked}</dim>");
-        print_registration(registered);
+        cprintln!("{pad}  {connection}, {pairing}, {dev_mode}");
+        print_registration(registered, tracked, account, pad);
 
         if let Some(error) = &self.detail_error {
-            cprintln!("  <dim>{error}</dim>");
+            cprintln!("{pad}  <dim>{error}</dim>");
         }
 
         if !self.is_connected() {
@@ -139,14 +137,14 @@ impl DeviceInfo {
         }
         if !self.is_paired() {
             cprintln!(
-                "<yellow>Not paired. Unlock the device and tap Trust, then run \
+                "{pad}<yellow>Not paired. Unlock the device and tap Trust, then run \
                  `strudel devices` again. If it still shows unpaired, disconnect and \
                  reconnect the device. Developer Mode does not appear in Settings > \
                  Privacy & Security until the device is trusted.</yellow>"
             );
         } else if !self.developer_mode_enabled() {
             cprintln!(
-                "<yellow>Enable Developer Mode in Settings > Privacy & Security, then \
+                "{pad}<yellow>Enable Developer Mode in Settings > Privacy & Security, then \
                  restart the device.</yellow>"
             );
         }
@@ -171,7 +169,7 @@ impl IosBuilder {
             if !known.is_empty() {
                 cprintln!("<bold>Devices found, none ready:</bold>");
                 for d in &known {
-                    d.print(false, None);
+                    d.print(false, None, "", "");
                 }
                 bail!("Fix the items above, then run `strudel devices add` again.");
             }
@@ -306,10 +304,16 @@ impl IosBuilder {
     }
 
     /// Print a tracked device that `devicectl` does not list.
-    pub fn print_tracked_offline(name: &str, udid: &str, registered: Option<bool>) {
-        cprintln!("<bold>{name}</bold> <cyan>[{udid}]</cyan>");
-        cprintln!("  <dim>not connected, tracked</dim>");
-        print_registration(registered);
+    pub fn print_tracked_offline(
+        name: &str,
+        udid: &str,
+        registered: Option<bool>,
+        account: &str,
+        pad: &str,
+    ) {
+        print_device_header(name, None, udid, pad);
+        cprintln!("{pad}  <dim>Not connected</dim>");
+        print_registration(registered, true, account, pad);
     }
 
     /// Devices registered on the portal for the current account, per
@@ -552,7 +556,7 @@ impl IosBuilder {
                     .developer_mode_status
                     .or(device.developer_mode.take());
             },
-            Err(e) => device.detail_error = Some(format!("could not parse device details: {e}")),
+            Err(e) => device.detail_error = Some(format!("Could not parse device details: {e}")),
         }
     }
 

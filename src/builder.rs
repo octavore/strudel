@@ -35,6 +35,7 @@ use anyhow::{Context, Result, bail};
 pub(crate) use bundle::{is_framework, resolve_build_artifact};
 use clml::{cformat, cprintln};
 use indoc::formatdoc;
+pub(crate) use macos::current_mac;
 pub(crate) use profile::decode_profile;
 
 use crate::config::{
